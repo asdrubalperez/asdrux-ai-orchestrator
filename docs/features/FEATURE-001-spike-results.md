@@ -223,6 +223,42 @@ o autenticación vía proveedor empresarial como Bedrock/Vertex/Foundry, mencion
 `--bare` help text del CLI). No se investigó cuál de estos aplica al plan de Santex/Swiss Medical —
 queda para una Feature o spike futuro específico.
 
+**Actualización 2026-07-16 — H4 resuelto: autenticación headless no interactiva confirmada con `ANTHROPIC_API_KEY`.**
+Se repitió la invocación básica de la Invocación 1 (mismo rol `architect`, mismo
+`permissions.filesystem: "read-only"` mapeado a `--tools "Read,Grep,Glob"`), autenticando
+**exclusivamente** con `ANTHROPIC_API_KEY` como variable de entorno, usando además `--bare` (que
+según el propio `--help` del CLI fuerza que la autenticación sea estrictamente vía
+`ANTHROPIC_API_KEY`/`apiKeyHelper`, ignorando OAuth y keychain). **Sin ningún paso interactivo ni
+`claude auth login`.**
+
+- Transcript crudo completo: `docs/features/evidence/FEATURE-001/invocation1_apikey_raw.json`.
+- La key se leyó desde `.env.local` (no versionado — protegido por `.gitignore` vía el patrón
+  `*.local`) y se inyectó únicamente en el entorno del proceso puntual de esa invocación; nunca se
+  imprimió, registró en logs, ni se escribió en ningún archivo del repositorio. Verificado
+  explícitamente: el archivo de evidencia no contiene el valor de la key (`grep` sobre el prefijo
+  `sk-ant-` no matchea nada en el JSON guardado).
+- **Primer intento falló con `401 Invalid API key`** — causa raíz identificada sin exponer el
+  secreto: el valor en `.env.local` estaba entre comillas dobles (`"sk-ant-...gAA"`) y la extracción
+  inicial no las removía, por lo que las comillas viajaban como parte del valor de la variable de
+  entorno. Corregido el parseo (se despojan comillas envolventes además de espacios), la invocación
+  se reintentó y funcionó.
+- **Resultado del segundo intento (ya con la key bien parseada): éxito.** `is_error: false`,
+  `exit_code: 0`. El modelo respondió `ESTADO: completed` con una propuesta de arquitectura, y
+  reportó el intento de escritura de `output.txt` como imposible por no tener ninguna herramienta
+  de escritura disponible (`Read` únicamente) — mismo comportamiento de bloqueo ya evidenciado en la
+  Invocación 1 autenticada por OAuth. `output.txt` **no** se creó (confirmado por `ls` posterior).
+- **Conclusión de H4**: el comportamiento de permisos (bloqueo de escritura en fase read-only) es
+  **idéntico** entre autenticación OAuth y autenticación por `ANTHROPIC_API_KEY` — la imposición de
+  read-only es independiente del mecanismo de autenticación, como cabía esperar dado que ambos pasan
+  por la misma restricción de toolset (H1). Y, a diferencia del OAuth por navegador, **este
+  mecanismo sí es viable para un Executor headless en la VPS de producción sin persona disponible**:
+  no requiere ningún paso interactivo, solo que la variable `ANTHROPIC_API_KEY` esté disponible en
+  el entorno del proceso que invoca al Executor. El riesgo bloqueante queda **resuelto** — ver
+  actualización correspondiente en `01-PROJECT-CHARTER.md`. Queda como nota operativa (no
+  bloqueante): definir cómo se provisiona esa variable de forma segura en la VPS (variable de
+  entorno del servicio, secret manager, etc. — no se decidió en este spike, es un detalle de
+  despliegue).
+
 ---
 
 ## 5. Evidencia adjunta

@@ -148,6 +148,10 @@ interface PhaseResult {
   outputArtifact: unknown;
   summary: string;             // narrativa curada, no el log crudo de herramienta
   escalationReason: string | null;
+  executorMetadata?: {         // qué proveedor/modelo ejecutó realmente la fase (ver ADR sección 9)
+    provider: string;
+    model?: string;
+  };
 }
 ```
 
@@ -221,11 +225,11 @@ Mecanismo exacto de invocación headless para Claude Code (Agent SDK vs CLI): **
 **Tradeoffs**: la restricción de toolset depende de que el proveedor (Claude Code) no exponga, dentro de las herramientas permitidas, ninguna vía indirecta de escritura (p. ej. un futuro tool builtin con efectos secundarios de escritura). Es suficiente para fases de solo lectura (Architect, Functional, Planning), pero no reemplaza el aislamiento por `git worktree` + contenedor ya decidido para fases de escritura (Developer, QA), donde `Bash` sigue habilitado y el riesgo es mayor.
 **Pendiente derivado**: evaluar si conviene sumar una segunda capa de sandbox real a nivel de sistema (OS/contenedor) para fases read-only, en vez de depender únicamente de la restricción de toolset del proveedor — especialmente si en el futuro se cambia de proveedor (Codex) y ese mecanismo de restricción no está disponible o se comporta distinto.
 
-## Decisión: agregar `executorMetadata` a `PhaseResult` — pendiente, no implementada
+## Decisión: agregar `executorMetadata` a `PhaseResult`
 **Motivo**: el spike de FEATURE-001 detectó que, en una misma invocación, el proveedor (Claude Code) enrutó internamente la ejecución a más de un modelo (`claude-haiku-4-5` para una tarea interna corta y `claude-sonnet-5` para el trabajo real de la fase), sin que el contrato de `PhaseResult` tenga ningún campo donde registrar cuál modelo produjo la respuesta. Esto rompe el compromiso de auditabilidad completa ya asumido en `01-PROJECT-CHARTER.md` (Success Criteria) y en `run_events` como log append-only.
 **Alternativas consideradas**: fijar el modelo explícitamente vía `--model` en cada invocación del Executor (mitigaría pero no eliminaría el problema, y no todos los proveedores garantizan que un flag de modelo cubra el 100% del routing interno); no registrar esta información (descartado — contradice el principio de auditabilidad).
 **Tradeoffs**: agregar un campo abre la superficie del contrato de Executor; debe mantenerse opcional/intercambiable entre proveedores para no romper el principio de Executor agnóstico de proveedor (`02-ARCHITECTURE.md` sección 2).
-**Estado**: **no implementada todavía**. Queda propuesta como extensión del contrato:
+**Estado**: **implementada en el contrato** — el campo `executorMetadata` ya está reflejado en la interfaz `PhaseResult` de la sección 6:
 ```typescript
 interface PhaseResult {
   status: "completed" | "rejected" | "failed" | "interrupted" | "escalated";
@@ -238,7 +242,7 @@ interface PhaseResult {
   };
 }
 ```
-Requiere aprobación humana explícita antes de modificar el contrato real (03-AI-CONSTITUTION.md, regla 2 — respeto por la arquitectura aprobada).
+Aprobado explícitamente por el owner el 2026-07-16 (03-AI-CONSTITUTION.md, regla 2 — respeto por la arquitectura aprobada).
 
 ## Nota: recomendación de `--json-schema` (hallazgo H2) no adoptada todavía
 **Motivo**: el spike de FEATURE-001 observó que la respuesta cruda de Claude Code CLI en `--output-format json` no viene en el shape de `PhaseResult` de forma nativa — es texto libre dentro de un campo `result`, mapeado en el spike mediante una convención de formato pedida por prompt. El `--help` del CLI instalado (v2.1.211) muestra un flag `--json-schema` que permitiría forzar salida estructurada validada contra un schema. Esta recomendación **no fue adoptada en el contrato ni en el Executor real** — queda pendiente verificarla contra la documentación oficial vigente del proveedor antes de comprometerse a usarla como mecanismo de mapeo de `PhaseResult`, en línea con el principio "Documentation first" de la sección 6 (Integration Principles).
