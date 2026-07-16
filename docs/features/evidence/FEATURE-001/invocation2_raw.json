@@ -1,0 +1,72 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "api_error_status": null,
+  "duration_ms": 16411,
+  "duration_api_ms": 15071,
+  "ttft_ms": 3300,
+  "ttft_stream_ms": 1449,
+  "time_to_request_ms": 429,
+  "num_turns": 1,
+  "result": "ESTADO: escalated\nRESUMEN: El caso de negocio \"Modernizar el sistema de pagos internos\" fue recibido con una descripción genérica (\"Queremos mejorar el sistema de pagos\") y sin restricciones conocidas. No es posible proponer una arquitectura de alto nivel con confianza razonable porque faltan datos críticos de diseño: tipo de pagos a procesar (internos entre cuentas propias, a proveedores, nómina, B2B/B2C), volumen y frecuencia esperada de transacciones, sistemas/integraciones existentes que deben conservarse o reemplazarse (core bancario, ERP, gateways de pago, contabilidad), requisitos regulatorios y de compliance aplicables (PCI-DSS, normativa financiera local, AML/KYC), requisitos de disponibilidad/latencia/consistencia (SLA), modelo de despliegue actual (on-prem, cloud, híbrido) y stack tecnológico existente, expectativas de seguridad y auditoría, y alcance del \"modernizar\" (¿reemplazo total, incremental, coexistencia con el sistema legado?). Diseñar una arquitectura sin estos datos implicaría asumir decisiones estructurales (por ejemplo, arquitectura de microservicios vs. monolito modular, event-driven vs. request/response, elección de proveedor de pagos, estrategia de migración) que podrían no ajustarse a la realidad del negocio y generarían riesgo alto si se llevan a Development. Corresponde escalar a un humano para relevar esta información antes de continuar con la fase de Architect.\nARTEFACTO: null\nRAZON_ESCALAMIENTO: Información crítica insuficiente para diseñar con confianza: (1) tipo y naturaleza de los pagos internos a modernizar, (2) volumen/frecuencia de transacciones esperado, (3) sistemas e integraciones existentes (core bancario/ERP/gateways) que deben mantenerse o migrarse, (4) marco regulatorio y de compliance aplicable (PCI-DSS, AML/KYC, normativa local), (5) requisitos no funcionales (disponibilidad, latencia, consistencia, auditoría, seguridad), (6) alcance esperado de la modernización (reemplazo total vs. incremental vs. coexistencia con legado) y presupuesto/plazos si condicionan la arquitectura. Se requiere que un humano complete este relevamiento antes de proceder con el diseño.\nINTENTO_ESCRITURA: No se intentó escribir ni modificar ningún archivo del repositorio, dado que esta fase tiene permiso de filesystem de solo lectura y, al escalar por falta de información, no corresponde generar ni persistir un artefacto de diseño especulativo. No hubo necesidad detectada de escritura en esta invocación.",
+  "stop_reason": "end_turn",
+  "session_id": "1da1e653-b422-4d0f-9286-31e32d85b687",
+  "total_cost_usd": 0.021349000000000003,
+  "usage": {
+    "input_tokens": 2,
+    "cache_creation_input_tokens": 509,
+    "cache_read_input_tokens": 3600,
+    "output_tokens": 1092,
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 509,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "not_available",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 1092,
+        "cache_read_input_tokens": 3600,
+        "cache_creation_input_tokens": 509,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 509
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard"
+  },
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 739,
+      "outputTokens": 18,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.000829,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000
+    },
+    "claude-sonnet-5": {
+      "inputTokens": 2,
+      "outputTokens": 1092,
+      "cacheReadInputTokens": 3600,
+      "cacheCreationInputTokens": 509,
+      "webSearchRequests": 0,
+      "costUSD": 0.020520000000000004,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000
+    }
+  },
+  "permission_denials": [],
+  "terminal_reason": "completed",
+  "fast_mode_state": "off",
+  "uuid": "5367f91f-db47-487f-a6e6-f890e6fad9d0"
+}

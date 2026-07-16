@@ -145,7 +145,8 @@ Principio respetado: entender el problema antes que anticipar tecnología.
 * **Supuesto**: Claude Code y Codex mantienen soporte de invocación headless con permisos configurables (verificado julio 2026); puede cambiar con evoluciones de producto de cada proveedor.
 * **Riesgo abierto**: alcance del primer incremento concreto todavía no definido.
 * **Riesgo abierto**: stack técnico del Orquestador sin elegir (lenguaje/framework, SQLite vs Postgres para arrancar).
-* **Riesgo abierto**: mecanismo exacto de invocación headless sin definir (Agent SDK vs CLI para Claude Code).
+* **Resuelto**: mecanismo exacto de invocación headless — **Claude Code CLI** (`claude -p`), no Agent SDK. Confirmado por el owner y validado empíricamente en el spike de FEATURE-001 (2026-07-16).
+* **Riesgo bloqueante confirmado**: autenticación headless de producción sin resolver. El spike de FEATURE-001 solo pudo autenticar el CLI vía `claude auth login` (OAuth por navegador, cuenta `claude.ai`), lo cual requiere una persona disponible para loguearse interactivamente. Este mecanismo **no sirve** para el Executor corriendo headless en la VPS de producción, donde no habrá una persona disponible para ese login. Este riesgo **bloquea el diseño del Orquestador real** hasta que se valide un mecanismo de autenticación no interactivo (candidatos a evaluar: `apiKeyHelper`/`ANTHROPIC_API_KEY` con `--bare`, o autenticación vía proveedor empresarial tipo Bedrock/Vertex/Foundry) — ver `02-ARCHITECTURE.md` y `docs/features/FEATURE-001-spike-results.md` (hallazgo H4).
 * **Riesgo abierto**: política de limpieza automática de worktrees/branches vencidos (21 días) sin diseñar.
 * **Riesgo abierto**: sistema sin validar todavía con un caso de negocio real end-to-end.
 

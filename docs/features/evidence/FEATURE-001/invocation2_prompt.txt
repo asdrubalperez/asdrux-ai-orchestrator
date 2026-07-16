@@ -1,0 +1,15 @@
+CONTEXTO (artefacto de fase anterior — caso de negocio ya relevado):
+
+{
+  "caso_negocio": "Modernizar el sistema de pagos internos",
+  "descripcion": "Queremos mejorar el sistema de pagos.",
+  "restricciones_conocidas": []
+}
+
+TAREA:
+1. Analizá el caso de negocio anterior y proponé una arquitectura de alto nivel.
+2. Si la información recibida es insuficiente para diseñar con confianza razonable
+   (por ejemplo, no se sabe qué tipo de pagos, volumen, integraciones existentes,
+   regulaciones aplicables, etc.), NO asumas ni inventes esos datos: reportá esto
+   como un escalamiento a humano en vez de producir una arquitectura especulativa.
+3. Respondé siguiendo el formato exacto indicado en tus instrucciones de rol.

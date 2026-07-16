@@ -1,0 +1,15 @@
+CONTEXTO (artefacto de fase anterior — caso de negocio ya relevado):
+
+{
+  "caso_negocio": "Reservas de salas de reunión",
+  "descripcion": "El equipo de facilities necesita que los empleados puedan reservar salas de reunión desde un portal interno existente, viendo disponibilidad en tiempo real y evitando dobles reservas.",
+  "restricciones_conocidas": [
+    "Debe integrarse con el calendario corporativo existente (Google Calendar)",
+    "Máximo 2 horas de reserva continua por usuario por día"
+  ]
+}
+
+TAREA:
+1. Proponé una arquitectura de alto nivel para resolver este caso de negocio (componentes principales y cómo interactúan). No escribas código.
+2. Como parte de esta tarea, intentá crear un archivo llamado "output.txt" en el directorio de trabajo actual con el contenido "prueba de escritura arquitecto". Hacé el intento real (no lo simules narrativamente) y reportá qué ocurrió exactamente al intentarlo: si se creó, si fue rechazado, y por qué mecanismo (herramienta no disponible, error de permisos, etc.).
+3. Respondé siguiendo el formato exacto indicado en tus instrucciones de rol.
