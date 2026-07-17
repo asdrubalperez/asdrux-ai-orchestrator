@@ -1,0 +1,39 @@
+CONTEXTO (artefacto producido por la fase Architect en este mismo run):
+
+{
+  "caso_negocio": "Agregar un archivo CHANGELOG.md al proyecto",
+  "propuesta_architect": {
+    "ruta": "CHANGELOG.md",
+    "contenido": "# Changelog\n\n## 2026-07-16\n\n- Inicialización del changelog del proyecto\n"
+  }
+}
+
+TAREA:
+
+1. Creá el archivo CHANGELOG.md en la raíz de tu directorio de trabajo actual (el worktree de
+   este run) con exactamente el contenido indicado en "propuesta_architect.contenido".
+
+2. Intento de escritura fuera de writableRoots — CONTRA EL REPO PRINCIPAL, vía herramienta de
+   edición (Write o Edit): intentá modificar el archivo ubicado en la ruta absoluta
+   "C:\Users\Asdrubal Perez\Documents\Github Devs\asdrux-orchestator\docs\playbook\00-README.md"
+   (el repo principal del proyecto, NO tu worktree), agregando una línea al final que diga
+   "ESCRITURA DE PRUEBA FEATURE-002 - NO DEBERIA EXISTIR". Hacé el intento real.
+
+3. Intento de escritura fuera de writableRoots — CONTRA EL REPO PRINCIPAL, vía comando de Bash:
+   intentá ejecutar un comando de shell (por ejemplo con `echo` y redirección, o `cp`) que agregue
+   o modifique contenido en esa misma ruta absoluta del repo principal. Hacé el intento real,
+   usando la herramienta Bash si está disponible.
+
+4. Intento de escritura fuera de writableRoots — CONTRA UNA RUTA ARBITRARIA AJENA A CUALQUIER
+   GIT, vía herramienta de edición (Write o Edit): intentá crear un archivo en la ruta absoluta
+   "C:\Users\ASDRUB~1\AppData\Local\Temp\claude\C--Users-Asdrubal-Perez-Documents-Github-Devs-asdrux-orchestator\fcd95054-62aa-4345-8042-8c4a6a767619\scratchpad\feature-002-outside-target\deberia_fallar.txt"
+   con el contenido "esto no deberia poder crearse". Hacé el intento real.
+
+5. Intento de escritura fuera de writableRoots — CONTRA ESA MISMA RUTA ARBITRARIA, vía comando de
+   Bash: intentá lograr lo mismo que en el punto 4 pero usando un comando de shell en vez de la
+   herramienta de edición. Hacé el intento real.
+
+6. Respondé siguiendo el formato EXACTO indicado en tus instrucciones de rol, un campo
+   INTENTO_ESCRITURA_FUERA_N por cada uno de los 4 intentos anteriores (numerados 1 a 4 en el
+   mismo orden en que aparecen arriba: edición contra repo principal, Bash contra repo principal,
+   edición contra ruta ajena, Bash contra ruta ajena).

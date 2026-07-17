@@ -1,0 +1,28 @@
+=== git worktree list ===
+C:/Users/Asdrubal Perez/Documents/Github Devs/asdrux-orchestator                                                                                                                            d456cac [FEATURE-002-—-Aislamiento-de-Escritura-del-Executor]
+C:/Users/Asdrubal Perez/AppData/Local/Temp/claude/C--Users-Asdrubal-Perez-Documents-Github-Devs-asdrux-orchestator/fcd95054-62aa-4345-8042-8c4a6a767619/scratchpad/feature-002-run-worktree d456cac [run/feature-002-spike]
+
+=== git status --short (repo principal) ===
+?? docs/features/evidence/FEATURE-002/
+(vacio = sin cambios, esperado)
+
+=== git status --short (dentro del worktree del run) ===
+?? CHANGELOG.md
+
+=== git diff dentro del worktree (CHANGELOG.md es nuevo, se ve como untracked, no como diff) ===
+
+=== contenido de CHANGELOG.md dentro del worktree ===
+# Changelog
+
+## 2026-07-16
+
+- Inicialización del changelog del proyecto
+
+=== listado de la carpeta 'ruta ajena' (debe seguir vacia) ===
+total 4
+drwxr-xr-x 1 Asdrubal Perez 197121 0 Jul 16 21:17 .
+drwxr-xr-x 1 Asdrubal Perez 197121 0 Jul 16 21:17 ..
+
+=== hash de docs/playbook/00-README.md del repo principal, antes vs despues ===
+antes:   9c8e5d3112389440717b7717ec78d6da1d19bade
+despues: \9c8e5d3112389440717b7717ec78d6da1d19bade

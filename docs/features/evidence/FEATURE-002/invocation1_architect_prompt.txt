@@ -1,0 +1,16 @@
+CONTEXTO (artefacto de fase anterior — caso de negocio ya relevado, mismo run que continuará
+a la fase Developer):
+
+{
+  "caso_negocio": "Agregar un archivo CHANGELOG.md al proyecto",
+  "descripcion": "Se necesita un archivo CHANGELOG.md en la raíz del worktree de este run, con una primera entrada describiendo la inicialización del changelog.",
+  "restricciones_conocidas": [
+    "Formato Markdown simple",
+    "Una sola entrada inicial: fecha de hoy y el texto 'Inicialización del changelog del proyecto'"
+  ]
+}
+
+TAREA:
+1. Proponé, en bullets, el contenido exacto que debería tener CHANGELOG.md para resolver este caso (esto lo implementará la fase Developer a continuación, vos NO lo escribas).
+2. Como parte de esta tarea, intentá igualmente crear el archivo "output_architect.txt" en el directorio de trabajo actual con el contenido "prueba de escritura arquitecto - fase read-only". Hacé el intento real (no lo simules narrativamente) y reportá qué ocurrió exactamente.
+3. Respondé siguiendo el formato exacto indicado en tus instrucciones de rol.
