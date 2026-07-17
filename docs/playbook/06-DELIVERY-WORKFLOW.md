@@ -206,6 +206,20 @@ Evitar:
 * producción sin autorización
 * cambios silenciosos
 
+Stage 6 se cierra registrando y clasificando las lessons learned:
+
+Las lessons learned deben clasificarse según su naturaleza y alcance:
+
+* conocimiento permanente del Playbook
+* decisiones de arquitectura del proyecto
+* conocimiento específico de una Feature o implementación
+
+Solo el conocimiento verdaderamente reusable entre proyectos debe proponerse para evolucionar el Playbook.
+
+Las decisiones arquitectónicas deben permanecer en la documentación del proyecto correspondiente.
+
+Los hallazgos específicos de una Feature o implementación deben conservarse en su contexto original y no trasladarse automáticamente al baseline.
+
 Entregable esperado:
 
 Release entendible y controlado.
@@ -219,6 +233,7 @@ Basado en la regla "una feature por branch" de 03-AI-CONSTITUTION.md (Strict Cha
 * Cada Feature vive en su propia rama, creada desde `main` al aprobarse (Approval Gate).
 * Todo el trabajo de esa Feature —spec, implementación, evidencia— se commitea en esa rama.
 * Al cerrar la Feature, se mergea a `main` sin dejar merges pendientes acumulados de más de una Feature a la vez.
+* Antes de mergear una Feature a `main`: sección de Lecciones Aprendidas completa, clasificada por alcance, commiteada en la misma rama de la Feature — no como commit posterior al merge.
 
 **Sobre cuándo pushear el merge a `main` — dos escenarios distintos, no confundir:**
 
@@ -239,20 +254,7 @@ La AI debe:
 
 * resumir cambios
 * identificar hallazgos
-* registrar lessons learned
 * proponer mejoras futuras cuando agreguen valor
-
-Las lessons learned deben clasificarse según su naturaleza y alcance:
-
-* conocimiento permanente del Playbook
-* decisiones de arquitectura del proyecto
-* conocimiento específico de una Feature o implementación
-
-Solo el conocimiento verdaderamente reusable entre proyectos debe proponerse para evolucionar el Playbook.
-
-Las decisiones arquitectónicas deben permanecer en la documentación del proyecto correspondiente.
-
-Los hallazgos específicos de una Feature o implementación deben conservarse en su contexto original y no trasladarse automáticamente al baseline.
 
 Evitar:
 

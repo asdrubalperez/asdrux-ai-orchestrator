@@ -174,3 +174,31 @@ resolvió un problema real y no anticipado (H8, resolución de binario en Window
 mecanismo ya validado en FEATURE-001/002. Queda abierto, explícitamente sin forzar una conclusión
 positiva, el comportamiento bajo invocaciones concurrentes de un proceso persistente (H9) — no
 bloquea el cierre de este incremento, pero sí es información relevante para diseñar el Incremento 2.
+
+---
+
+## 7. Lecciones Aprendidas (06-DELIVERY-WORKFLOW.md, Stage 6)
+
+Clasificadas según su naturaleza y alcance, antes de mergear esta Feature a `main`:
+
+**Específico de esta implementación (queda acá, no se traslada a ningún otro documento):**
+- H8 (resolución del binario real `.exe` vs. el shim `.cmd` en Windows) — es un detalle del
+  entorno de desarrollo local en Windows; no necesariamente aplica a la VPS de producción, que
+  corre Linux. Pendiente confirmar la primera vez que el Executor corra ahí.
+- H9 (riesgo de concurrencia de procesos) — queda explícitamente abierto, no resuelto. Este
+  incremento solo ejerció invocaciones secuenciales desde comandos cortos, no desde un servicio
+  persistente. No se fuerza una conclusión sobre cómo se comportará bajo concurrencia real.
+
+**Decisiones de arquitectura del proyecto:**
+- Ninguna ADR nueva en `02-ARCHITECTURE.md` por este incremento. H9 podría ameritar una si el
+  Incremento 2 (secuencia de 2+ fases) confirma que hace falta un proceso persistente en vez de
+  comandos cortos — se evalúa en ese momento, con evidencia de ese incremento, no ahora.
+
+**Candidato a conocimiento reusable del AI-Playbook Base (propuesta — no aplicada, requiere decisión aparte):**
+- H8: invocar un CLI de terceros desde Node.js en Windows requiere resolver el binario real
+  (`.exe`) en vez de usar `shell: true` con un array de argumentos — `cmd.exe` no transporta de
+  forma confiable argumentos multilínea (system prompts, contexto JSON con saltos de línea), y
+  produce fallos silenciosos (el proceso corre y responde, pero con el argumento truncado/mal
+  interpretado, no con un error explícito). Es una lección de integración Node/Windows, no de
+  gobernanza de este proyecto — se deja como recomendación para el owner, no se traslada a la
+  copia local del Playbook como efecto colateral de este cierre.
