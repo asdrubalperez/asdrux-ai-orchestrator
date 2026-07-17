@@ -252,3 +252,45 @@ mecanismo concreto (sandbox de rutas del propio CLI, con alcance = `cwd`, extens
 y se recomienda actualizar `02-ARCHITECTURE.md` para reflejarlo. Se registra una fricción operativa
 menor y no bloqueante (H6, aliasing de rutas en Windows) que no aplica al entorno de producción
 (Linux).
+
+---
+
+## 9. Cierre — Lecciones Aprendidas (06-DELIVERY-WORKFLOW.md, Stage 7)
+
+Siguiendo el principio de Stage 7 ("clasificar según naturaleza y alcance; solo el conocimiento
+verdaderamente reusable entre proyectos se propone para evolucionar el Playbook"), las lecciones de
+FEATURE-002 se separan así:
+
+**Específico de esta Feature/implementación (queda acá, no se traslada a ningún otro documento):**
+- H5, H6, H7 (sección 5). Son hallazgos sobre el comportamiento concreto de Claude Code CLI en un
+  entorno de desarrollo Windows — no están validados contra Codex ni contra el entorno de
+  producción real (VPS Ubuntu 24.04). No deben tratarse como garantías universales del proveedor,
+  solo como evidencia puntual de este spike.
+
+**Decisiones de arquitectura del proyecto (ya incorporadas a `docs/playbook/02-ARCHITECTURE.md`, no se duplican acá):**
+- La ADR "`workspace-write` con `writableRoots` se impone vía un sandbox de rutas real del CLI"
+  (sección 9 de `02-ARCHITECTURE.md`), derivada de H5.
+- El pendiente de aislamiento por contenedor como defensa en profundidad para Developer/QA **sigue
+  vigente** — este spike no lo cierra ni lo reemplaza, solo confirma que la primera capa (sandbox
+  de rutas del CLI) funciona para el caso probado.
+
+**Candidato a conocimiento reusable del AI-Playbook Base (propuesta — no aplicada, requiere decisión aparte):**
+- Al diseñar un spike que prueba "enforcement de permisos" de una herramienta de IA de terceros,
+  conviene declarar de antemano las distintas *vías* de bypass a probar por separado —herramientas
+  de edición estructuradas (Write/Edit) vs. ejecución de comandos arbitrarios (Bash/shell)—, porque
+  un mismo permiso declarado en el contrato puede sostenerse por mecanismos completamente distintos
+  según la vía. FEATURE-001 encontró que read-only se sostiene por ausencia total de herramientas
+  de escritura; FEATURE-002 encontró que `workspace-write`/`writableRoots` se sostiene por un
+  sandbox de rutas real, incluso con Bash habilitado. Probar solo una vía habría dejado sin
+  verificar la otra.
+- Esto podría formalizarse como guía adicional en `04-TESTING-POLICY.md` (sección "Real Environment
+  Validation") o en `07-FEATURE-TEMPLATE.md` (sección 7, Technical Considerations) del
+  **AI-Playbook Base** (`asdrubalperez/AI-Playbook`), no de la copia local de este proyecto. Se deja
+  como recomendación para que el owner decida si amerita una propuesta separada al Base — no se
+  modifica la copia local del Playbook de este proyecto como efecto colateral de cerrar esta
+  Feature, para no confundir "gobernanza reusable" con "hallazgo de un spike puntual".
+
+**Estado de la Feature**: **Closed** — implementada, validada con evidencia real, y cerrada el
+2026-07-16. Sin acciones pendientes de esta Feature en sí; los pendientes derivados (contenedor
+como defensa adicional, propuesta opcional al Playbook Base) quedan registrados arriba, fuera del
+alcance de este cierre.

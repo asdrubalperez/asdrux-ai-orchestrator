@@ -10,7 +10,7 @@ Basado en: 07-FEATURE-TEMPLATE.md (Standard Mode)
 - **Name**: Executor Write Isolation — Claude Code, worktree confinado
 - **Type**: Spike técnico / prueba de contrato (no feature de negocio)
 - **Owner**: Asdru
-- **Status**: **Approved** (Go confirmado 2026-07-16)
+- **Status**: **Closed** — implementada y validada con evidencia real el 2026-07-16 (Go confirmado el mismo día). Ver `FEATURE-002-spike-results.md` sección 9 (Cierre — Lecciones Aprendidas).
 - **Priority**: Alta — bloquea la decisión de alcance de Milestone 1
 
 ---
