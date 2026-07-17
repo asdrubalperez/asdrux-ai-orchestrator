@@ -177,6 +177,7 @@ Mecanismo exacto de invocación headless para Claude Code: **Claude Code CLI** (
 * **Docker Engine**: instalación oficial (repositorio de Docker), usuario `asdru` en grupo `docker` (sin necesidad de `sudo`).
 * **Git**: clave SSH propia de la VM, configurada como Deploy Key con acceso de escritura sobre `asdrubalperez/ai-orchestrator`.
 * **Postgres de desarrollo**: contenedor separado en la misma VPS (`postgres-dev-orquestador`, imagen `postgres:16-alpine`, puerto atado a `127.0.0.1:5432` — no expuesto públicamente). Acceso desde máquinas de desarrollo vía túnel SSH (`ssh -L 5433:localhost:5432 asdru@179.197.79.99`), nunca conexión directa. Independiente de cualquier Postgres de producción futuro — nombre, volumen y ciclo de vida propios, sin compartir datos.
+* **Node.js en la VPS**: instalado (v22 LTS, vía repositorio oficial NodeSource) a partir de FEATURE-006, para poder desarrollar y validar directamente en la VPS el aislamiento por contenedor de Developer/QA (H14) — la máquina de desarrollo local (Windows, sin Docker Desktop) no puede ejecutar contenedores reales, así que ese trabajo se hace por SSH contra la VPS en vez de contra un Docker remoto desde la notebook. Es la primera vez que el propio código del Orquestador corre en la VPS, no solo su infraestructura de soporte (Postgres, deploy key).
 
 ## Deployment Strategy
 
