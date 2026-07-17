@@ -41,6 +41,8 @@ const ALLOWED_ENV_PASSTHROUGH_KEYS = [
   "LC_ALL",
 ] as const;
 
+const DEFAULT_DEVELOPER_CONTAINER_IMAGE = "ai-orchestrator-developer:latest";
+
 export interface ClaudeCodeExecutorOptions {
   /** Directorio de trabajo del run (el worktree). Todas las invocaciones de esta instancia corren ahí. */
   workingDirectory: string;
@@ -51,6 +53,16 @@ export interface ClaudeCodeExecutorOptions {
    * necesariamente a la decisión de modelo del Executor real de producción.
    */
   model?: string;
+  /**
+   * FEATURE-006 (resuelve H14): "container" corre la invocación COMPLETA de Claude Code —incluida
+   * su herramienta Bash interna— dentro de un contenedor Docker endurecido, en vez de en el host.
+   * Necesario para fases con Bash real (developer), donde el confinamiento por restricción de
+   * toolset (H1) no aplica. "host" (default) preserva el mecanismo ya validado para fases sin
+   * Bash o donde el sandbox de rutas del propio CLI alcanza (architect, functional, planning, qa).
+   */
+  sandbox?: "host" | "container";
+  /** Imagen a usar cuando sandbox === "container". Default: ai-orchestrator-developer:latest. */
+  containerImage?: string;
 }
 
 interface RawCliResult {
@@ -134,7 +146,10 @@ export class ClaudeCodeExecutor implements Executor {
 
     const prompt = this.buildPrompt(invocation);
 
-    const raw = await this.spawnClaude(args, prompt, apiKey, options);
+    const raw =
+      this.options.sandbox === "container"
+        ? await this.spawnClaudeInContainer(args, prompt, apiKey, options)
+        : await this.spawnClaude(args, prompt, apiKey, options);
     return this.mapToPhaseResult(raw);
   }
 
@@ -188,11 +203,61 @@ export class ClaudeCodeExecutor implements Executor {
     apiKey: string,
     options: RunPhaseOptions
   ): Promise<RawCliResult> {
+    return this.execAndCapture(this.claudeBinary, [...args, prompt], this.options.workingDirectory, this.buildChildEnv(apiKey), options);
+  }
+
+  /**
+   * FEATURE-006: corre `claude` ENTERO (no solo comandos individuales) dentro de un contenedor
+   * Docker — su herramienta Bash interna queda confinada al filesystem/red/usuario del
+   * contenedor, no del host. Solo se pasa ANTHROPIC_API_KEY al contenedor, nada más del entorno
+   * del Orquestador (ni siquiera las variables de sistema que sí se reenvían en modo host — el
+   * contenedor ya trae las suyas propias). Sin --network none: a diferencia del TestExecutor de
+   * QA, Developer necesita alcanzar la API del proveedor de IA — limitación documentada (no hay
+   * allowlist de egress fino en este incremento, ver FEATURE-006 Scope/Excluded).
+   */
+  private spawnClaudeInContainer(
+    args: string[],
+    prompt: string,
+    apiKey: string,
+    options: RunPhaseOptions
+  ): Promise<RawCliResult> {
+    const image = this.options.containerImage ?? DEFAULT_DEVELOPER_CONTAINER_IMAGE;
+    const dockerArgs = [
+      "run",
+      "--rm",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges",
+      "--pids-limit",
+      "256",
+      "--memory",
+      "512m",
+      "--cpus",
+      "1",
+      "-v",
+      `${this.options.workingDirectory}:/workspace:rw`,
+      "--workdir",
+      "/workspace",
+      "-e",
+      `ANTHROPIC_API_KEY=${apiKey}`,
+      image,
+      "claude",
+      ...args,
+      prompt,
+    ];
+    return this.execAndCapture("docker", dockerArgs, undefined, undefined, options);
+  }
+
+  private execAndCapture(
+    command: string,
+    args: string[],
+    cwd: string | undefined,
+    env: NodeJS.ProcessEnv | undefined,
+    options: RunPhaseOptions
+  ): Promise<RawCliResult> {
     return new Promise((resolve, reject) => {
-      const child = spawn(this.claudeBinary, [...args, prompt], {
-        cwd: this.options.workingDirectory,
-        env: this.buildChildEnv(apiKey),
-      });
+      const child = spawn(command, args, { cwd, env });
 
       let stdout = "";
       let stderr = "";
@@ -238,7 +303,7 @@ export class ClaudeCodeExecutor implements Executor {
         options.onEvent?.({ type: "process_exit", data: { code } } satisfies ExecutorEvent);
 
         if (code !== 0 && !stdout.trim()) {
-          reject(new Error(`claude CLI terminó con código ${code} sin salida. stderr: ${stderr}`));
+          reject(new Error(`"${command}" terminó con código ${code} sin salida. stderr: ${stderr}`));
           return;
         }
 

@@ -112,8 +112,18 @@ export async function runStart(args: string[]): Promise<void> {
 
     // --- Loop Developer↔QA (FEATURE-005) ---
     if (pipelineSpec.definition.loop) {
+      // FEATURE-006 (resuelve H14): Developer corre en un Executor separado, en modo "container"
+      // — su invocación completa (Bash incluido) queda confinada dentro de un contenedor Docker
+      // endurecido, no en el host. QA sigue en modo "host" (ya no necesita Bash en absoluto).
+      const developerExecutor = new ClaudeCodeExecutor({
+        workingDirectory: worktree.worktreePath,
+        model,
+        sandbox: "container",
+      });
+
       const finalResult = await runDeveloperQaLoop({
         executor,
+        developerExecutor,
         readRole,
         runId: run.id,
         planningResult: previousResult as PhaseResult,
@@ -145,12 +155,13 @@ export async function runStart(args: string[]): Promise<void> {
 
 export async function runDeveloperQaLoop(params: {
   executor: ClaudeCodeExecutor;
+  developerExecutor: ClaudeCodeExecutor;
   readRole: (agentRole: string) => Promise<string>;
   runId: string;
   planningResult: PhaseResult;
   maxAttempts: number;
 }): Promise<PhaseResult> {
-  const { executor, readRole, runId, planningResult, maxAttempts } = params;
+  const { executor, developerExecutor, readRole, runId, planningResult, maxAttempts } = params;
   const testExecutor = new TestExecutor();
   const testCommand = extractTestCommand(planningResult.outputArtifact);
   console.log(`[run:start] COMANDO_TEST declarado por Planning: ${testCommand}`);
@@ -177,11 +188,11 @@ export async function runDeveloperQaLoop(params: {
       agentRole: "developer",
       roleInstructions: developerRoleInstructions,
       context: developerContext,
-      permissions: { filesystem: "workspace-write", writableRoots: [executor.options.workingDirectory] },
+      permissions: { filesystem: "workspace-write", writableRoots: [developerExecutor.options.workingDirectory] },
     };
 
     await recordRunEvent(runId, "phase_started", { agentRole: "developer", attempt });
-    const developerResult = await executor.runPhase(developerInvocation, { timeoutMs: 300_000 });
+    const developerResult = await developerExecutor.runPhase(developerInvocation, { timeoutMs: 300_000 });
     await recordRunEvent(runId, "phase_finished", { agentRole: "developer", attempt, result: developerResult });
     await recordArtifact({
       runId,
