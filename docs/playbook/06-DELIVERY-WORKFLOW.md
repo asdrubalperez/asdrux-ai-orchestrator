@@ -212,6 +212,23 @@ Release entendible y controlado.
 
 ---
 
+## Disciplina de Branching (activa para este proyecto)
+
+Basado en la regla "una feature por branch" de 03-AI-CONSTITUTION.md (Strict Change Mode) — se activa esta regla puntual sin activar el modo completo.
+
+* Cada Feature vive en su propia rama, creada desde `main` al aprobarse (Approval Gate).
+* Todo el trabajo de esa Feature —spec, implementación, evidencia— se commitea en esa rama.
+* Al cerrar la Feature, se mergea a `main` sin dejar merges pendientes acumulados de más de una Feature a la vez.
+
+**Sobre cuándo pushear el merge a `main` — dos escenarios distintos, no confundir:**
+
+* **Hoy (desarrollo temprano, sin CI, sin nada desplegado desde `main`)**: push inmediato después de cada merge. El costo de un error es bajo — no hay producción ni pipeline que dependa de `main` en este momento.
+* **Una vez que exista CI/CD real, o que algo desplegado dependa de `main`**: el push deja de ser automático. Antes de pushear un merge, debe confirmarse "readiness" explícito — que la validación de la Feature (Stage 5) haya pasado, y si existe pipeline de CI, que corra en verde. El humano decide el momento del push a `main`, no se asume.
+
+**Disparador para endurecer esta regla**: la primera vez que se configure CI/CD (sección "Deployment Strategy" de `02-ARCHITECTURE.md`, hoy `[Pendiente]`) o la primera vez que algo en producción lea de `main`, esta sección debe actualizarse para reflejar el gate real — no seguir con "push inmediato" por inercia.
+
+---
+
 # Stage 7 — Post-Release Review
 
 Objetivo:
