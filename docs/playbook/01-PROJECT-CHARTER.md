@@ -143,19 +143,21 @@ Principio respetado: entender el problema antes que anticipar tecnología.
 ## Risks & Assumptions
 
 * **Supuesto**: Claude Code y Codex mantienen soporte de invocación headless con permisos configurables (verificado julio 2026); puede cambiar con evoluciones de producto de cada proveedor.
-* **Riesgo abierto**: alcance del primer incremento concreto todavía no definido.
-* **Riesgo abierto**: stack técnico del Orquestador sin elegir (lenguaje/framework, SQLite vs Postgres para arrancar).
+* **Resuelto**: alcance del primer incremento concreto. Milestone 1 se descompuso en 3 incrementos: (1) una fase real persistida — FEATURE-003, cerrada; (2) secuencia de 2+ fases con transición automática — en curso, FEATURE-004; (3) pipeline completo con loop Developer↔QA — pendiente.
+* **Resuelto**: stack técnico del Orquestador — Node.js + TypeScript, PostgreSQL. Ver `02-ARCHITECTURE.md`, secciones 4 y 5.
 * **Resuelto**: mecanismo exacto de invocación headless — **Claude Code CLI** (`claude -p`), no Agent SDK. Confirmado por el owner y validado empíricamente en el spike de FEATURE-001 (2026-07-16).
 * **Resuelto**: autenticación headless de producción. El spike de FEATURE-001 (2026-07-16) confirmó, con una invocación real y sin ningún paso interactivo, que `ANTHROPIC_API_KEY` como variable de entorno (junto con `--bare`, que fuerza ese mecanismo e ignora OAuth/keychain) autentica al CLI correctamente y sostiene el mismo comportamiento de permisos read-only ya validado con OAuth. Esto sí es viable para el Executor corriendo headless en la VPS de producción, sin persona disponible. Detalle y evidencia: `docs/features/FEATURE-001-spike-results.md` (hallazgo H4, actualización 2026-07-16). Queda como nota operativa no bloqueante: definir el mecanismo de aprovisionamiento seguro de esa variable en la VPS (fuera del alcance de este spike).
 * **Riesgo abierto**: política de limpieza automática de worktrees/branches vencidos (21 días) sin diseñar.
 * **Riesgo abierto**: sistema sin validar todavía con un caso de negocio real end-to-end.
+* **Riesgo abierto (derivado de FEATURE-003, hallazgo H9)**: comportamiento bajo invocaciones concurrentes de múltiples runs simultáneos, desde un proceso Node persistente, todavía no validado — solo se probaron invocaciones secuenciales.
+* **Pendiente de diseño (roadmap, no bloqueante)**: evaluar si el pipeline necesita un segundo mecanismo de loop entre Architect↔Functional (además del ya definido Developer↔QA), para los casos donde Functional necesite que Architect revise o ajuste el diseño. Surgió en discusión durante el diseño del Incremento 2 (FEATURE-004) — deliberadamente no implementado ahí; de decidirse necesario, requeriría su propio límite de reintentos y condición de corte propia, no se asume por defecto ni por analogía con Developer↔QA.
 
 ---
 
 ## Timeline / Milestones
 
 * **Milestone 0 — cumplido**: VPS operativa, Docker Engine instalado, git configurado con deploy key de escritura, repositorio `ai-orchestrator` creado (vacío).
-* **Milestone 1 — próximo, alcance pendiente de definir**: probablemente schema de las 4 tablas + ciclo básico de invocación con un solo adaptador (Claude Code), sin UI todavía.
+* **Milestone 1 — en curso**: descompuesto en 3 incrementos (ver Risks & Assumptions). Incremento 1 (schema completo de las 4 tablas + una fase real persistida) cumplido — FEATURE-003. Incremento 2 (secuencia de 2+ fases, transición automática) en curso — FEATURE-004.
 * **Milestone futuro**: validación end-to-end con un caso de negocio real, previo a sumar al resto del equipo.
 
 ---
