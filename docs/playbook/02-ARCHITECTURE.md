@@ -80,7 +80,8 @@ Decisión explícita — evitar mezcla de estilos: los agentes nunca se autoconv
 
 ## Backend Stack
 
-**[Pendiente]** — lenguaje/framework del Orquestador sin elegir. Uno de los pendientes explícitos a resolver antes del primer incremento.
+**Node.js + TypeScript**.
+**Justificación**: el contrato de Executor ya está escrito en TypeScript (sección 6); esto da consistencia de tipado end-to-end entre el contrato, el Orquestador y sus adaptadores. Node ofrece un modelo de I/O no bloqueante adecuado para el streaming de progreso vía SSE planeado a futuro (sección 3). Además da continuidad con el stack de desarrollo ya usado por el owner.
 
 ## Backend Principles
 
@@ -104,7 +105,8 @@ Cuatro tablas:
 | `run_events` | Log append-only de todo lo ocurrido — auditoría y reconexión SSE sin pérdida vía `Last-Event-ID`. |
 | `artifacts` | Lo que produce cada agente. Texto/JSON directo para diseño; para código, referencia a commit/PR (no duplicado — git es la fuente de verdad). |
 
-Motor de base de datos: **[Pendiente]** — SQLite vs Postgres para arrancar, decisión explícita todavía abierta.
+Motor de base de datos: **PostgreSQL**.
+**Justificación**: Docker Engine ya está operativo en la VPS (sección 7), por lo que correr Postgres en contenedor no agrega infraestructura nueva. Soporta `JSONB`, útil para poder consultar el contenido de `artifacts` más adelante sin tratarlo como texto opaco. El owner tiene experiencia previa con Postgres.
 
 ## Data Principles
 
@@ -155,7 +157,7 @@ interface PhaseResult {
 }
 ```
 
-Mecanismo exacto de invocación headless para Claude Code (Agent SDK vs CLI): **[Pendiente]**.
+Mecanismo exacto de invocación headless para Claude Code: **Claude Code CLI** (`claude -p`), no Agent SDK — confirmado empíricamente en los spikes de FEATURE-001 (`docs/features/FEATURE-001-spike-results.md`) y FEATURE-002 (`docs/features/FEATURE-002-spike-results.md`).
 
 ## Integration Principles
 
