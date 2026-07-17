@@ -1,0 +1,63 @@
+{
+  "run": {
+    "id": "978361b2-ce98-4f94-a357-791a0a7fd8cc",
+    "pipeline_definition_id": "a5b9cd3e-ec7e-4711-9864-c29c361b9637",
+    "owner_id": "asdru",
+    "current_phase": "architect",
+    "status": "completed",
+    "branch_name": "run/978361b2-ce98-4f94-a357-791a0a7fd8cc",
+    "worktree_path": "C:\\Users\\Asdrubal Perez\\Documents\\Github Devs\\ai-orchestrator-worktrees\\978361b2-ce98-4f94-a357-791a0a7fd8cc",
+    "created_at": "2026-07-17T02:26:59.780Z",
+    "updated_at": "2026-07-17T02:27:37.074Z"
+  },
+  "events": [
+    {
+      "id": "5",
+      "event_type": "run_started",
+      "payload": {
+        "casePath": "C:\\Users\\ASDRUB~1\\AppData\\Local\\Temp\\claude\\C--Users-Asdrubal-Perez-Documents-Github-Devs-asdrux-orchestator\\fcd95054-62aa-4345-8042-8c4a6a767619\\scratchpad/feature-003-cases/case_ok.json",
+        "branchName": "run/978361b2-ce98-4f94-a357-791a0a7fd8cc",
+        "worktreePath": "C:\\Users\\Asdrubal Perez\\Documents\\Github Devs\\ai-orchestrator-worktrees\\978361b2-ce98-4f94-a357-791a0a7fd8cc"
+      },
+      "created_at": "2026-07-17T02:26:59.832Z"
+    },
+    {
+      "id": "6",
+      "event_type": "phase_started",
+      "payload": {
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-17T02:26:59.880Z"
+    },
+    {
+      "id": "7",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "completed",
+          "summary": "El caso de negocio (reserva de salas de reunión desde el portal interno existente, con disponibilidad en tiempo real, prevención de dobles reservas, integración con Google Calendar y límite de 2 horas continuas por usuario por día) es suficientemente claro para proponer una arquitectura de alto nivel. Se plantea un servicio de reservas desacoplado que se embebe en el portal existente, se sincroniza con Google Calendar como fuente de verdad del calendario corporativo y aplica reglas de negocio (anti-doble-reserva y límite diario) en el backend. Se documentan supuestos y puntos de validación no bloqueantes al final.",
+          "outputArtifact": "- Contexto y alcance\n  - Módulo de \"Reservas de Salas\" integrado en el portal interno existente (frontend embebido o microfrontend/widget), sin construir un portal nuevo.\n  - Fuente de verdad de disponibilidad: Google Calendar corporativo (un calendario/recurso por sala), complementado por un almacén propio para reglas y auditoría.\n\n- Componentes de alto nivel\n  - UI de Reservas (dentro del portal): vista de disponibilidad en tiempo real, selección de sala/horario, confirmación y cancelación.\n  - API de Reservas (backend/servicio de dominio): expone endpoints para consultar disponibilidad, crear/cancelar reservas y validar reglas.\n  - Motor de Reglas de Negocio: valida \"máximo 2 horas continuas por usuario por día\" y evita dobles reservas antes de confirmar.\n  - Integración con Google Calendar (Adapter/Anti-corruption layer): lectura de disponibilidad (free/busy) y escritura de eventos en el calendario de cada sala.\n  - Base de datos propia: registro de reservas locales, metadatos de salas, cuotas por usuario/día y auditoría (para no depender solo de Google Calendar en las validaciones).\n  - Servicio de Notificaciones (opcional): confirmaciones/cancelaciones vía email o el canal del portal.\n\n- Flujos principales\n  - Ver disponibilidad: la UI consulta la API → la API combina free/busy de Google Calendar + reservas locales pendientes → devuelve slots libres en tiempo real (con estrategia de refresco/caché corta).\n  - Crear reserva: la UI envía solicitud → la API valida reglas (límite diario 2h continuas + no solapamiento) → escribe evento en Google Calendar de la sala → persiste la reserva local → confirma al usuario.\n  - Cancelar reserva: la API elimina el evento en Google Calendar y actualiza el estado local.\n\n- Consistencia y prevención de doble reserva\n  - Control de concurrencia en el backend (bloqueo optimista/pesimista o transacción sobre el slot) para evitar dobles reservas ante solicitudes simultáneas.\n  - Estrategia de sincronización bidireccional: webhooks/push notifications de Google Calendar (o polling periódico) para reflejar cambios hechos directamente en el calendario.\n  - Manejo de fallos: patrón de compensación si falla la escritura en Google Calendar tras la validación local (rollback/estado \"pendiente\").\n\n- Reglas de negocio a modelar\n  - Cuota diaria por usuario: acumulado ≤ 2 horas y validación de \"continuidad\" según definición confirmada (ver supuestos).\n  - Identidad del usuario: obtenida del SSO/sesión del portal existente para atribuir reservas y aplicar cuotas.\n\n- Aspectos transversales\n  - Seguridad: autenticación vía SSO del portal; autorización por rol (empleado vs. facilities/admin); manejo seguro de credenciales/OAuth de Google (service account con delegación de dominio).\n  - Observabilidad: logs de auditoría de reservas, métricas de uso de salas y monitoreo de la integración con Google.\n  - Zona horaria/localización: normalización de husos horarios para evitar errores en límites de día.\n\n- Supuestos y puntos a validar (no bloqueantes para el diseño de alto nivel)\n  - Cada sala está representada como un recurso/calendario en Google Calendar corporativo.\n  - \"2 horas continuas por día\" se interpreta como una sola reserva contigua de hasta 2h; queda por confirmar si se permiten múltiples reservas fragmentadas que sumen 2h.\n  - El portal existente provee identidad de usuario vía SSO reutilizable por el servicio.\n  - Volumen esperado y número de salas moderados (no se detecta necesidad de arquitectura de alta escala en esta fase).",
+          "escalationReason": null,
+          "executorMetadata": {
+            "model": "claude-opus-4-8[1m]",
+            "provider": "claude-code-cli"
+          }
+        },
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-17T02:27:36.973Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "8782b949-c52e-4475-aba9-7a301300c0f5",
+      "phase": "architect",
+      "kind": "design",
+      "content": {
+        "summary": "El caso de negocio (reserva de salas de reunión desde el portal interno existente, con disponibilidad en tiempo real, prevención de dobles reservas, integración con Google Calendar y límite de 2 horas continuas por usuario por día) es suficientemente claro para proponer una arquitectura de alto nivel. Se plantea un servicio de reservas desacoplado que se embebe en el portal existente, se sincroniza con Google Calendar como fuente de verdad del calendario corporativo y aplica reglas de negocio (anti-doble-reserva y límite diario) en el backend. Se documentan supuestos y puntos de validación no bloqueantes al final.",
+        "outputArtifact": "- Contexto y alcance\n  - Módulo de \"Reservas de Salas\" integrado en el portal interno existente (frontend embebido o microfrontend/widget), sin construir un portal nuevo.\n  - Fuente de verdad de disponibilidad: Google Calendar corporativo (un calendario/recurso por sala), complementado por un almacén propio para reglas y auditoría.\n\n- Componentes de alto nivel\n  - UI de Reservas (dentro del portal): vista de disponibilidad en tiempo real, selección de sala/horario, confirmación y cancelación.\n  - API de Reservas (backend/servicio de dominio): expone endpoints para consultar disponibilidad, crear/cancelar reservas y validar reglas.\n  - Motor de Reglas de Negocio: valida \"máximo 2 horas continuas por usuario por día\" y evita dobles reservas antes de confirmar.\n  - Integración con Google Calendar (Adapter/Anti-corruption layer): lectura de disponibilidad (free/busy) y escritura de eventos en el calendario de cada sala.\n  - Base de datos propia: registro de reservas locales, metadatos de salas, cuotas por usuario/día y auditoría (para no depender solo de Google Calendar en las validaciones).\n  - Servicio de Notificaciones (opcional): confirmaciones/cancelaciones vía email o el canal del portal.\n\n- Flujos principales\n  - Ver disponibilidad: la UI consulta la API → la API combina free/busy de Google Calendar + reservas locales pendientes → devuelve slots libres en tiempo real (con estrategia de refresco/caché corta).\n  - Crear reserva: la UI envía solicitud → la API valida reglas (límite diario 2h continuas + no solapamiento) → escribe evento en Google Calendar de la sala → persiste la reserva local → confirma al usuario.\n  - Cancelar reserva: la API elimina el evento en Google Calendar y actualiza el estado local.\n\n- Consistencia y prevención de doble reserva\n  - Control de concurrencia en el backend (bloqueo optimista/pesimista o transacción sobre el slot) para evitar dobles reservas ante solicitudes simultáneas.\n  - Estrategia de sincronización bidireccional: webhooks/push notifications de Google Calendar (o polling periódico) para reflejar cambios hechos directamente en el calendario.\n  - Manejo de fallos: patrón de compensación si falla la escritura en Google Calendar tras la validación local (rollback/estado \"pendiente\").\n\n- Reglas de negocio a modelar\n  - Cuota diaria por usuario: acumulado ≤ 2 horas y validación de \"continuidad\" según definición confirmada (ver supuestos).\n  - Identidad del usuario: obtenida del SSO/sesión del portal existente para atribuir reservas y aplicar cuotas.\n\n- Aspectos transversales\n  - Seguridad: autenticación vía SSO del portal; autorización por rol (empleado vs. facilities/admin); manejo seguro de credenciales/OAuth de Google (service account con delegación de dominio).\n  - Observabilidad: logs de auditoría de reservas, métricas de uso de salas y monitoreo de la integración con Google.\n  - Zona horaria/localización: normalización de husos horarios para evitar errores en límites de día.\n\n- Supuestos y puntos a validar (no bloqueantes para el diseño de alto nivel)\n  - Cada sala está representada como un recurso/calendario en Google Calendar corporativo.\n  - \"2 horas continuas por día\" se interpreta como una sola reserva contigua de hasta 2h; queda por confirmar si se permiten múltiples reservas fragmentadas que sumen 2h.\n  - El portal existente provee identidad de usuario vía SSO reutilizable por el servicio.\n  - Volumen esperado y número de salas moderados (no se detecta necesidad de arquitectura de alta escala en esta fase)."
+      },
+      "created_at": "2026-07-17T02:27:37.029Z"
+    }
+  ]
+}

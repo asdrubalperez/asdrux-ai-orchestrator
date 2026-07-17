@@ -1,0 +1,8 @@
+{
+  "caso_negocio": "Reservas de salas de reunión",
+  "descripcion": "El equipo de facilities necesita que los empleados puedan reservar salas de reunión desde un portal interno existente, viendo disponibilidad en tiempo real y evitando dobles reservas.",
+  "restricciones_conocidas": [
+    "Debe integrarse con el calendario corporativo existente (Google Calendar)",
+    "Máximo 2 horas de reserva continua por usuario por día"
+  ]
+}

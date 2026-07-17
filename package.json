@@ -1,0 +1,21 @@
+{
+  "name": "ai-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Orquestador de workflow con agentes de IA — Milestone 1, Incremento 1 (FEATURE-003).",
+  "type": "module",
+  "scripts": {
+    "migrate": "tsx src/db/migrate.ts",
+    "cli": "tsx src/cli/index.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

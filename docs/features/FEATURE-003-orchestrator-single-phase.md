@@ -10,7 +10,7 @@ Basado en: 07-FEATURE-TEMPLATE.md (Standard Mode)
 - **Name**: Orquestador Real — Milestone 1, Incremento 1 (una fase persistida)
 - **Type**: Feature de producto (primer código real, ya no es un spike descartable)
 - **Owner**: Asdru
-- **Status**: **Approved** (Go confirmado 2026-07-16)
+- **Status**: **Closed** — implementada y validada con evidencia real el 2026-07-17. Ver `FEATURE-003-implementation-results.md`.
 - **Priority**: Alta — primer incremento real del Orquestador, base de todo lo que sigue
 
 ---
