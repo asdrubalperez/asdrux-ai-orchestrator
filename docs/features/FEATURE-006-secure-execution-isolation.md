@@ -10,7 +10,7 @@ Basado en: 07-FEATURE-TEMPLATE.md (Standard Mode)
 - **Name**: Aislamiento Real de Ejecución — Contenedor + QA sin Bash
 - **Type**: Feature de seguridad/infraestructura — resuelve riesgo bloqueante
 - **Owner**: Asdru
-- **Status**: **Approved** (Go confirmado 2026-07-17) — implementación por partes: punto 1 (fix de `process.env`) primero y aislado, con commit intermedio propio, antes de seguir con `TestExecutor` y contenedores.
+- **Status**: **Closed** — implementada y validada con evidencia real el 2026-07-17 (VPS por SSH). Ver `FEATURE-006-implementation-results.md`. Resuelve el riesgo bloqueante H14.
 - **Priority**: Crítica — desbloquea el riesgo H14 registrado en 01-PROJECT-CHARTER.md
 
 ---
