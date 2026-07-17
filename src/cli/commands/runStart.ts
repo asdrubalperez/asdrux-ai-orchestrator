@@ -21,6 +21,7 @@ import {
 import type { PhaseInvocation, PhaseResult } from "../../contracts/executor.js";
 import { PIPELINES, SINGLE_PHASE_ARCHITECT } from "../../pipelines/definitions.js";
 import { extractTestCommand } from "../../pipelines/extractTestCommand.js";
+import { TestExecutor, parseTestCommand } from "../../testing/testExecutor.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..", "..");
@@ -150,6 +151,7 @@ export async function runDeveloperQaLoop(params: {
   maxAttempts: number;
 }): Promise<PhaseResult> {
   const { executor, readRole, runId, planningResult, maxAttempts } = params;
+  const testExecutor = new TestExecutor();
   const testCommand = extractTestCommand(planningResult.outputArtifact);
   console.log(`[run:start] COMANDO_TEST declarado por Planning: ${testCommand}`);
 
@@ -197,11 +199,22 @@ export async function runDeveloperQaLoop(params: {
 
     await updateRunCurrentPhase(runId, "qa");
 
+    // FEATURE-006 (resuelve H14): el TestExecutor —no el agente QA— corre el comando de test,
+    // como executable + args estructurados, dentro de un contenedor sin red. QA nunca recibe Bash.
+    const { executable, args: testArgs } = parseTestCommand(testCommand);
+    const testResult = await testExecutor.run({
+      executable,
+      args: testArgs,
+      workingDirectory: executor.options.workingDirectory,
+      timeoutMs: 60_000,
+    });
+    await recordRunEvent(runId, "test_executed", { attempt, testCommand, testResult });
+
     const qaInvocation: PhaseInvocation = {
       agentRole: "qa",
       roleInstructions: qaRoleInstructions,
-      context: { plan: planningResult.outputArtifact, testCommand, developerSummary: developerResult.summary },
-      permissions: { filesystem: "read-only", allowedCommands: [testCommand] },
+      context: { plan: planningResult.outputArtifact, testCommand, testResult, developerSummary: developerResult.summary },
+      permissions: { filesystem: "read-only" },
     };
 
     await recordRunEvent(runId, "phase_started", { agentRole: "qa", attempt });
