@@ -10,7 +10,7 @@ Basado en: 07-FEATURE-TEMPLATE.md (Standard Mode)
 - **Name**: Orquestador Real — Milestone 1, Incremento 1 (una fase persistida)
 - **Type**: Feature de producto (primer código real, ya no es un spike descartable)
 - **Owner**: Asdru
-- **Status**: Draft — pendiente de Go humano
+- **Status**: **Approved** (Go confirmado 2026-07-16)
 - **Priority**: Alta — primer incremento real del Orquestador, base de todo lo que sigue
 
 ---
@@ -79,7 +79,7 @@ No aplica — no hay lógica de decisión/optimización involucrada, es orquesta
 
 - **Arquitectura afectada**: primer código real de producción del proyecto — todo lo anterior era spike descartable.
 - **Integraciones**: PostgreSQL real (contenedor Docker en la VPS o local para desarrollo), Claude Code CLI headless.
-- **Dependencias**: Docker Engine (ya operativo en la VPS, sección 7 de Architecture), `ANTHROPIC_API_KEY` como variable de entorno (mecanismo ya resuelto en FEATURE-001).
+- **Dependencias**: Postgres de desarrollo corriendo en contenedor separado en la VPS (`postgres-dev-orquestador`), accedido desde el entorno de desarrollo vía túnel SSH (`localhost:5433` → `127.0.0.1:5432` en la VPS) — nunca expuesto públicamente ni compartido con un futuro Postgres de producción. `ANTHROPIC_API_KEY` como variable de entorno (mecanismo ya resuelto en FEATURE-001). El connection string de desarrollo (`DATABASE_URL_DEV`) vive en `.env.local`, nunca en el chat ni en archivos versionados del repo.
 - **Riesgos técnicos**:
   - Primera vez que el schema conceptual se traduce a migraciones reales — pueden aparecer ajustes de tipos/constraints no anticipados; documentarlos como hallazgo si ocurren, no forzar el schema original a la fuerza.
   - No está confirmado cómo se comporta el mecanismo CLI cuando un servicio Node lo invoca repetidamente como proceso hijo (en los spikes se ejecutó una vez por invocación, manual) — observar y documentar si aparece fricción (manejo de procesos, timeouts, límites de concurrencia), no asumir que escala igual que el spike puntual.
@@ -115,7 +115,11 @@ No aplica — no hay lógica de decisión/optimización involucrada, es orquesta
 
 # 10. Approval Gate
 
-**Pendiente.** Requiere Go humano explícito de Asdru (owner del proyecto) antes de iniciar la implementación.
+**Aprobado.** Go humano confirmado el 2026-07-16 por Asdru (owner del proyecto), junto con las siguientes decisiones operativas:
+- Postgres de desarrollo: contenedor separado en la VPS (`postgres-dev-orquestador`), accedido vía túnel SSH — no Docker Desktop local.
+- Punto de entrada de este incremento: comando CLI del Orquestador (no endpoint HTTP).
+
+La implementación queda habilitada para ejecutarse.
 
 ---
 

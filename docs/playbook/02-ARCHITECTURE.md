@@ -176,6 +176,7 @@ Mecanismo exacto de invocación headless para Claude Code: **Claude Code CLI** (
 * **Usuario de trabajo**: `asdru` (sudo), acceso SSH solo por clave.
 * **Docker Engine**: instalación oficial (repositorio de Docker), usuario `asdru` en grupo `docker` (sin necesidad de `sudo`).
 * **Git**: clave SSH propia de la VM, configurada como Deploy Key con acceso de escritura sobre `asdrubalperez/ai-orchestrator`.
+* **Postgres de desarrollo**: contenedor separado en la misma VPS (`postgres-dev-orquestador`, imagen `postgres:16-alpine`, puerto atado a `127.0.0.1:5432` — no expuesto públicamente). Acceso desde máquinas de desarrollo vía túnel SSH (`ssh -L 5433:localhost:5432 asdru@179.197.79.99`), nunca conexión directa. Independiente de cualquier Postgres de producción futuro — nombre, volumen y ciclo de vida propios, sin compartir datos.
 
 ## Deployment Strategy
 
