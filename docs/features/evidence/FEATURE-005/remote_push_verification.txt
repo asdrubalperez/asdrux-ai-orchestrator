@@ -1,0 +1,16 @@
+=== git ls-remote de las ramas de runs pusheadas por FEATURE-005 ===
+0e66ab60e37b4e7c54be280c31a2a0a2a0c204d3	refs/heads/run/4efe4614-8deb-46b2-a3b0-2f3aa44dcd6b
+25d6624a0547904a1e221f6afc5f7c089d288bf8	refs/heads/run/5fd08aa7-7bef-4bb9-804f-0a74be7f08c9
+
+=== contenido real commiteado en el run del camino dorado (5fd08aa7) ===
+From https://github.com/asdrubalperez/asdrux-ai-orchestrator
+ * branch            run/5fd08aa7-7bef-4bb9-804f-0a74be7f08c9 -> FETCH_HEAD
+commit 25d6624a0547904a1e221f6afc5f7c089d288bf8
+Author: ai-orchestrator-bot <ai-orchestrator-bot@localhost>
+Date:   Fri Jul 17 12:35:10 2026 -0300
+
+    feat: implementación aprobada por QA (run 5fd08aa7-7bef-4bb9-804f-0a74be7f08c9)
+
+ src/discount.mjs      | 21 +++++++++++++++++++++
+ src/discount.test.mjs | 30 ++++++++++++++++++++++++++++++
+ 2 files changed, 51 insertions(+)

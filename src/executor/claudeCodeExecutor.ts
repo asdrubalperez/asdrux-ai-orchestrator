@@ -22,6 +22,13 @@ import type {
 export interface ClaudeCodeExecutorOptions {
   /** Directorio de trabajo del run (el worktree). Todas las invocaciones de esta instancia corren ahí. */
   workingDirectory: string;
+  /**
+   * Alias de modelo (--model, ej. "haiku") a usar en esta instancia. Pensado para pruebas de
+   * spikes/Features: usar un modelo económico por default y solo justificar explícitamente uno
+   * más potente cuando una tarea puntual lo amerite (decisión del owner, 2026-07-17). No aplica
+   * necesariamente a la decisión de modelo del Executor real de producción.
+   */
+  model?: string;
 }
 
 interface RawCliResult {
@@ -64,7 +71,7 @@ function resolveClaudeBinary(): string {
 export class ClaudeCodeExecutor implements Executor {
   private readonly claudeBinary = resolveClaudeBinary();
 
-  constructor(private readonly options: ClaudeCodeExecutorOptions) {}
+  constructor(public readonly options: ClaudeCodeExecutorOptions) {}
 
   async runPhase(invocation: PhaseInvocation, options: RunPhaseOptions = {}): Promise<PhaseResult> {
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -86,9 +93,21 @@ export class ClaudeCodeExecutor implements Executor {
       "--strict-mcp-config",
     ];
 
+    if (this.options.model) {
+      args.push("--model", this.options.model);
+    }
+
     if (invocation.permissions.filesystem === "workspace-write") {
       args.push("--permission-mode", "acceptEdits");
       this.assertWritableRootsMatchCwd(invocation);
+    } else if (invocation.permissions.allowedCommands?.length) {
+      // Permisos híbridos (QA, FEATURE-005): read-only + un comando de shell puntual autorizado.
+      // Sin validar todavía si --allowedTools restringe realmente a ese patrón o solo evita el
+      // prompt de aprobación — se documenta como hallazgo en la evidencia de FEATURE-005.
+      for (const cmd of invocation.permissions.allowedCommands) {
+        args.push("--allowedTools", `Bash(${cmd})`);
+      }
+      args.push("--permission-mode", "acceptEdits");
     }
 
     const prompt = this.buildPrompt(invocation);
@@ -98,10 +117,15 @@ export class ClaudeCodeExecutor implements Executor {
   }
 
   private resolveTools(invocation: PhaseInvocation): string {
-    if (invocation.permissions.filesystem === "read-only") {
-      return "Read,Grep,Glob";
+    if (invocation.permissions.filesystem === "workspace-write") {
+      return "Read,Grep,Glob,Write,Edit,Bash";
     }
-    return "Read,Grep,Glob,Write,Edit,Bash";
+    if (invocation.permissions.allowedCommands?.length) {
+      // read-only + comando puntual habilitado (QA): Bash debe estar en el toolset para que el
+      // patrón de --allowedTools tenga algo que restringir.
+      return "Read,Grep,Glob,Bash";
+    }
+    return "Read,Grep,Glob";
   }
 
   private assertWritableRootsMatchCwd(invocation: PhaseInvocation): void {
@@ -206,9 +230,17 @@ export class ClaudeCodeExecutor implements Executor {
     const parsed = this.parseRoleConvention(raw.result);
     const model = this.dominantModel(raw.modelUsage);
 
+    // COMANDO_TEST es un campo propio del rol Planning (FEATURE-005), ajeno al contrato genérico
+    // de PhaseResult. Cuando está presente, se adjunta junto al texto de ARTEFACTO en vez de
+    // agregar un campo nuevo al contrato — los demás roles siguen recibiendo outputArtifact como
+    // string plano, sin cambios (backward-compatible con FEATURE-001/002/003/004).
+    const outputArtifact = parsed.comandoTest
+      ? { text: parsed.artefacto, comandoTest: parsed.comandoTest }
+      : parsed.artefacto;
+
     return {
       status: parsed.status,
-      outputArtifact: parsed.artefacto,
+      outputArtifact,
       summary: parsed.resumen,
       escalationReason: parsed.razonEscalamiento,
       executorMetadata: { provider: "claude-code-cli", model },
@@ -216,20 +248,28 @@ export class ClaudeCodeExecutor implements Executor {
   }
 
   /**
-   * Parsea la convención de texto ESTADO/RESUMEN/ARTEFACTO/RAZON_ESCALAMIENTO usada en
-   * roleInstructions — el mismo mecanismo validado en FEATURE-001/002 (H2: la CLI no devuelve
-   * PhaseResult estructurado nativamente; --json-schema queda pendiente de adoptar hasta
-   * verificarlo contra documentación oficial, ver 02-ARCHITECTURE.md).
+   * Parsea la convención de texto ESTADO/RESUMEN/ARTEFACTO/RAZON_ESCALAMIENTO (+ COMANDO_TEST
+   * opcional, usado solo por el rol Planning) usada en roleInstructions — el mismo mecanismo
+   * validado en FEATURE-001/002 (H2: la CLI no devuelve PhaseResult estructurado nativamente;
+   * --json-schema queda pendiente de adoptar hasta verificarlo contra documentación oficial, ver
+   * 02-ARCHITECTURE.md).
    */
   private parseRoleConvention(text: string): {
     status: PhaseStatus;
     resumen: string;
     artefacto: unknown;
     razonEscalamiento: string | null;
+    comandoTest: string | null;
   } {
+    // Defensa adicional (FEATURE-005, H12): modelos más económicos (ej. haiku) no siempre
+    // respetan "texto plano sin Markdown" al pie de la letra — envuelven las etiquetas en
+    // **negrita** o usan encabezados "#", rompiendo el parseo estricto. Se despoja Markdown
+    // antes de extraer, en vez de asumir que el modelo lo va a respetar siempre.
+    const cleaned = text.replace(/\*\*/g, "").replace(/^#+\s*/gm, "");
+
     const extract = (label: string): string | null => {
       const re = new RegExp(`${label}:\\s*([\\s\\S]*?)(?=\\n[A-Z_]+:|$)`);
-      const match = text.match(re);
+      const match = cleaned.match(re);
       return match ? match[1].trim() : null;
     };
 
@@ -237,14 +277,17 @@ export class ClaudeCodeExecutor implements Executor {
     const resumen = extract("RESUMEN") ?? "";
     const artefactoRaw = extract("ARTEFACTO");
     const razon = extract("RAZON_ESCALAMIENTO");
+    const comandoTest = extract("COMANDO_TEST");
 
-    const status: PhaseStatus = estado === "escalated" ? "escalated" : "completed";
+    const status: PhaseStatus =
+      estado === "escalated" ? "escalated" : estado === "rejected" ? "rejected" : "completed";
 
     return {
       status,
       resumen,
       artefacto: artefactoRaw && artefactoRaw !== "null" ? artefactoRaw : null,
       razonEscalamiento: razon && razon !== "null" ? razon : null,
+      comandoTest: comandoTest && comandoTest !== "null" ? comandoTest : null,
     };
   }
 

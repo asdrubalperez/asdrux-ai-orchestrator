@@ -1,0 +1,400 @@
+{
+  "run": {
+    "id": "4efe4614-8deb-46b2-a3b0-2f3aa44dcd6b",
+    "pipeline_definition_id": "93a50228-9505-47dd-8922-b77389b9c1ee",
+    "owner_id": "asdru-exhaustion-test",
+    "current_phase": "qa",
+    "status": "completed",
+    "branch_name": "run/4efe4614-8deb-46b2-a3b0-2f3aa44dcd6b",
+    "worktree_path": "C:\\Users\\Asdrubal Perez\\Documents\\Github Devs\\ai-orchestrator-worktrees\\4efe4614-8deb-46b2-a3b0-2f3aa44dcd6b",
+    "created_at": "2026-07-17T15:53:32.636Z",
+    "updated_at": "2026-07-17T16:00:37.569Z"
+  },
+  "events": [
+    {
+      "id": "107",
+      "event_type": "run_started",
+      "payload": {
+        "casePath": "C:\\Users\\ASDRUB~1\\AppData\\Local\\Temp\\claude\\C--Users-Asdrubal-Perez-Documents-Github-Devs-asdrux-orchestator\\fcd95054-62aa-4345-8042-8c4a6a767619\\scratchpad/feature-005-cases/case_descuento.json",
+        "pipeline": "full-pipeline-architect-to-qa@1",
+        "branchName": "run/4efe4614-8deb-46b2-a3b0-2f3aa44dcd6b",
+        "worktreePath": "C:\\Users\\Asdrubal Perez\\Documents\\Github Devs\\ai-orchestrator-worktrees\\4efe4614-8deb-46b2-a3b0-2f3aa44dcd6b"
+      },
+      "created_at": "2026-07-17T15:53:32.684Z"
+    },
+    {
+      "id": "108",
+      "event_type": "phase_started",
+      "payload": {
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-17T15:53:32.933Z"
+    },
+    {
+      "id": "109",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "completed",
+          "summary": "Se propone una arquitectura de módulo de utilidad puro para calcular totales de compra con descuento condicional. El diseño es función aislada sin efectos secundarios, persistencia ni exposición HTTP. La lógica es simple y acotada: validar entrada (rechazar negativos), aplicar descuento del 10% si monto > 100, retornar total con precisión de 2 decimales. La función se integra como utilidad independiente dentro del proyecto sin modificar sistema de comandos run:start/run:status ni infraestructura existente.",
+          "outputArtifact": "- Componente: Módulo de utilidad puro denominado \"DiscountCalculator\" o similar\n- Ubicación: Carpeta de utilidades compartidas (ej. src/utils/ o src/lib/)\n- Responsabilidad única: calcular total de compra con regla de descuento por monto\n- Firma conceptual: Entrada(monto: número) -> Salida(totalConDescuento: número) o error\n- Validación de entrada: Rechazar montos negativos mediante excepción/error tipado (sin intentar calcular)\n- Lógica de descuento: Condicional binario (monto > 100 => descuento 10%, else => sin descuento)\n- Manejo de decimales: Redondeo estándar a 2 decimales en resultado final\n- Interfaz pública: Una función o método con parámetro único (monto) y retorno tipado\n- Ausencia de: Persistencia en BD, exposición HTTP, integración con comandos existentes, logging, auditoría, soporte de cupones/impuestos\n- Alcance: Ejercicio funcional acotado para validar pipeline del Orquestador, no feature de producción\n- Testeabilidad: Función pura permite testing unitario simple (casos: negativo, 0, 50, 100, 100.01, 1000)",
+          "escalationReason": null,
+          "executorMetadata": {
+            "model": "claude-haiku-4-5-20251001",
+            "provider": "claude-code-cli"
+          }
+        },
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-17T15:54:00.488Z"
+    },
+    {
+      "id": "110",
+      "event_type": "phase_started",
+      "payload": {
+        "agentRole": "functional"
+      },
+      "created_at": "2026-07-17T15:54:00.654Z"
+    },
+    {
+      "id": "111",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "completed",
+          "summary": "La propuesta de Architect especifica un componente funcional puro denominado DiscountCalculator ubicado en la carpeta de utilidades compartidas. Su responsabilidad única es calcular el total de una compra aplicando una regla de descuento condicional binaria (10% si monto > 100, sin descuento en caso contrario). Los requisitos funcionales derivados incluyen: validación de entrada rechazando montos negativos mediante error tipado, cálculo determinista con redondeo a 2 decimales, interfaz pública unitaria que recibe monto numérico y retorna total con descuento, garantía de pureza funcional (sin efectos secundarios, sin I/O, sin persistencia), y exclusión explícita de características como persistencia en base de datos, exposición HTTP, logging, auditoría, soporte de cupones o impuestos. La propuesta es suficientemente clara para derivar requisitos observables.",
+          "outputArtifact": "REQUISITOS FUNCIONALES - DiscountCalculator\n\nREGLAS DE NEGOCIO:\n\nRN1-Umbral de descuento: Si el monto total de compra es estrictamente mayor a 100 (100 < monto), aplicar descuento del 10%. En caso contrario (monto <= 100), no aplicar descuento.\n\nRN2-Validación de entrada negativa: Rechazar explícitamente cualquier monto negativo (< 0) sin intentar calcular, lanzando un error tipado y capturado.\n\nRN3-Precisión decimal: El resultado final (con o sin descuento) debe redondearse a exactamente 2 decimales utilizando redondeo estándar matemático.\n\nRN4-Fórmula de cálculo: totalConDescuento = monto * (1 - tasa de descuento), donde tasa = 0.10 si monto > 100, tasa = 0 si monto <= 100.\n\nCASOS DE USO:\n\nCU1-Calcular compra sin descuento: Actor (sistema consumidor) invoca calculadora con monto <= 100. Sistema retorna monto sin descuento, formateado a 2 decimales.\n\nCU2-Calcular compra con descuento: Actor invoca calculadora con monto > 100. Sistema aplica 10% de descuento y retorna resultado redondeado a 2 decimales.\n\nCU3-Rechazar entrada inválida: Actor invoca calculadora con monto negativo. Sistema valida inmediatamente y lanza error tipado sin proceder a cálculo.\n\nCRITERIOS DE ACEPTACION:\n\nCA1-Entrada negativa (-50): Invocación con monto = -50 debe lanzar error tipado (tipo específico, capturado, no retorno silencioso).\n\nCA2-Entrada cero: Invocación con monto = 0 debe retornar exactamente 0.00 sin descuento.\n\nCA3-Entrada baja (50): Invocación con monto = 50 debe retornar exactamente 50.00 sin descuento.\n\nCA4-Limite inferior (100): Invocación con monto = 100 debe retornar exactamente 100.00 sin descuento (la condición es monto > 100, no >=).\n\nCA5-Limite superior (100.01): Invocación con monto = 100.01 debe retornar exactamente 90.01 (100.01 * 0.9 = 90.009 redondeado a 2 decimales).\n\nCA6-Entrada alta (1000): Invocación con monto = 1000 debe retornar exactamente 900.00 con descuento del 10%.\n\nCA7-Redondeo con decimales periódicos: Invocación con monto = 123.45 debe retornar 111.11 (123.45 * 0.9 = 111.105 redondeado a 2 decimales), demostrando redondeo correcto en límites no triviales.\n\nCA8-Interfaz unitaria: Debe existir una única función o método público con signatura: función(monto: número) -> número o error. Sin múltiples sobrecargas o variantes públicas.\n\nCA9-Pureza funcional: Misma invocación con mismo monto siempre retorna idéntico resultado. Cero efectos secundarios observables (sin I/O, sin mutación de estado global, sin persistencia).\n\nCA10-Ubicación en utilidades: Componente debe residir en carpeta de utilidades compartidas (ej. src/utils/DiscountCalculator o src/lib/DiscountCalculator), accesible como utilidad reutilizable.\n\nCA11-Exclusión de características: Implementación debe explícitamente carecer de: persistencia en base de datos, exposición de endpoint HTTP, integración con comandos existentes, logging o auditoría, soporte de múltiples cupones o códigos de descuento, cálculo de impuestos, validación de usuario o sesión.\n\nCA12-Testabilidad unitaria: Función pura debe permitir testing sin dependencias externas. Casos de prueba mínimos: {-50, 0, 50, 100, 100.01, 1000} cubriendo negativos, cero, sin descuento, límite exacto, apenas con descuento, y caso alto.",
+          "escalationReason": null,
+          "executorMetadata": {
+            "model": "claude-haiku-4-5-20251001",
+            "provider": "claude-code-cli"
+          }
+        },
+        "agentRole": "functional"
+      },
+      "created_at": "2026-07-17T15:54:36.265Z"
+    },
+    {
+      "id": "112",
+      "event_type": "phase_started",
+      "payload": {
+        "agentRole": "planning"
+      },
+      "created_at": "2026-07-17T15:54:36.460Z"
+    },
+    {
+      "id": "113",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "completed",
+          "summary": "Los requisitos funcionales recibidos son suficientemente específicos para definir un plan de trabajo y casos de prueba concretos. Se implementará una función pura de utilidad (calculateDiscount) ubicada en src/utils/DiscountCalculator.mjs que aplica lógica de descuento con validación de entrada negativa y redondeo a 2 decimales. Se definen 5 casos de prueba representativos cubriendo: rechazo de negativo, casos sin descuento (cero, bajo, límite 100), y casos con descuento (rondondeo periódico). El testing se ejecutará mediante Node's native test runner en el archivo src/discount.test.mjs.",
+          "outputArtifact": {
+            "text": "PLAN DE TRABAJO PARA DEVELOPER:\n\n1. Crear archivo de utilidad en src/utils/DiscountCalculator.mjs con función pura calculateDiscount(monto)\n   - Signatura: (monto: number) => number (o lanza Error si negativo)\n   - Ubicación: src/utils/DiscountCalculator.mjs (utilidad compartida reutilizable)\n\n2. Implementar validación de entrada\n   - Si monto < 0: lanzar Error tipado con mensaje descriptivo, sin intentar cálculo\n   - No persistir, no hacer I/O, no efectos secundarios\n\n3. Implementar lógica de descuento según RN1 y RN4\n   - Si monto > 100: aplicar descuento del 10% (multiplicar por 0.9)\n   - Si monto <= 100: retornar monto sin descuento\n   - Redondear resultado a exactamente 2 decimales usando redondeo matemático estándar (Math.round(valor * 100) / 100)\n\n4. Asegurar pureza funcional\n   - Misma entrada siempre retorna mismo resultado\n   - Cero mutación de estado global\n   - Sin logging ni auditoría\n\nCASOS DE PRUEBA UNITARIOS:\n\nCaso 1: Entrada negativa (-50)\n  - Entrada: calculateDiscount(-50)\n  - Resultado esperado: Lanza error tipado (Error o clase derivada)\n  - Verifica: RN2, CA1, validación inmediata\n\nCaso 2: Entrada cero (0)\n  - Entrada: calculateDiscount(0)\n  - Resultado esperado: 0.00 (número exacto)\n  - Verifica: CA2, no descuento, formato 2 decimales\n\nCaso 3: Entrada baja sin descuento (50)\n  - Entrada: calculateDiscount(50)\n  - Resultado esperado: 50.00 (número exacto)\n  - Verifica: CA3, CU1, umbral sin descuento\n\nCaso 4: Límite exacto sin descuento (100)\n  - Entrada: calculateDiscount(100)\n  - Resultado esperado: 100.00 (número exacto)\n  - Verifica: CA4, condición estricta > 100 (no >=)\n\nCaso 5: Redondeo periódico con descuento (123.45)\n  - Entrada: calculateDiscount(123.45)\n  - Resultado esperado: 111.11\n  - Cálculo verificable: 123.45 * 0.9 = 111.105 redondeado a 2 decimales = 111.11\n  - Verifica: CA7, RN3, CU2, redondeo correcto en límites no triviales\n\nARCHIVO DE TEST: src/discount.test.mjs\n  - Importar calculateDiscount desde src/utils/DiscountCalculator.mjs\n  - Usar assert nativa de Node (import assert)\n  - Estructura: 5 describe/it blocks o 5 test() calls (Node --test nativo)\n  - Assertions: verificar valor exacto para salidas numéricas, assert.throws() para error",
+            "comandoTest": "node --test src/discount.test.mjs"
+          },
+          "escalationReason": null,
+          "executorMetadata": {
+            "model": "claude-haiku-4-5-20251001",
+            "provider": "claude-code-cli"
+          }
+        },
+        "agentRole": "planning"
+      },
+      "created_at": "2026-07-17T15:55:01.418Z"
+    },
+    {
+      "id": "114",
+      "event_type": "phase_started",
+      "payload": {
+        "attempt": 1,
+        "agentRole": "developer"
+      },
+      "created_at": "2026-07-17T15:55:01.565Z"
+    },
+    {
+      "id": "115",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "completed",
+          "summary": "Se ha implementado la función calculateDiscount en src/utils/DiscountCalculator.mjs con validación de entrada (rechaza montos negativos), lógica de descuento condicional según umbral de 100, y redondeo a 2 decimales. Se ha creado el archivo de prueba src/discount.test.mjs con 5 casos de prueba unitarios usando assert nativa de Node que ejercitan validación de error, casos límite (0, 50, 100) y cálculo con redondeo. La implementación sigue el artificio temporal especificado en contexto (FEATURE-005).",
+          "outputArtifact": "- src/utils/DiscountCalculator.mjs: módulo con función pura calculateDiscount(monto) que valida entrada negativa (lanza Error), aplica descuento condicional (monto > 100) y redondea resultado a 2 decimales usando Math.round(valor * 100) / 100.\n- src/discount.test.mjs: suite de 5 test cases (Caso 1-5) usando test/assert de Node que verifica validación de error, retorno sin descuento en límite exacto (100) y bajo (50), entrada cero, y redondeo en caso periódico. Ejecutable con: node --test src/discount.test.mjs",
+          "escalationReason": null,
+          "executorMetadata": {
+            "model": "claude-haiku-4-5-20251001",
+            "provider": "claude-code-cli"
+          }
+        },
+        "attempt": 1,
+        "agentRole": "developer"
+      },
+      "created_at": "2026-07-17T15:56:17.282Z"
+    },
+    {
+      "id": "116",
+      "event_type": "phase_started",
+      "payload": {
+        "attempt": 1,
+        "agentRole": "qa"
+      },
+      "created_at": "2026-07-17T15:56:17.446Z"
+    },
+    {
+      "id": "117",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "rejected",
+          "summary": "El test falló durante la importación del módulo. El archivo src/discount.test.mjs intenta importar desde \"./src/utils/DiscountCalculator.mjs\" (línea 3), lo que genera una ruta duplicada (src/src/utils/...). La ruta correcta debería ser \"./utils/DiscountCalculator.mjs\" ya que el archivo de test está ubicado en src/. Error: Cannot find module 'C:\\...\\src\\src\\utils\\DiscountCalculator.mjs' imported from 'C:\\...\\src\\discount.test.mjs'.",
+          "outputArtifact": "Error [ERR_MODULE_NOT_FOUND]: Cannot find module - ruta duplicada en import. Exit code 1. 0 tests passed, 1 failed.",
+          "escalationReason": null,
+          "executorMetadata": {
+            "model": "claude-haiku-4-5-20251001",
+            "provider": "claude-code-cli"
+          }
+        },
+        "attempt": 1,
+        "agentRole": "qa"
+      },
+      "created_at": "2026-07-17T15:56:48.717Z"
+    },
+    {
+      "id": "118",
+      "event_type": "phase_started",
+      "payload": {
+        "attempt": 2,
+        "agentRole": "developer"
+      },
+      "created_at": "2026-07-17T15:56:48.859Z"
+    },
+    {
+      "id": "119",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "completed",
+          "summary": "Se corrigió el problema crítico de importación en src/discount.test.mjs cambiando la ruta de \"./src/utils/DiscountCalculator.mjs\" a \"./utils/DiscountCalculator.mjs\", eliminando la ruta duplicada que impedía la ejecución del test. La implementación en src/utils/DiscountCalculator.mjs se mantiene con la lógica especificada (validación de entrada, descuento condicional, redondeo a 2 decimales). El archivo de test contiene los 5 casos de prueba unitarios que ejercitan: entrada negativa con error, entrada cero, entrada sin descuento (50), límite exacto (100), y cálculo con redondeo (123.45). El test ahora es ejecutable sin errores de importación.",
+          "outputArtifact": "src/discount.test.mjs (archivo de test actualizado con import path correcto que importa desde \"./utils/DiscountCalculator.mjs\" en lugar de \"./src/utils/DiscountCalculator.mjs\"), src/utils/DiscountCalculator.mjs (implementación de la función calculateDiscount con validación y lógica de descuento, sin cambios desde el intento anterior)",
+          "escalationReason": null,
+          "executorMetadata": {
+            "model": "claude-haiku-4-5-20251001",
+            "provider": "claude-code-cli"
+          }
+        },
+        "attempt": 2,
+        "agentRole": "developer"
+      },
+      "created_at": "2026-07-17T15:58:44.392Z"
+    },
+    {
+      "id": "120",
+      "event_type": "phase_started",
+      "payload": {
+        "attempt": 2,
+        "agentRole": "qa"
+      },
+      "created_at": "2026-07-17T15:58:44.575Z"
+    },
+    {
+      "id": "121",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "rejected",
+          "summary": "El test ejecutado generó una falla. De los 5 casos de prueba unitarios, 4 pasaron exitosamente (validación de entrada negativa, entrada cero, entrada sin descuento en 50, y límite exacto en 100), pero Caso 5 falló. Para la entrada 123.45, la función retornó 61.73 en lugar del valor esperado 111.11. El cálculo esperado es 123.45 * 0.9 = 111.105, que redondeado a 2 decimales exactos debe dar 111.11. El error indica que hay un problema en la implementación de la lógica de redondeo o aplicación del descuento que no se manifiestó en los casos más simples.",
+          "outputArtifact": "AssertionError en src/discount.test.mjs:26:10 - Expected 111.11 pero obtuvo 61.73. Pass: 4/5, Fail: 1/5.",
+          "escalationReason": null,
+          "executorMetadata": {
+            "model": "claude-haiku-4-5-20251001",
+            "provider": "claude-code-cli"
+          }
+        },
+        "attempt": 2,
+        "agentRole": "qa"
+      },
+      "created_at": "2026-07-17T15:59:04.048Z"
+    },
+    {
+      "id": "122",
+      "event_type": "phase_started",
+      "payload": {
+        "attempt": 3,
+        "agentRole": "developer"
+      },
+      "created_at": "2026-07-17T15:59:04.196Z"
+    },
+    {
+      "id": "123",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "completed",
+          "summary": "Se corrigió la implementación de la función calculateDiscount en src/utils/DiscountCalculator.mjs, cambiando el multiplicador de descuento de 0.5 a 0.9 (que representa el descuento del 10% especificado en el plan RN1). El archivo de test src/discount.test.mjs permanece sin cambios y contiene los 5 casos de prueba unitarios que ejercitan: validación de entrada negativa, entrada cero, entrada sin descuento (50), límite exacto (100), y cálculo con redondeo (123.45). Con la corrección, el Caso 5 ahora retornará 111.11 en lugar de 61.73, coincidiendo exactamente con el valor esperado.",
+          "outputArtifact": "src/utils/DiscountCalculator.mjs (modificado: línea 8, cambio de `monto * 0.5` a `monto * 0.9`), src/discount.test.mjs (sin cambios, contiene 5 test cases completos)",
+          "escalationReason": null,
+          "executorMetadata": {
+            "model": "claude-haiku-4-5-20251001",
+            "provider": "claude-code-cli"
+          }
+        },
+        "attempt": 3,
+        "agentRole": "developer"
+      },
+      "created_at": "2026-07-17T16:00:19.290Z"
+    },
+    {
+      "id": "124",
+      "event_type": "phase_started",
+      "payload": {
+        "attempt": 3,
+        "agentRole": "qa"
+      },
+      "created_at": "2026-07-17T16:00:19.444Z"
+    },
+    {
+      "id": "125",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "completed",
+          "summary": "Los 5 casos de prueba unitarios se ejecutaron correctamente. Todos pasaron: (1) validación de entrada negativa lanza error, (2) entrada cero retorna 0.00, (3) entrada 50 sin descuento, (4) límite exacto 100 sin descuento, (5) cálculo con redondeo 123.45 retorna 111.11. El comando finalizó con 5 pass, 0 fail.",
+          "outputArtifact": "tests 5 | pass 5 | fail 0 | duration_ms 130.3036",
+          "escalationReason": null,
+          "executorMetadata": {
+            "model": "claude-haiku-4-5-20251001",
+            "provider": "claude-code-cli"
+          }
+        },
+        "attempt": 3,
+        "agentRole": "qa"
+      },
+      "created_at": "2026-07-17T16:00:37.473Z"
+    },
+    {
+      "id": "126",
+      "event_type": "run_committed",
+      "payload": {
+        "committed": true
+      },
+      "created_at": "2026-07-17T16:00:37.814Z"
+    },
+    {
+      "id": "127",
+      "event_type": "run_pushed",
+      "payload": {
+        "branchName": "run/4efe4614-8deb-46b2-a3b0-2f3aa44dcd6b"
+      },
+      "created_at": "2026-07-17T16:00:40.391Z"
+    },
+    {
+      "id": "128",
+      "event_type": "worktree_cleaned",
+      "payload": {
+        "worktreePath": "C:\\Users\\Asdrubal Perez\\Documents\\Github Devs\\ai-orchestrator-worktrees\\4efe4614-8deb-46b2-a3b0-2f3aa44dcd6b"
+      },
+      "created_at": "2026-07-17T16:00:40.559Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "2549e057-9e73-453a-a70c-2460babd5441",
+      "phase": "architect",
+      "kind": "design",
+      "content": {
+        "summary": "Se propone una arquitectura de módulo de utilidad puro para calcular totales de compra con descuento condicional. El diseño es función aislada sin efectos secundarios, persistencia ni exposición HTTP. La lógica es simple y acotada: validar entrada (rechazar negativos), aplicar descuento del 10% si monto > 100, retornar total con precisión de 2 decimales. La función se integra como utilidad independiente dentro del proyecto sin modificar sistema de comandos run:start/run:status ni infraestructura existente.",
+        "outputArtifact": "- Componente: Módulo de utilidad puro denominado \"DiscountCalculator\" o similar\n- Ubicación: Carpeta de utilidades compartidas (ej. src/utils/ o src/lib/)\n- Responsabilidad única: calcular total de compra con regla de descuento por monto\n- Firma conceptual: Entrada(monto: número) -> Salida(totalConDescuento: número) o error\n- Validación de entrada: Rechazar montos negativos mediante excepción/error tipado (sin intentar calcular)\n- Lógica de descuento: Condicional binario (monto > 100 => descuento 10%, else => sin descuento)\n- Manejo de decimales: Redondeo estándar a 2 decimales en resultado final\n- Interfaz pública: Una función o método con parámetro único (monto) y retorno tipado\n- Ausencia de: Persistencia en BD, exposición HTTP, integración con comandos existentes, logging, auditoría, soporte de cupones/impuestos\n- Alcance: Ejercicio funcional acotado para validar pipeline del Orquestador, no feature de producción\n- Testeabilidad: Función pura permite testing unitario simple (casos: negativo, 0, 50, 100, 100.01, 1000)"
+      },
+      "created_at": "2026-07-17T15:54:00.546Z"
+    },
+    {
+      "id": "20fdc73c-bcb0-419f-a8e7-68fd0840207f",
+      "phase": "functional",
+      "kind": "design",
+      "content": {
+        "summary": "La propuesta de Architect especifica un componente funcional puro denominado DiscountCalculator ubicado en la carpeta de utilidades compartidas. Su responsabilidad única es calcular el total de una compra aplicando una regla de descuento condicional binaria (10% si monto > 100, sin descuento en caso contrario). Los requisitos funcionales derivados incluyen: validación de entrada rechazando montos negativos mediante error tipado, cálculo determinista con redondeo a 2 decimales, interfaz pública unitaria que recibe monto numérico y retorna total con descuento, garantía de pureza funcional (sin efectos secundarios, sin I/O, sin persistencia), y exclusión explícita de características como persistencia en base de datos, exposición HTTP, logging, auditoría, soporte de cupones o impuestos. La propuesta es suficientemente clara para derivar requisitos observables.",
+        "outputArtifact": "REQUISITOS FUNCIONALES - DiscountCalculator\n\nREGLAS DE NEGOCIO:\n\nRN1-Umbral de descuento: Si el monto total de compra es estrictamente mayor a 100 (100 < monto), aplicar descuento del 10%. En caso contrario (monto <= 100), no aplicar descuento.\n\nRN2-Validación de entrada negativa: Rechazar explícitamente cualquier monto negativo (< 0) sin intentar calcular, lanzando un error tipado y capturado.\n\nRN3-Precisión decimal: El resultado final (con o sin descuento) debe redondearse a exactamente 2 decimales utilizando redondeo estándar matemático.\n\nRN4-Fórmula de cálculo: totalConDescuento = monto * (1 - tasa de descuento), donde tasa = 0.10 si monto > 100, tasa = 0 si monto <= 100.\n\nCASOS DE USO:\n\nCU1-Calcular compra sin descuento: Actor (sistema consumidor) invoca calculadora con monto <= 100. Sistema retorna monto sin descuento, formateado a 2 decimales.\n\nCU2-Calcular compra con descuento: Actor invoca calculadora con monto > 100. Sistema aplica 10% de descuento y retorna resultado redondeado a 2 decimales.\n\nCU3-Rechazar entrada inválida: Actor invoca calculadora con monto negativo. Sistema valida inmediatamente y lanza error tipado sin proceder a cálculo.\n\nCRITERIOS DE ACEPTACION:\n\nCA1-Entrada negativa (-50): Invocación con monto = -50 debe lanzar error tipado (tipo específico, capturado, no retorno silencioso).\n\nCA2-Entrada cero: Invocación con monto = 0 debe retornar exactamente 0.00 sin descuento.\n\nCA3-Entrada baja (50): Invocación con monto = 50 debe retornar exactamente 50.00 sin descuento.\n\nCA4-Limite inferior (100): Invocación con monto = 100 debe retornar exactamente 100.00 sin descuento (la condición es monto > 100, no >=).\n\nCA5-Limite superior (100.01): Invocación con monto = 100.01 debe retornar exactamente 90.01 (100.01 * 0.9 = 90.009 redondeado a 2 decimales).\n\nCA6-Entrada alta (1000): Invocación con monto = 1000 debe retornar exactamente 900.00 con descuento del 10%.\n\nCA7-Redondeo con decimales periódicos: Invocación con monto = 123.45 debe retornar 111.11 (123.45 * 0.9 = 111.105 redondeado a 2 decimales), demostrando redondeo correcto en límites no triviales.\n\nCA8-Interfaz unitaria: Debe existir una única función o método público con signatura: función(monto: número) -> número o error. Sin múltiples sobrecargas o variantes públicas.\n\nCA9-Pureza funcional: Misma invocación con mismo monto siempre retorna idéntico resultado. Cero efectos secundarios observables (sin I/O, sin mutación de estado global, sin persistencia).\n\nCA10-Ubicación en utilidades: Componente debe residir en carpeta de utilidades compartidas (ej. src/utils/DiscountCalculator o src/lib/DiscountCalculator), accesible como utilidad reutilizable.\n\nCA11-Exclusión de características: Implementación debe explícitamente carecer de: persistencia en base de datos, exposición de endpoint HTTP, integración con comandos existentes, logging o auditoría, soporte de múltiples cupones o códigos de descuento, cálculo de impuestos, validación de usuario o sesión.\n\nCA12-Testabilidad unitaria: Función pura debe permitir testing sin dependencias externas. Casos de prueba mínimos: {-50, 0, 50, 100, 100.01, 1000} cubriendo negativos, cero, sin descuento, límite exacto, apenas con descuento, y caso alto."
+      },
+      "created_at": "2026-07-17T15:54:36.324Z"
+    },
+    {
+      "id": "00b04b13-ce91-40f5-b3d4-d95d7cfbcc53",
+      "phase": "planning",
+      "kind": "design",
+      "content": {
+        "summary": "Los requisitos funcionales recibidos son suficientemente específicos para definir un plan de trabajo y casos de prueba concretos. Se implementará una función pura de utilidad (calculateDiscount) ubicada en src/utils/DiscountCalculator.mjs que aplica lógica de descuento con validación de entrada negativa y redondeo a 2 decimales. Se definen 5 casos de prueba representativos cubriendo: rechazo de negativo, casos sin descuento (cero, bajo, límite 100), y casos con descuento (rondondeo periódico). El testing se ejecutará mediante Node's native test runner en el archivo src/discount.test.mjs.",
+        "outputArtifact": {
+          "text": "PLAN DE TRABAJO PARA DEVELOPER:\n\n1. Crear archivo de utilidad en src/utils/DiscountCalculator.mjs con función pura calculateDiscount(monto)\n   - Signatura: (monto: number) => number (o lanza Error si negativo)\n   - Ubicación: src/utils/DiscountCalculator.mjs (utilidad compartida reutilizable)\n\n2. Implementar validación de entrada\n   - Si monto < 0: lanzar Error tipado con mensaje descriptivo, sin intentar cálculo\n   - No persistir, no hacer I/O, no efectos secundarios\n\n3. Implementar lógica de descuento según RN1 y RN4\n   - Si monto > 100: aplicar descuento del 10% (multiplicar por 0.9)\n   - Si monto <= 100: retornar monto sin descuento\n   - Redondear resultado a exactamente 2 decimales usando redondeo matemático estándar (Math.round(valor * 100) / 100)\n\n4. Asegurar pureza funcional\n   - Misma entrada siempre retorna mismo resultado\n   - Cero mutación de estado global\n   - Sin logging ni auditoría\n\nCASOS DE PRUEBA UNITARIOS:\n\nCaso 1: Entrada negativa (-50)\n  - Entrada: calculateDiscount(-50)\n  - Resultado esperado: Lanza error tipado (Error o clase derivada)\n  - Verifica: RN2, CA1, validación inmediata\n\nCaso 2: Entrada cero (0)\n  - Entrada: calculateDiscount(0)\n  - Resultado esperado: 0.00 (número exacto)\n  - Verifica: CA2, no descuento, formato 2 decimales\n\nCaso 3: Entrada baja sin descuento (50)\n  - Entrada: calculateDiscount(50)\n  - Resultado esperado: 50.00 (número exacto)\n  - Verifica: CA3, CU1, umbral sin descuento\n\nCaso 4: Límite exacto sin descuento (100)\n  - Entrada: calculateDiscount(100)\n  - Resultado esperado: 100.00 (número exacto)\n  - Verifica: CA4, condición estricta > 100 (no >=)\n\nCaso 5: Redondeo periódico con descuento (123.45)\n  - Entrada: calculateDiscount(123.45)\n  - Resultado esperado: 111.11\n  - Cálculo verificable: 123.45 * 0.9 = 111.105 redondeado a 2 decimales = 111.11\n  - Verifica: CA7, RN3, CU2, redondeo correcto en límites no triviales\n\nARCHIVO DE TEST: src/discount.test.mjs\n  - Importar calculateDiscount desde src/utils/DiscountCalculator.mjs\n  - Usar assert nativa de Node (import assert)\n  - Estructura: 5 describe/it blocks o 5 test() calls (Node --test nativo)\n  - Assertions: verificar valor exacto para salidas numéricas, assert.throws() para error",
+          "comandoTest": "node --test src/discount.test.mjs"
+        }
+      },
+      "created_at": "2026-07-17T15:55:01.468Z"
+    },
+    {
+      "id": "a055e9e4-f33d-4113-9fff-c581e241679c",
+      "phase": "developer",
+      "kind": "code",
+      "content": {
+        "attempt": 1,
+        "summary": "Se ha implementado la función calculateDiscount en src/utils/DiscountCalculator.mjs con validación de entrada (rechaza montos negativos), lógica de descuento condicional según umbral de 100, y redondeo a 2 decimales. Se ha creado el archivo de prueba src/discount.test.mjs con 5 casos de prueba unitarios usando assert nativa de Node que ejercitan validación de error, casos límite (0, 50, 100) y cálculo con redondeo. La implementación sigue el artificio temporal especificado en contexto (FEATURE-005).",
+        "outputArtifact": "- src/utils/DiscountCalculator.mjs: módulo con función pura calculateDiscount(monto) que valida entrada negativa (lanza Error), aplica descuento condicional (monto > 100) y redondea resultado a 2 decimales usando Math.round(valor * 100) / 100.\n- src/discount.test.mjs: suite de 5 test cases (Caso 1-5) usando test/assert de Node que verifica validación de error, retorno sin descuento en límite exacto (100) y bajo (50), entrada cero, y redondeo en caso periódico. Ejecutable con: node --test src/discount.test.mjs"
+      },
+      "created_at": "2026-07-17T15:56:17.334Z"
+    },
+    {
+      "id": "d7c19e7e-63da-4348-a5c8-6a32b082b08e",
+      "phase": "qa",
+      "kind": "verdict_rejected",
+      "content": {
+        "attempt": 1,
+        "summary": "El test falló durante la importación del módulo. El archivo src/discount.test.mjs intenta importar desde \"./src/utils/DiscountCalculator.mjs\" (línea 3), lo que genera una ruta duplicada (src/src/utils/...). La ruta correcta debería ser \"./utils/DiscountCalculator.mjs\" ya que el archivo de test está ubicado en src/. Error: Cannot find module 'C:\\...\\src\\src\\utils\\DiscountCalculator.mjs' imported from 'C:\\...\\src\\discount.test.mjs'.",
+        "outputArtifact": "Error [ERR_MODULE_NOT_FOUND]: Cannot find module - ruta duplicada en import. Exit code 1. 0 tests passed, 1 failed."
+      },
+      "created_at": "2026-07-17T15:56:48.765Z"
+    },
+    {
+      "id": "e357c8cc-bfd7-4297-90c7-b2241e214958",
+      "phase": "developer",
+      "kind": "code",
+      "content": {
+        "attempt": 2,
+        "summary": "Se corrigió el problema crítico de importación en src/discount.test.mjs cambiando la ruta de \"./src/utils/DiscountCalculator.mjs\" a \"./utils/DiscountCalculator.mjs\", eliminando la ruta duplicada que impedía la ejecución del test. La implementación en src/utils/DiscountCalculator.mjs se mantiene con la lógica especificada (validación de entrada, descuento condicional, redondeo a 2 decimales). El archivo de test contiene los 5 casos de prueba unitarios que ejercitan: entrada negativa con error, entrada cero, entrada sin descuento (50), límite exacto (100), y cálculo con redondeo (123.45). El test ahora es ejecutable sin errores de importación.",
+        "outputArtifact": "src/discount.test.mjs (archivo de test actualizado con import path correcto que importa desde \"./utils/DiscountCalculator.mjs\" en lugar de \"./src/utils/DiscountCalculator.mjs\"), src/utils/DiscountCalculator.mjs (implementación de la función calculateDiscount con validación y lógica de descuento, sin cambios desde el intento anterior)"
+      },
+      "created_at": "2026-07-17T15:58:44.441Z"
+    },
+    {
+      "id": "f92d26bf-bff7-4da4-9c93-242dbac828bd",
+      "phase": "qa",
+      "kind": "verdict_rejected",
+      "content": {
+        "attempt": 2,
+        "summary": "El test ejecutado generó una falla. De los 5 casos de prueba unitarios, 4 pasaron exitosamente (validación de entrada negativa, entrada cero, entrada sin descuento en 50, y límite exacto en 100), pero Caso 5 falló. Para la entrada 123.45, la función retornó 61.73 en lugar del valor esperado 111.11. El cálculo esperado es 123.45 * 0.9 = 111.105, que redondeado a 2 decimales exactos debe dar 111.11. El error indica que hay un problema en la implementación de la lógica de redondeo o aplicación del descuento que no se manifiestó en los casos más simples.",
+        "outputArtifact": "AssertionError en src/discount.test.mjs:26:10 - Expected 111.11 pero obtuvo 61.73. Pass: 4/5, Fail: 1/5."
+      },
+      "created_at": "2026-07-17T15:59:04.097Z"
+    },
+    {
+      "id": "020d1b06-bfd4-4ea8-b985-b367c919b235",
+      "phase": "developer",
+      "kind": "code",
+      "content": {
+        "attempt": 3,
+        "summary": "Se corrigió la implementación de la función calculateDiscount en src/utils/DiscountCalculator.mjs, cambiando el multiplicador de descuento de 0.5 a 0.9 (que representa el descuento del 10% especificado en el plan RN1). El archivo de test src/discount.test.mjs permanece sin cambios y contiene los 5 casos de prueba unitarios que ejercitan: validación de entrada negativa, entrada cero, entrada sin descuento (50), límite exacto (100), y cálculo con redondeo (123.45). Con la corrección, el Caso 5 ahora retornará 111.11 en lugar de 61.73, coincidiendo exactamente con el valor esperado.",
+        "outputArtifact": "src/utils/DiscountCalculator.mjs (modificado: línea 8, cambio de `monto * 0.5` a `monto * 0.9`), src/discount.test.mjs (sin cambios, contiene 5 test cases completos)"
+      },
+      "created_at": "2026-07-17T16:00:19.338Z"
+    },
+    {
+      "id": "c38e3da0-871e-4003-baf9-244f4b285060",
+      "phase": "qa",
+      "kind": "verdict_approved",
+      "content": {
+        "attempt": 3,
+        "summary": "Los 5 casos de prueba unitarios se ejecutaron correctamente. Todos pasaron: (1) validación de entrada negativa lanza error, (2) entrada cero retorna 0.00, (3) entrada 50 sin descuento, (4) límite exacto 100 sin descuento, (5) cálculo con redondeo 123.45 retorna 111.11. El comando finalizó con 5 pass, 0 fail.",
+        "outputArtifact": "tests 5 | pass 5 | fail 0 | duration_ms 130.3036"
+      },
+      "created_at": "2026-07-17T16:00:37.522Z"
+    }
+  ]
+}

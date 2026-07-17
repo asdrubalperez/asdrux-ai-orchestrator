@@ -1,0 +1,17 @@
+[run:start] COMANDO_TEST declarado por Planning: node --test src/fake.test.mjs
+[run:start] QA rechazó el intento 1: QA rechaza siempre (intento simulado #1) -- test determinístico de agotamiento
+[run:start] QA rechazó el intento 2: QA rechaza siempre (intento simulado #2) -- test determinístico de agotamiento
+[run:start] QA rechazó el intento 3: QA rechaza siempre (intento simulado #3) -- test determinístico de agotamiento
+[run:start] Límite de 3 intentos alcanzado — run escalado, sin cuarto intento.
+=== RESULTADO ===
+developerCalls: 3 (esperado: 3, nunca un 4to intento)
+qaCalls: 3 (esperado: 3)
+finalResult.status: escalated (esperado: escalated)
+finalResult.escalationReason: Límite de reintentos (3) alcanzado — último rechazo de QA: QA rechaza siempre (intento simulado #3) -- test determinístico de agotamiento
+--- eventos persistidos ---
+phase_started:developer#1, phase_finished:developer#1, phase_started:qa#1, phase_finished:qa#1, phase_started:developer#2, phase_finished:developer#2, phase_started:qa#2, phase_finished:qa#2, phase_started:developer#3, phase_finished:developer#3, phase_started:qa#3, phase_finished:qa#3, loop_exhausted:
+OK: developerCalls === 3
+OK: qaCalls === 3
+OK: finalResult.status === 'escalated'
+OK: no hay un 4to phase_started:developer
+OK: hay evento loop_exhausted

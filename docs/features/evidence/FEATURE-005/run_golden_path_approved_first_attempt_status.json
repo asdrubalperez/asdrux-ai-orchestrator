@@ -1,0 +1,244 @@
+{
+  "run": {
+    "id": "5fd08aa7-7bef-4bb9-804f-0a74be7f08c9",
+    "pipeline_definition_id": "93a50228-9505-47dd-8922-b77389b9c1ee",
+    "owner_id": "asdru",
+    "current_phase": "qa",
+    "status": "completed",
+    "branch_name": "run/5fd08aa7-7bef-4bb9-804f-0a74be7f08c9",
+    "worktree_path": "C:\\Users\\Asdrubal Perez\\Documents\\Github Devs\\ai-orchestrator-worktrees\\5fd08aa7-7bef-4bb9-804f-0a74be7f08c9",
+    "created_at": "2026-07-17T15:32:10.354Z",
+    "updated_at": "2026-07-17T15:35:11.119Z"
+  },
+  "events": [
+    {
+      "id": "57",
+      "event_type": "run_started",
+      "payload": {
+        "casePath": "C:\\Users\\ASDRUB~1\\AppData\\Local\\Temp\\claude\\C--Users-Asdrubal-Perez-Documents-Github-Devs-asdrux-orchestator\\fcd95054-62aa-4345-8042-8c4a6a767619\\scratchpad/feature-005-cases/case_descuento.json",
+        "pipeline": "full-pipeline-architect-to-qa@1",
+        "branchName": "run/5fd08aa7-7bef-4bb9-804f-0a74be7f08c9",
+        "worktreePath": "C:\\Users\\Asdrubal Perez\\Documents\\Github Devs\\ai-orchestrator-worktrees\\5fd08aa7-7bef-4bb9-804f-0a74be7f08c9"
+      },
+      "created_at": "2026-07-17T15:32:10.405Z"
+    },
+    {
+      "id": "58",
+      "event_type": "phase_started",
+      "payload": {
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-17T15:32:10.631Z"
+    },
+    {
+      "id": "59",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "completed",
+          "summary": "El caso de negocio presenta un requerimiento claro y bien acotado: una función pura de cálculo que aplique una regla de descuento condicional basada en monto. No hay ambigüedades críticas. La propuesta de arquitectura define un módulo de utilidad aislado con validación de entrada, lógica de descuento condicional, y manejo explícito de decimales. El diseño respeta la restricción de pureza (sin persistencia, sin HTTP, sin efectos secundarios) y se estructura para máxima testabilidad.",
+          "outputArtifact": "MÓDULO: CalculadorDescuentoCompra (Utility Module Puro)\nUbicación: Archivo separado, importable, sin dependencias externas (excepto librerías estándar de redondeo si aplica)\n\nCONTRATO DE FUNCIÓN:\n- Nombre: calcular_total_con_descuento (o similar según lenguaje)\n- Entrada: monto (número positivo, hasta 2 decimales)\n- Salida: total_final (número con 2 decimales aplicando descuento si aplica)\n- Excepciones: Lanzar excepción específica si monto < 0\n\nVALIDACIÓN DE ENTRADA:\n- Rechazar valores negativos (lanzar TypeError, ValueError o equivalente)\n- Aceptar cero como válido (sin descuento)\n- Aceptar decimales (máximo 2 dígitos fraccionarios)\n\nLÓGICA DE CÁLCULO:\n- Si monto > 100: total_final = monto * 0.9 (aplicar 10% descuento)\n- Si monto <= 100: total_final = monto (sin descuento)\n- Redondeo: estándar a 2 decimales después de cálculo (round() función nativa)\n\nCASOS DE PRUEBA (EDGE CASES):\n- Monto negativo: debe fallar\n- Monto 0: retorna 0 (sin descuento)\n- Monto 100: retorna 100 (sin descuento, frontera inclusiva)\n- Monto 100.01: retorna 90.009 redondeado a 90.01 (descuento activo)\n- Monto 200: retorna 180 (descuento aplicado)\n- Monto con decimales 150.50: retorna 135.45\n\nESTRUCTURA DE PROYECTO:\n- Crear directorio utils/ (o equivalente) en raíz del proyecto\n- Archivo: descuentos.py (o .js, .ts según stack)\n- No requiere configuración, no requiere inicialización\n- Importable directamente en tests sin setup complejo\n\nINTEGRACIÓN:\n- Cero integración con run:start, run:status, o comandos existentes\n- Cero efectos secundarios (no modifica estado global, no accede a BD)\n- Puede ser invocada desde tests unitarios de forma aislada\n- Disponible para uso futuro desde otras capas si se requiere\n\nTESTING RECOMENDADO:\n- Mínimo 5 test cases unitarios (negativos, cero, límite inferior sin descuento, límite superior con descuento, decimal)\n- Framework: unittest, pytest, vitest o equivalente según stack\n- Cobertura esperada: 100% (función simple)",
+          "escalationReason": null,
+          "executorMetadata": {
+            "model": "claude-haiku-4-5-20251001",
+            "provider": "claude-code-cli"
+          }
+        },
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-17T15:32:35.825Z"
+    },
+    {
+      "id": "60",
+      "event_type": "phase_started",
+      "payload": {
+        "agentRole": "functional"
+      },
+      "created_at": "2026-07-17T15:32:35.997Z"
+    },
+    {
+      "id": "61",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "completed",
+          "summary": "La propuesta de arquitectura es suficientemente detallada para derivar requisitos funcionales concretos. Se trata de un módulo utility puro con lógica determinista de descuentos condicionales. Los requisitos funcionales se centran en tres áreas: validación de entrada, aplicación de descuento condicional según umbral de monto, y garantía de precisión numérica. La función es aislada, sin dependencias ni efectos secundarios, lo que simplifica la derivación de criterios de aceptación observables.",
+          "outputArtifact": "REGLAS DE NEGOCIO:\n- Un descuento del 10% se aplica cuando el monto de compra es estrictamente mayor a 100\n- No se aplica descuento cuando el monto es menor o igual a 100\n- El resultado final siempre se redondea a exactamente 2 decimales usando redondeo estándar (round nativo del lenguaje)\n- Cero es un valor válido que no genera descuento\n- Valores negativos son inválidos y generan una excepción\n\nCASOS DE USO:\n\n1. Calcular total de compra con descuento elegible\n   Actores: Sistema de carrito, sistema de facturación, integraciones futuras\n   Entrada: Monto de compra mayor a 100 con máximo 2 decimales\n   Acción: Aplicar descuento del 10% y redondear a 2 decimales\n   Salida: Monto final reducido con precisión de 2 decimales\n\n2. Calcular total de compra sin descuento\n   Actores: Sistema de carrito, sistema de facturación\n   Entrada: Monto de compra menor o igual a 100 con máximo 2 decimales\n   Acción: Retornar monto sin modificación\n   Salida: Monto original exacto con máximo 2 decimales\n\n3. Validar entrada antes de cálculo\n   Actores: Cualquier consumidor de la función\n   Entrada: Valor numérico arbitrario\n   Acción: Verificar que sea no negativo y no supere 2 decimales\n   Salida: Proceder al cálculo o lanzar excepción de validación\n\nCRITERIOS DE ACEPTACIÓN OBSERVABLES:\n\n- Dado monto = 0, entonces retorna 0.00\n- Dado monto = 50, entonces retorna 50.00 (sin descuento, bajo límite)\n- Dado monto = 100, entonces retorna 100.00 (límite inclusivo, sin descuento)\n- Dado monto = 100.01, entonces retorna 90.01 (descuento activo, frontera superior)\n- Dado monto = 200, entonces retorna 180.00 (descuento aplicado)\n- Dado monto = 150.50, entonces retorna 135.45 (descuento con decimales en entrada)\n- Dado monto = -1, entonces lanza excepción (ValueError o TypeError según lenguaje)\n- Dado monto = -0.01, entonces lanza excepción\n- Dado monto con más de 2 decimales (ejemplo 10.999), entonces rechaza con excepción de validación\n- Salida siempre tiene exactamente 2 dígitos fraccionarios tras redondeo\n- La función no modifica estado global, no accede a persistencia, no ejecuta I/O\n- La función es invocable en aislamiento sin setup previo ni configuración\n- Debe soportar al menos 5 casos de prueba unitaria con cobertura del 100%\n\nREGLA DE INTEGRACIÓN:\n- El módulo no se integra con run:start ni run:status\n- No tiene efectos secundarios\n- Disponible para importación desde tests unitarios y capas futuras sin conflictos",
+          "escalationReason": null,
+          "executorMetadata": {
+            "model": "claude-haiku-4-5-20251001",
+            "provider": "claude-code-cli"
+          }
+        },
+        "agentRole": "functional"
+      },
+      "created_at": "2026-07-17T15:33:08.048Z"
+    },
+    {
+      "id": "62",
+      "event_type": "phase_started",
+      "payload": {
+        "agentRole": "planning"
+      },
+      "created_at": "2026-07-17T15:33:08.212Z"
+    },
+    {
+      "id": "63",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "completed",
+          "summary": "Los requisitos funcionales definen un módulo de cálculo de descuentos para transacciones comerciales con lógica clara de umbral (10% si monto > 100), validación de entrada (no negativos, máximo 2 decimales), y redondeo estándar a 2 decimales. El plan Developer es simple y acotado: implementar una única función pura de cálculo, con validación de entrada explícita y casos de prueba que cubran comportamiento normal, fronteras críticas y manejo de errores. Se seleccionan 5 casos de prueba representativos que cubren sin descuento, con descuento, frontera 100, frontera 100.01, y validación de entrada negativa.",
+          "outputArtifact": {
+            "text": "PLAN DE TRABAJO DEVELOPER:\n\n- Crear archivo src/discount.mjs que exporte función calculateDiscount(amount)\n- Validación de entrada: verificar que amount sea número, no negativo y con máximo 2 decimales; lanzar Error si falla validación\n- Lógica de cálculo: si amount > 100 (estrictamente), aplicar monto * 0.9; si no, retornar monto sin cambios\n- Redondeo: utilizar Math.round() para redondear a exactamente 2 decimales (método: multiplicar por 100, aplicar round, dividir por 100)\n- Formato de salida: retornar número con precisión de 2 decimales\n- No incluir dependencias externas, no acceder a estado global, no ejecutar I/O\n- Archivo debe ser importable como módulo ES (export default o export function)\n\nCASOS DE PRUEBA REPRESENTATIVOS:\n\n- Caso 1: Entrada 50.00, Salida esperada 50.00 (sin descuento, bajo umbral)\n- Caso 2: Entrada 200.00, Salida esperada 180.00 (con descuento, monto redondo)\n- Caso 3: Entrada 100.00, Salida esperada 100.00 (límite inferior, no aplica descuento)\n- Caso 4: Entrada 100.01, Salida esperada 90.01 (frontera crítica, descuento activo)\n- Caso 5: Entrada -1, Excepción esperada Error (validación: monto negativo rechazado)",
+            "comandoTest": "node --test src/discount.test.mjs"
+          },
+          "escalationReason": null,
+          "executorMetadata": {
+            "model": "claude-haiku-4-5-20251001",
+            "provider": "claude-code-cli"
+          }
+        },
+        "agentRole": "planning"
+      },
+      "created_at": "2026-07-17T15:33:37.772Z"
+    },
+    {
+      "id": "64",
+      "event_type": "phase_started",
+      "payload": {
+        "attempt": 1,
+        "agentRole": "developer"
+      },
+      "created_at": "2026-07-17T15:33:37.926Z"
+    },
+    {
+      "id": "65",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "completed",
+          "summary": "Se ha implementado exitosamente la función calculateDiscount en src/discount.mjs y su conjunto de pruebas en src/discount.test.mjs. La función valida que el parámetro de entrada sea un número no negativo con máximo 2 decimales, lanzando Error en caso de incumplimiento. Implementa la lógica de descuento del 10% (multiplicar por 0.9) cuando el monto es estrictamente mayor a 100, y utiliza Math.round() para redondear precisamente a 2 decimales. El archivo de test contiene 5 casos de prueba que cubren: montos sin descuento (50.00), montos con descuento (200.00), el límite inferior (100.00), la frontera crítica (100.01) y validación de rechazos (-1). Ambos archivos están listos para ser ejecutados con el comando especificado por Planning.",
+          "outputArtifact": "src/discount.mjs (implementación de función calculateDiscount con validación, lógica de descuento y redondeo a 2 decimales); src/discount.test.mjs (suite de 5 tests usando node:test que valida todos los casos de prueba del plan)",
+          "escalationReason": null,
+          "executorMetadata": {
+            "model": "claude-haiku-4-5-20251001",
+            "provider": "claude-code-cli"
+          }
+        },
+        "attempt": 1,
+        "agentRole": "developer"
+      },
+      "created_at": "2026-07-17T15:34:54.493Z"
+    },
+    {
+      "id": "66",
+      "event_type": "phase_started",
+      "payload": {
+        "attempt": 1,
+        "agentRole": "qa"
+      },
+      "created_at": "2026-07-17T15:34:54.663Z"
+    },
+    {
+      "id": "67",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "completed",
+          "summary": "El comando de test pasó exitosamente. Todos los 5 casos de prueba ejecutaron correctamente: Caso 1 (50.00 sin descuento), Caso 2 (200.00 con descuento aplicado), Caso 3 (100.00 en límite inferior sin descuento), Caso 4 (100.01 en frontera crítica con descuento), y Caso 5 (validación de rechazo con monto negativo). La salida del test muestra 5 pass, 0 fail.",
+          "outputArtifact": "tests 5 | pass 5 | fail 0 | cancelled 0 | skipped 0 | duration_ms 158.1195",
+          "escalationReason": null,
+          "executorMetadata": {
+            "model": "claude-haiku-4-5-20251001",
+            "provider": "claude-code-cli"
+          }
+        },
+        "attempt": 1,
+        "agentRole": "qa"
+      },
+      "created_at": "2026-07-17T15:35:11.022Z"
+    },
+    {
+      "id": "68",
+      "event_type": "run_committed",
+      "payload": {
+        "committed": true
+      },
+      "created_at": "2026-07-17T15:35:11.396Z"
+    },
+    {
+      "id": "69",
+      "event_type": "run_pushed",
+      "payload": {
+        "branchName": "run/5fd08aa7-7bef-4bb9-804f-0a74be7f08c9"
+      },
+      "created_at": "2026-07-17T15:35:13.950Z"
+    },
+    {
+      "id": "70",
+      "event_type": "worktree_cleaned",
+      "payload": {
+        "worktreePath": "C:\\Users\\Asdrubal Perez\\Documents\\Github Devs\\ai-orchestrator-worktrees\\5fd08aa7-7bef-4bb9-804f-0a74be7f08c9"
+      },
+      "created_at": "2026-07-17T15:35:14.111Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "351438d4-25cb-46bd-a2c7-5998dbc95f85",
+      "phase": "architect",
+      "kind": "design",
+      "content": {
+        "summary": "El caso de negocio presenta un requerimiento claro y bien acotado: una función pura de cálculo que aplique una regla de descuento condicional basada en monto. No hay ambigüedades críticas. La propuesta de arquitectura define un módulo de utilidad aislado con validación de entrada, lógica de descuento condicional, y manejo explícito de decimales. El diseño respeta la restricción de pureza (sin persistencia, sin HTTP, sin efectos secundarios) y se estructura para máxima testabilidad.",
+        "outputArtifact": "MÓDULO: CalculadorDescuentoCompra (Utility Module Puro)\nUbicación: Archivo separado, importable, sin dependencias externas (excepto librerías estándar de redondeo si aplica)\n\nCONTRATO DE FUNCIÓN:\n- Nombre: calcular_total_con_descuento (o similar según lenguaje)\n- Entrada: monto (número positivo, hasta 2 decimales)\n- Salida: total_final (número con 2 decimales aplicando descuento si aplica)\n- Excepciones: Lanzar excepción específica si monto < 0\n\nVALIDACIÓN DE ENTRADA:\n- Rechazar valores negativos (lanzar TypeError, ValueError o equivalente)\n- Aceptar cero como válido (sin descuento)\n- Aceptar decimales (máximo 2 dígitos fraccionarios)\n\nLÓGICA DE CÁLCULO:\n- Si monto > 100: total_final = monto * 0.9 (aplicar 10% descuento)\n- Si monto <= 100: total_final = monto (sin descuento)\n- Redondeo: estándar a 2 decimales después de cálculo (round() función nativa)\n\nCASOS DE PRUEBA (EDGE CASES):\n- Monto negativo: debe fallar\n- Monto 0: retorna 0 (sin descuento)\n- Monto 100: retorna 100 (sin descuento, frontera inclusiva)\n- Monto 100.01: retorna 90.009 redondeado a 90.01 (descuento activo)\n- Monto 200: retorna 180 (descuento aplicado)\n- Monto con decimales 150.50: retorna 135.45\n\nESTRUCTURA DE PROYECTO:\n- Crear directorio utils/ (o equivalente) en raíz del proyecto\n- Archivo: descuentos.py (o .js, .ts según stack)\n- No requiere configuración, no requiere inicialización\n- Importable directamente en tests sin setup complejo\n\nINTEGRACIÓN:\n- Cero integración con run:start, run:status, o comandos existentes\n- Cero efectos secundarios (no modifica estado global, no accede a BD)\n- Puede ser invocada desde tests unitarios de forma aislada\n- Disponible para uso futuro desde otras capas si se requiere\n\nTESTING RECOMENDADO:\n- Mínimo 5 test cases unitarios (negativos, cero, límite inferior sin descuento, límite superior con descuento, decimal)\n- Framework: unittest, pytest, vitest o equivalente según stack\n- Cobertura esperada: 100% (función simple)"
+      },
+      "created_at": "2026-07-17T15:32:35.880Z"
+    },
+    {
+      "id": "0bc7a665-b0a4-4c29-a772-60c88d4ea93f",
+      "phase": "functional",
+      "kind": "design",
+      "content": {
+        "summary": "La propuesta de arquitectura es suficientemente detallada para derivar requisitos funcionales concretos. Se trata de un módulo utility puro con lógica determinista de descuentos condicionales. Los requisitos funcionales se centran en tres áreas: validación de entrada, aplicación de descuento condicional según umbral de monto, y garantía de precisión numérica. La función es aislada, sin dependencias ni efectos secundarios, lo que simplifica la derivación de criterios de aceptación observables.",
+        "outputArtifact": "REGLAS DE NEGOCIO:\n- Un descuento del 10% se aplica cuando el monto de compra es estrictamente mayor a 100\n- No se aplica descuento cuando el monto es menor o igual a 100\n- El resultado final siempre se redondea a exactamente 2 decimales usando redondeo estándar (round nativo del lenguaje)\n- Cero es un valor válido que no genera descuento\n- Valores negativos son inválidos y generan una excepción\n\nCASOS DE USO:\n\n1. Calcular total de compra con descuento elegible\n   Actores: Sistema de carrito, sistema de facturación, integraciones futuras\n   Entrada: Monto de compra mayor a 100 con máximo 2 decimales\n   Acción: Aplicar descuento del 10% y redondear a 2 decimales\n   Salida: Monto final reducido con precisión de 2 decimales\n\n2. Calcular total de compra sin descuento\n   Actores: Sistema de carrito, sistema de facturación\n   Entrada: Monto de compra menor o igual a 100 con máximo 2 decimales\n   Acción: Retornar monto sin modificación\n   Salida: Monto original exacto con máximo 2 decimales\n\n3. Validar entrada antes de cálculo\n   Actores: Cualquier consumidor de la función\n   Entrada: Valor numérico arbitrario\n   Acción: Verificar que sea no negativo y no supere 2 decimales\n   Salida: Proceder al cálculo o lanzar excepción de validación\n\nCRITERIOS DE ACEPTACIÓN OBSERVABLES:\n\n- Dado monto = 0, entonces retorna 0.00\n- Dado monto = 50, entonces retorna 50.00 (sin descuento, bajo límite)\n- Dado monto = 100, entonces retorna 100.00 (límite inclusivo, sin descuento)\n- Dado monto = 100.01, entonces retorna 90.01 (descuento activo, frontera superior)\n- Dado monto = 200, entonces retorna 180.00 (descuento aplicado)\n- Dado monto = 150.50, entonces retorna 135.45 (descuento con decimales en entrada)\n- Dado monto = -1, entonces lanza excepción (ValueError o TypeError según lenguaje)\n- Dado monto = -0.01, entonces lanza excepción\n- Dado monto con más de 2 decimales (ejemplo 10.999), entonces rechaza con excepción de validación\n- Salida siempre tiene exactamente 2 dígitos fraccionarios tras redondeo\n- La función no modifica estado global, no accede a persistencia, no ejecuta I/O\n- La función es invocable en aislamiento sin setup previo ni configuración\n- Debe soportar al menos 5 casos de prueba unitaria con cobertura del 100%\n\nREGLA DE INTEGRACIÓN:\n- El módulo no se integra con run:start ni run:status\n- No tiene efectos secundarios\n- Disponible para importación desde tests unitarios y capas futuras sin conflictos"
+      },
+      "created_at": "2026-07-17T15:33:08.107Z"
+    },
+    {
+      "id": "2ba7a5a8-8ba4-4243-a771-8834ac144cd8",
+      "phase": "planning",
+      "kind": "design",
+      "content": {
+        "summary": "Los requisitos funcionales definen un módulo de cálculo de descuentos para transacciones comerciales con lógica clara de umbral (10% si monto > 100), validación de entrada (no negativos, máximo 2 decimales), y redondeo estándar a 2 decimales. El plan Developer es simple y acotado: implementar una única función pura de cálculo, con validación de entrada explícita y casos de prueba que cubran comportamiento normal, fronteras críticas y manejo de errores. Se seleccionan 5 casos de prueba representativos que cubren sin descuento, con descuento, frontera 100, frontera 100.01, y validación de entrada negativa.",
+        "outputArtifact": {
+          "text": "PLAN DE TRABAJO DEVELOPER:\n\n- Crear archivo src/discount.mjs que exporte función calculateDiscount(amount)\n- Validación de entrada: verificar que amount sea número, no negativo y con máximo 2 decimales; lanzar Error si falla validación\n- Lógica de cálculo: si amount > 100 (estrictamente), aplicar monto * 0.9; si no, retornar monto sin cambios\n- Redondeo: utilizar Math.round() para redondear a exactamente 2 decimales (método: multiplicar por 100, aplicar round, dividir por 100)\n- Formato de salida: retornar número con precisión de 2 decimales\n- No incluir dependencias externas, no acceder a estado global, no ejecutar I/O\n- Archivo debe ser importable como módulo ES (export default o export function)\n\nCASOS DE PRUEBA REPRESENTATIVOS:\n\n- Caso 1: Entrada 50.00, Salida esperada 50.00 (sin descuento, bajo umbral)\n- Caso 2: Entrada 200.00, Salida esperada 180.00 (con descuento, monto redondo)\n- Caso 3: Entrada 100.00, Salida esperada 100.00 (límite inferior, no aplica descuento)\n- Caso 4: Entrada 100.01, Salida esperada 90.01 (frontera crítica, descuento activo)\n- Caso 5: Entrada -1, Excepción esperada Error (validación: monto negativo rechazado)",
+          "comandoTest": "node --test src/discount.test.mjs"
+        }
+      },
+      "created_at": "2026-07-17T15:33:37.827Z"
+    },
+    {
+      "id": "0283879b-5766-4c27-8e59-d198d6d3b0eb",
+      "phase": "developer",
+      "kind": "code",
+      "content": {
+        "attempt": 1,
+        "summary": "Se ha implementado exitosamente la función calculateDiscount en src/discount.mjs y su conjunto de pruebas en src/discount.test.mjs. La función valida que el parámetro de entrada sea un número no negativo con máximo 2 decimales, lanzando Error en caso de incumplimiento. Implementa la lógica de descuento del 10% (multiplicar por 0.9) cuando el monto es estrictamente mayor a 100, y utiliza Math.round() para redondear precisamente a 2 decimales. El archivo de test contiene 5 casos de prueba que cubren: montos sin descuento (50.00), montos con descuento (200.00), el límite inferior (100.00), la frontera crítica (100.01) y validación de rechazos (-1). Ambos archivos están listos para ser ejecutados con el comando especificado por Planning.",
+        "outputArtifact": "src/discount.mjs (implementación de función calculateDiscount con validación, lógica de descuento y redondeo a 2 decimales); src/discount.test.mjs (suite de 5 tests usando node:test que valida todos los casos de prueba del plan)"
+      },
+      "created_at": "2026-07-17T15:34:54.547Z"
+    },
+    {
+      "id": "111e1021-f955-499e-b7ea-197587e437df",
+      "phase": "qa",
+      "kind": "verdict_approved",
+      "content": {
+        "attempt": 1,
+        "summary": "El comando de test pasó exitosamente. Todos los 5 casos de prueba ejecutaron correctamente: Caso 1 (50.00 sin descuento), Caso 2 (200.00 con descuento aplicado), Caso 3 (100.00 en límite inferior sin descuento), Caso 4 (100.01 en frontera crítica con descuento), y Caso 5 (validación de rechazo con monto negativo). La salida del test muestra 5 pass, 0 fail.",
+        "outputArtifact": "tests 5 | pass 5 | fail 0 | cancelled 0 | skipped 0 | duration_ms 158.1195"
+      },
+      "created_at": "2026-07-17T15:35:11.070Z"
+    }
+  ]
+}

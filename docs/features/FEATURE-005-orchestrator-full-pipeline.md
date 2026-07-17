@@ -10,7 +10,7 @@ Basado en: 07-FEATURE-TEMPLATE.md (Standard Mode)
 - **Name**: Orquestador Real — Milestone 1, Incremento 3 (pipeline completo)
 - **Type**: Feature de producto
 - **Owner**: Asdru
-- **Status**: Draft — pendiente de Go humano
+- **Status**: **Closed** — Go confirmado y feature implementada/validada el 2026-07-17. Ver `FEATURE-005-implementation-results.md`. Incluye un hallazgo abierto y no resuelto (H14) sobre el confinamiento real de comandos de QA — ver sección 4/5 del documento de resultados.
 - **Priority**: Alta — cierra Milestone 1
 
 ---
@@ -124,7 +124,7 @@ Loop acotado simple: contador de intentos por run, incrementado en cada rechazo 
 
 # 11. Approval Gate
 
-**Pendiente.** Requiere Go humano explícito de Asdru (owner del proyecto) antes de implementar.
+**Aprobado.** Go humano confirmado el 2026-07-17 por Asdru (owner del proyecto), condicionado a verificar primero la deploy key de la VPS (hecho, ver `FEATURE-005-implementation-results.md` sección 0). Implementación completada el mismo día.
 
 ---
 
