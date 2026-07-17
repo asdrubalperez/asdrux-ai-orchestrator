@@ -19,6 +19,28 @@ import type {
 //     él — el propio CLI bloquea escrituras fuera de ese directorio, H5;
 //   - autenticación exclusivamente vía ANTHROPIC_API_KEY + --bare, sin OAuth, H4.
 
+// FEATURE-006 (resuelve H14): el proceso hijo NUNCA hereda el process.env completo del
+// Orquestador — eso exponía DATABASE_URL_DEV (y cualquier otro secreto) a cada invocación, sin
+// importar el rol. Solo se reenvían las variables de sistema estrictamente necesarias para que
+// Node y el propio CLI funcionen (resolución de rutas, directorios temporales, localización);
+// todo lo demás requiere pasarse explícitamente (ver buildChildEnv).
+const ALLOWED_ENV_PASSTHROUGH_KEYS = [
+  "PATH",
+  "HOME",
+  "USERPROFILE",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "SystemRoot",
+  "windir",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "ComSpec",
+  "PATHEXT",
+  "LANG",
+  "LC_ALL",
+] as const;
+
 export interface ClaudeCodeExecutorOptions {
   /** Directorio de trabajo del run (el worktree). Todas las invocaciones de esta instancia corren ahí. */
   workingDirectory: string;
@@ -147,6 +169,19 @@ export class ClaudeCodeExecutor implements Executor {
     ].join("\n");
   }
 
+  /** FEATURE-006: allowlist explícita — nunca `{ ...process.env }`. Ver H14. */
+  private buildChildEnv(apiKey: string): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = {};
+    for (const key of ALLOWED_ENV_PASSTHROUGH_KEYS) {
+      const value = process.env[key];
+      if (value !== undefined) {
+        env[key] = value;
+      }
+    }
+    env.ANTHROPIC_API_KEY = apiKey;
+    return env;
+  }
+
   private spawnClaude(
     args: string[],
     prompt: string,
@@ -156,7 +191,7 @@ export class ClaudeCodeExecutor implements Executor {
     return new Promise((resolve, reject) => {
       const child = spawn(this.claudeBinary, [...args, prompt], {
         cwd: this.options.workingDirectory,
-        env: { ...process.env, ANTHROPIC_API_KEY: apiKey },
+        env: this.buildChildEnv(apiKey),
       });
 
       let stdout = "";

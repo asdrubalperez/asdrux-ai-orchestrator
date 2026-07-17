@@ -10,7 +10,7 @@ Basado en: 07-FEATURE-TEMPLATE.md (Standard Mode)
 - **Name**: Aislamiento Real de Ejecución — Contenedor + QA sin Bash
 - **Type**: Feature de seguridad/infraestructura — resuelve riesgo bloqueante
 - **Owner**: Asdru
-- **Status**: Draft — pendiente de Go humano
+- **Status**: **Approved** (Go confirmado 2026-07-17) — implementación por partes: punto 1 (fix de `process.env`) primero y aislado, con commit intermedio propio, antes de seguir con `TestExecutor` y contenedores.
 - **Priority**: Crítica — desbloquea el riesgo H14 registrado en 01-PROJECT-CHARTER.md
 
 ---
@@ -116,7 +116,9 @@ No aplica.
 
 # 10. Approval Gate
 
-**Pendiente.** Requiere Go humano explícito de Asdru antes de implementar.
+**Aprobado.** Go humano confirmado el 2026-07-17 por Asdru, con implementación explícitamente
+secuenciada por partes: punto 1 (fix de `process.env`) se implementa y commitea de forma aislada
+primero, antes de continuar con el `TestExecutor` y los contenedores.
 
 ---
 

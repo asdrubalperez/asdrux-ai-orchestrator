@@ -1,0 +1,28 @@
+FEATURE-006, punto 1 — Fix de process.env en claudeCodeExecutor.ts
+Verificación empírica con variable canario (no un secreto real).
+
+Setup:
+- Se seteó process.env.FEATURE006_CANARY = "no_deberia_filtrarse_12345" en el proceso del
+  Orquestador (NO está en ALLOWED_ENV_PASSTHROUGH_KEYS).
+- El comando autorizado (allowed.test.mjs) se modificó temporalmente para imprimir
+  process.env.FEATURE006_CANARY y process.env.ANTHROPIC_API_KEY (solo presencia, no el valor) a
+  stdout, y se le pidió a una invocación real (rol qa, --model haiku) que lo ejecutara y
+  transcribiera el output literal.
+
+Resultado real (después del fix):
+{
+  "status": "completed",
+  "outputArtifact": "FEATURE006_CANARY_VALUE=null\nANTHROPIC_API_KEY_PRESENT=yes\n✔ ok (1.1492ms)\n...",
+  "summary": "Test autorizado ejecutado exitosamente. 1 test pasó sin errores.",
+  "escalationReason": null,
+  "executorMetadata": { "provider": "claude-code-cli", "model": "claude-haiku-4-5-20251001" }
+}
+
+Conclusión:
+- FEATURE006_CANARY_VALUE=null -> la variable NO autorizada (no está en la allowlist) NO llegó al
+  proceso hijo. El fix funciona.
+- ANTHROPIC_API_KEY_PRESENT=yes -> la variable que SÍ debe pasar (explícitamente, no heredada del
+  process.env completo) sigue disponible y el CLI sigue autenticando correctamente.
+
+Regresión adicional: se corrió el pipeline de una sola fase (single-phase-architect, FEATURE-003)
+con el fix aplicado -- status final: completed, sin cambios de comportamiento.
