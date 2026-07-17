@@ -229,6 +229,30 @@ Pasos obligatorios, en este orden — ningún paso se salta ni se combina con el
 
 **Disparador para endurecer esta política**: la primera vez que se configure CI/CD (sección "Deployment Strategy" de `02-ARCHITECTURE.md`, hoy `[Pendiente]`), o la primera vez que algo en producción lea de `main`. En ese momento esta sección debe actualizarse para reflejar el gate real — no seguir con push inmediato por inercia.
 
+### Checkout de origen cuando existen múltiples checkouts o agentes
+
+Cuando el mismo repo tiene más de un checkout activo (hoy: notebook del owner sin Docker, y VPS
+con Docker/Node) y/o más de un agente IA de desarrollo trabajando (Claude Code, Codex), aplica
+esta regla:
+
+- El commit real de una Feature se origina en el checkout donde se genera la evidencia que esa
+  Feature necesita validar — no en un checkout fijo por convención general para todo el proyecto.
+- El/los otro(s) checkout(s) nunca commitea(n) por su cuenta esa misma Feature; se ponen al día
+  exclusivamente con `git pull` después del push del checkout de origen.
+- Qué checkout es "el de origen" se decide Feature por Feature, en la sección "Technical
+  Considerations" / "Ambiente de ejecución autorizado" del documento de esa Feature — no se asume
+  por default.
+- Ejemplo ya vivido: FEATURE-001 a 006 (Claude Code) se escribieron principalmente en notebook,
+  con VPS solo como entorno de ejecución para pruebas que requerían Docker real — ahí el checkout
+  de origen fue notebook. FEATURE-007 (Codex) valida el propio mecanismo de ejecución
+  headless/sandbox de Codex, que es Linux-específico y no portable — ahí el checkout de origen es
+  la VPS, y notebook se pone al día con `pull` al cierre.
+- Si dos agentes/checkouts crean independientemente una rama con el mismo nombre para la misma
+  Feature antes de que se fije el checkout de origen, no es un error grave mientras no haya
+  commits en ninguna de las dos — se descarta la rama sobrante sin pérdida. Si ya hay commits
+  divergentes en ambas, se escala al Architect antes de resolver — no se elige unilateralmente
+  cuál commit prevalece.
+
 ## Cierre de Stage 6 — Lessons Learned
 
 Antes del paso 2 de la secuencia (push de la rama), se registran y clasifican las lessons learned de la Feature:
