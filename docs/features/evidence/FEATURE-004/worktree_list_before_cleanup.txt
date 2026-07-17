@@ -1,0 +1,4 @@
+C:/Users/Asdrubal Perez/Documents/Github Devs/asdrux-orchestator                                             b091012 [FEATURE-004-orchestrator-phase-sequence]
+C:/Users/Asdrubal Perez/Documents/Github Devs/ai-orchestrator-worktrees/bc90b929-35f9-4e6f-9a3a-fb9c814f9bdb b091012 [run/bc90b929-35f9-4e6f-9a3a-fb9c814f9bdb]
+C:/Users/Asdrubal Perez/Documents/Github Devs/ai-orchestrator-worktrees/e5249590-1eec-468e-90ca-575266154f20 b091012 [run/e5249590-1eec-468e-90ca-575266154f20]
+C:/Users/Asdrubal Perez/Documents/Github Devs/ai-orchestrator-worktrees/f7dd9778-a238-42d4-a5c2-8264fd1db067 b091012 [run/f7dd9778-a238-42d4-a5c2-8264fd1db067]

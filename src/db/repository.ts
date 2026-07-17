@@ -1,9 +1,7 @@
 import type { PoolClient } from "pg";
 import { pool } from "./pool.js";
-import type { AgentRole, PhaseResult } from "../contracts/executor.js";
-
-const SINGLE_PHASE_PIPELINE_NAME = "single-phase-architect";
-const SINGLE_PHASE_PIPELINE_VERSION = 1;
+import type { PhaseResult } from "../contracts/executor.js";
+import type { PipelineSpec } from "../pipelines/definitions.js";
 
 export interface PipelineDefinitionRow {
   id: string;
@@ -23,23 +21,23 @@ export interface RunRow {
   updated_at: string;
 }
 
-/** Incremento 1 de Milestone 1: un pipeline de una sola fase (architect, read-only). */
-export async function ensureSinglePhasePipelineDefinition(): Promise<PipelineDefinitionRow> {
+/**
+ * Busca o crea la fila de `pipeline_definitions` para un `PipelineSpec` dado. La secuencia de
+ * fases vive como datos (JSONB), no hardcodeada — este repositorio es agnóstico de qué pipeline
+ * concreto se le pase (FEATURE-004, Regla Funcional 2).
+ */
+export async function ensurePipelineDefinition(spec: PipelineSpec): Promise<PipelineDefinitionRow> {
   const existing = await pool.query<PipelineDefinitionRow>(
     "select id, name, version from pipeline_definitions where name = $1 and version = $2",
-    [SINGLE_PHASE_PIPELINE_NAME, SINGLE_PHASE_PIPELINE_VERSION]
+    [spec.name, spec.version]
   );
   if (existing.rows[0]) return existing.rows[0];
-
-  const definition = {
-    phases: [{ agentRole: "architect" as AgentRole, permissions: { filesystem: "read-only" } }],
-  };
 
   const inserted = await pool.query<PipelineDefinitionRow>(
     `insert into pipeline_definitions (name, version, definition)
      values ($1, $2, $3)
      returning id, name, version`,
-    [SINGLE_PHASE_PIPELINE_NAME, SINGLE_PHASE_PIPELINE_VERSION, definition]
+    [spec.name, spec.version, spec.definition]
   );
   return inserted.rows[0];
 }
@@ -48,6 +46,7 @@ export async function createRun(params: {
   id: string;
   pipelineDefinitionId: string;
   ownerId: string;
+  firstPhase: string;
   branchName: string;
   worktreePath: string;
 }): Promise<RunRow> {
@@ -55,9 +54,13 @@ export async function createRun(params: {
     `insert into runs (id, pipeline_definition_id, owner_id, current_phase, status, branch_name, worktree_path)
      values ($1, $2, $3, $4, 'running', $5, $6)
      returning *`,
-    [params.id, params.pipelineDefinitionId, params.ownerId, "architect", params.branchName, params.worktreePath]
+    [params.id, params.pipelineDefinitionId, params.ownerId, params.firstPhase, params.branchName, params.worktreePath]
   );
   return result.rows[0];
+}
+
+export async function updateRunCurrentPhase(runId: string, phase: string): Promise<void> {
+  await pool.query("update runs set current_phase = $1, updated_at = now() where id = $2", [phase, runId]);
 }
 
 export async function recordRunEvent(
