@@ -199,6 +199,7 @@ La AI debe:
 * verificar readiness
 * considerar cache
 * explicar dependencias relevantes
+* seguir la Secuencia de Branching y Merge definida abajo, sin saltar pasos ni combinarlos
 
 Evitar:
 
@@ -206,43 +207,42 @@ Evitar:
 * producción sin autorización
 * cambios silenciosos
 
-Stage 6 se cierra registrando y clasificando las lessons learned:
+## Secuencia de Branching y Merge (activa para este proyecto)
 
-Las lessons learned deben clasificarse según su naturaleza y alcance:
+Basado en la regla "una feature por branch" de 03-AI-CONSTITUTION.md (Strict Change Mode) — se activa esta regla puntual, sin activar el modo completo.
+
+Cada Feature vive en su propia rama, creada desde `main` al aprobarse (Stage 3 — Approval Gate). Todo el trabajo de esa Feature —spec, implementación, evidencia, y el cierre de lessons learned descrito abajo— se commitea en esa rama, nunca directo en `main`.
+
+Pasos obligatorios, en este orden — ningún paso se salta ni se combina con el siguiente sin pausa para revisión:
+
+1. Commit del trabajo en la rama de la Feature, incluyendo la sección de Lecciones Aprendidas (ver "Cierre de Stage 6" abajo) — el commit de cierre incluye la Feature completa, no solo el código.
+2. Push de la rama (no de `main`) — habilita revisión externa antes de mergear.
+3. Esperar confirmación explícita de revisión antes de continuar.
+4. Checkout a `main`.
+5. Merge de la rama de la Feature hacia `main` — sin dejar merges pendientes acumulados de más de una Feature a la vez.
+6. Push de `main` — ver política de timing abajo.
+
+### Política de push de `main`
+
+* **Hoy (desarrollo temprano, sin CI, sin nada desplegado desde `main`)**: el paso 6 es inmediato después del paso 5. El costo de un error es bajo — no hay producción ni pipeline que dependa de `main` todavía.
+* **Una vez que exista CI/CD real, o que algo desplegado dependa de `main`**: el paso 6 deja de ser automático. Antes de ejecutarlo, debe confirmarse "readiness" explícito — que la validación de la Feature (Stage 5) haya pasado, y si existe pipeline de CI, que corra en verde. El humano decide el momento del push a `main`, no se asume.
+
+**Disparador para endurecer esta política**: la primera vez que se configure CI/CD (sección "Deployment Strategy" de `02-ARCHITECTURE.md`, hoy `[Pendiente]`), o la primera vez que algo en producción lea de `main`. En ese momento esta sección debe actualizarse para reflejar el gate real — no seguir con push inmediato por inercia.
+
+## Cierre de Stage 6 — Lessons Learned
+
+Antes del paso 2 de la secuencia (push de la rama), se registran y clasifican las lessons learned de la Feature:
 
 * conocimiento permanente del Playbook
 * decisiones de arquitectura del proyecto
 * conocimiento específico de una Feature o implementación
 
-Solo el conocimiento verdaderamente reusable entre proyectos debe proponerse para evolucionar el Playbook.
-
-Las decisiones arquitectónicas deben permanecer en la documentación del proyecto correspondiente.
-
-Los hallazgos específicos de una Feature o implementación deben conservarse en su contexto original y no trasladarse automáticamente al baseline.
+Solo el conocimiento verdaderamente reusable entre proyectos debe proponerse para evolucionar el Playbook. Las decisiones arquitectónicas deben permanecer en la documentación del proyecto correspondiente. Los hallazgos específicos de una Feature o implementación deben conservarse en su contexto original y no trasladarse automáticamente al baseline.
 
 Entregable esperado:
 
-Release entendible y controlado.
+Release entendible y controlado, con historial de `main` que refleja fielmente el orden real de merges — sin ramas pendientes acumuladas.
 
----
-
-## Disciplina de Branching (activa para este proyecto)
-
-Basado en la regla "una feature por branch" de 03-AI-CONSTITUTION.md (Strict Change Mode) — se activa esta regla puntual sin activar el modo completo.
-
-* Cada Feature vive en su propia rama, creada desde `main` al aprobarse (Approval Gate).
-* Todo el trabajo de esa Feature —spec, implementación, evidencia— se commitea en esa rama.
-* Al cerrar la Feature, se mergea a `main` sin dejar merges pendientes acumulados de más de una Feature a la vez.
-* Antes de mergear una Feature a `main`: sección de Lecciones Aprendidas completa, clasificada por alcance, commiteada en la misma rama de la Feature — no como commit posterior al merge.
-
-**Sobre cuándo pushear el merge a `main` — dos escenarios distintos, no confundir:**
-
-* **Hoy (desarrollo temprano, sin CI, sin nada desplegado desde `main`)**: push inmediato después de cada merge. El costo de un error es bajo — no hay producción ni pipeline que dependa de `main` en este momento.
-* **Una vez que exista CI/CD real, o que algo desplegado dependa de `main`**: el push deja de ser automático. Antes de pushear un merge, debe confirmarse "readiness" explícito — que la validación de la Feature (Stage 5) haya pasado, y si existe pipeline de CI, que corra en verde. El humano decide el momento del push a `main`, no se asume.
-
-**Disparador para endurecer esta regla**: la primera vez que se configure CI/CD (sección "Deployment Strategy" de `02-ARCHITECTURE.md`, hoy `[Pendiente]`) o la primera vez que algo en producción lea de `main`, esta sección debe actualizarse para reflejar el gate real — no seguir con "push inmediato" por inercia.
-
----
 
 # Stage 7 — Post-Release Review
 
