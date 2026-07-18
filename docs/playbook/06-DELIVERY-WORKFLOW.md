@@ -42,6 +42,9 @@ La AI debe:
 * detectar restricciones
 * aclarar ambigüedades
 * identificar riesgos tempranos
+* leer la sección de Lecciones Aprendidas de la Feature inmediatamente anterior (el
+  `*-implementation-results.md` o `*-spike-results.md` más reciente en `docs/features/`), si
+  existe, antes de iniciar Discovery
 
 Evitar:
 
