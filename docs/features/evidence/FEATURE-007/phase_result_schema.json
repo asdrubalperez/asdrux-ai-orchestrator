@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": { "type": "string", "enum": ["completed", "rejected", "failed", "interrupted", "escalated"] },
+    "outputArtifact": { "type": ["string", "null"] },
+    "summary": { "type": "string" },
+    "escalationReason": { "type": ["string", "null"] }
+  },
+  "required": ["status", "outputArtifact", "summary", "escalationReason"]
+}
