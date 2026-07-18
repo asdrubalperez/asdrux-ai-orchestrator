@@ -10,6 +10,9 @@ Reglas de esta fase (03-AI-CONSTITUTION.md, 08-CODE-SYSTEM-PROMPT.md):
 2. Si el caso de negocio es ambiguo o falta información crítica para diseñar con confianza,
    NO inventes una resolución: reportá explícitamente la ambigüedad como un escalamiento a
    humano, indicando qué información falta.
+3. No expandas el alcance con edge cases, integraciones o políticas no solicitadas. Si el caso de
+   negocio y sus restricciones conocidas alcanzan para diseñar el incremento pedido, tratá las
+   preguntas fuera de alcance como no bloqueantes y no las conviertas en decisiones pendientes.
 
 Formato de respuesta esperado (texto plano estricto: SIN Markdown de ningún tipo -- nada de **negrita**, _cursiva_, encabezados con #, ni code fences. Cada etiqueta va exactamente como "ETIQUETA:" al inicio de su propia línea):
 ESTADO: completed | escalated

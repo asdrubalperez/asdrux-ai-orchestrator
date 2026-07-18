@@ -1,0 +1,17 @@
+FEATURE-008 Parte 4 - full pipeline Codex summary
+RUN_ID=c4d8ada5-34f1-4ebe-989a-b7f207c4f605
+START_EXIT=0
+RUN_STATUS=completed
+CURRENT_PHASE=qa
+PHASE_EVENTS=phase_started:architect,phase_finished:architect,phase_started:functional,phase_finished:functional,phase_started:planning,phase_finished:planning,phase_started:developer#1,phase_finished:developer#1,phase_started:qa#1,phase_finished:qa#1
+PHASE_FINISHED_PROVIDERS=architect:codex:gpt-5.6-luna,functional:codex:gpt-5.6-luna,planning:codex:gpt-5.6-luna,developer#1:codex:gpt-5.6-luna,qa#1:codex:gpt-5.6-luna
+DEVELOPER_FINISHED_COUNT=1
+QA_FINISHED_COUNT=1
+TEST_EXECUTED_COUNT=1
+ARTIFACT_PHASES=architect:design,functional:design,planning:design,developer:code,qa:verdict_approved
+RUN_COMMITTED_EVENT=true
+RUN_PUSHED_EVENT=true
+WORKTREE_CLEANED_EVENT=true
+START_STDOUT_HAS_FULL_PIPELINE=true
+START_STDOUT_FINAL_COMPLETED=true
+START_STDOUT_PUSHED=true

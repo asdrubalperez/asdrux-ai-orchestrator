@@ -1,0 +1,14 @@
+
+> ai-orchestrator@0.1.0 cli
+> tsx src/cli/index.ts run:start --case /home/asdru/test-cases/case_descuento.json --pipeline full-pipeline-architect-to-qa --executor codex --model gpt-5.6-luna
+
+[run:start] runId=c4d8ada5-34f1-4ebe-989a-b7f207c4f605
+[run:start] pipeline=full-pipeline-architect-to-qa@1 (3 fase/s lineales + loop Developer↔QA)
+[run:start] worktree creado: /home/asdru/ai-orchestrator-worktrees/c4d8ada5-34f1-4ebe-989a-b7f207c4f605 (rama run/c4d8ada5-34f1-4ebe-989a-b7f207c4f605)
+[run:start] COMANDO_TEST declarado por Planning: node --test src/discount.test.mjs
+[run:start] QA aprobó en el intento 1.
+[run:start] cambios commiteados en la rama.
+[run:start] push real de la rama "run/c4d8ada5-34f1-4ebe-989a-b7f207c4f605" a origin.
+[run:start] worktree limpiado tras aprobación.
+[run:start] status final: completed
+[run:start] run c4d8ada5-34f1-4ebe-989a-b7f207c4f605 persistido. Consultar con: npm run cli -- run:status --run c4d8ada5-34f1-4ebe-989a-b7f207c4f605
