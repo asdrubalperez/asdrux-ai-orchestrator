@@ -1,0 +1,4 @@
+MODEL_SMOKE_EXIT_CODE=0
+model: gpt-5.6-luna
+provider: openai
+sandbox: read-only
