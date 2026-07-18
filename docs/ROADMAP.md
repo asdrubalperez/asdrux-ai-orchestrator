@@ -6,10 +6,10 @@
 - Milestone 0
 - Milestone 1 — Pipeline completo Claude Code (FEATURE-001 a 006)
 - Spike Codex — walking skeleton, invocación única read-only (FEATURE-007)
+- Construcción de `CodexExecutor` de producción — paridad con Claude Code
 
 **🟡 Confirmado**
 - Milestone 2 — Validación end-to-end con caso de negocio real
-- Construcción de `CodexExecutor` de producción — paridad con Claude Code
 
 **⚪ Tentativo**
 - Loop Architect ↔ Functional
@@ -44,18 +44,20 @@ invocación única, rol `architect`, `permissions.filesystem: "read-only"` — e
 FEATURE-001, no de FEATURE-002 (aislamiento de escritura), FEATURE-004/005 (secuencia multi-fase,
 pipeline completo) ni FEATURE-006 (confinamiento QA). La paridad completa con Claude Code
 (escritura, confinamiento QA, orquestación multi-fase) queda explícitamente en el ítem
-🟡 Confirmado "Construcción de `CodexExecutor` de producción — paridad con Claude Code" — eso es
+✅ Ejecutado "Construcción de `CodexExecutor` de producción — paridad con Claude Code" — eso es
 lo que falta, no un extra opcional.
 
 ### 🟡 Milestone 2 — Validación end-to-end con caso de negocio real
 Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
 Confirmado y no Tentativo.
 
-### 🟡 Construcción de `CodexExecutor` de producción — paridad con Claude Code
-Confirmado con el owner: se construye `CodexExecutor` como implementación de producción, no solo
-el walking skeleton de FEATURE-007. Implica repetir para Codex el equivalente de FEATURE-002
-(aislamiento de escritura), FEATURE-004/005 (secuencia multi-fase, pipeline completo) y FEATURE-006
-(confinamiento QA) — es la paridad completa con Claude Code que el spike todavía no cubre.
+### ✅ Construcción de `CodexExecutor` de producción — paridad con Claude Code
+Cerrado en FEATURE-008 (ver `docs/features/FEATURE-008-implementation-results.md`). Se replicó
+para Codex el equivalente de FEATURE-002 (aislamiento de escritura, resuelto vía Docker con
+`--sandbox danger-full-access`, no con el sandbox nativo de Codex — bloqueado en esta VPS por un
+problema de privilegio de red del kernel), FEATURE-004/005 (secuencia multi-fase, pipeline
+completo) y FEATURE-006 (confinamiento QA, vía `--config features.shell_tool=false`). Paridad
+completa alcanzada y validada con evidencia real contra la VPS.
 
 ### ⚪ Loop Architect ↔ Functional
 Evaluar solo si el escalamiento por esta causa resulta frecuente en la práctica. Requeriría su
