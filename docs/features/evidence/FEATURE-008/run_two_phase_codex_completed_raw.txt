@@ -1,0 +1,10 @@
+
+> ai-orchestrator@0.1.0 cli
+> tsx src/cli/index.ts run:start --case /home/asdru/ai-orchestrator/docs/features/evidence/FEATURE-008/case_two_phase_codex_ok.json --pipeline two-phase-architect-functional --executor codex --model gpt-5.6-luna
+
+[run:start] runId=60ecaa96-c81a-4387-bb9e-ddb93f7a7b52
+[run:start] pipeline=two-phase-architect-functional@1 (2 fase/s lineales)
+[run:start] worktree creado: /home/asdru/ai-orchestrator-worktrees/60ecaa96-c81a-4387-bb9e-ddb93f7a7b52 (rama run/60ecaa96-c81a-4387-bb9e-ddb93f7a7b52)
+[run:start] worktree preservado (política de retención de 21 días): /home/asdru/ai-orchestrator-worktrees/60ecaa96-c81a-4387-bb9e-ddb93f7a7b52
+[run:start] status final: completed
+[run:start] run 60ecaa96-c81a-4387-bb9e-ddb93f7a7b52 persistido. Consultar con: npm run cli -- run:status --run 60ecaa96-c81a-4387-bb9e-ddb93f7a7b52

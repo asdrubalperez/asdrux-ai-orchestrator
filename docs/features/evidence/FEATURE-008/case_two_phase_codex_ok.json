@@ -1,0 +1,13 @@
+{
+  "caso_negocio": "Registro interno de solicitudes de soporte",
+  "descripcion": "El equipo de operaciones necesita una funcionalidad dentro del portal interno existente para registrar solicitudes de soporte no urgentes. Cada solicitud debe guardar titulo, descripcion, area solicitante, prioridad baja/media/alta y estado inicial pendiente. No hay integraciones externas, pagos, notificaciones automaticas ni permisos especiales en este incremento.",
+  "restricciones_conocidas": [
+    "La solucion debe usar la base de datos existente del portal interno.",
+    "Solo usuarios autenticados del portal pueden crear solicitudes.",
+    "El alcance se limita a crear y consultar solicitudes propias; no incluye asignacion ni resolucion."
+  ],
+  "criterios_de_exito": [
+    "Architect puede proponer una arquitectura de alto nivel sin decisiones externas pendientes.",
+    "Functional puede derivar reglas de negocio y criterios de aceptacion desde la propuesta de Architect."
+  ]
+}

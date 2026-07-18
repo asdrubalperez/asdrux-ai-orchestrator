@@ -1,0 +1,11 @@
+FEATURE-008 Parte 3 - two-phase Codex escalated cut summary
+RUN_ID=8ff2004f-4f48-46d1-80d7-260be8eaff1a
+RUN_STATUS=escalated
+CURRENT_PHASE=architect
+PHASE_EVENTS=phase_started:architect,phase_finished:architect
+PHASE_FINISHED_PROVIDERS=architect:codex:gpt-5.6-luna
+ARTIFACT_PHASES=architect:escalation
+START_STDOUT_HAS_TWO_PHASE_PIPELINE=true
+START_STDOUT_FINAL_ESCALATED=true
+FUNCTIONAL_PHASE_STARTED=false
+FUNCTIONAL_PHASE_FINISHED=false
