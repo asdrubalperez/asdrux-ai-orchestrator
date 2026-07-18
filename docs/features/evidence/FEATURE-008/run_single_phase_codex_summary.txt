@@ -1,0 +1,9 @@
+TSC_COMMAND_EXIT_CODE=0
+TSC_EXIT_CODE=0
+PARSER_TEST_EXIT_CODE=0
+RUN_START_EXIT_CODE=0
+RUN_ID=32de063a-8b15-417e-ad74-35148ecaf526
+RUN_STATUS_EXIT_CODE=0
+[run:start] status final: completed
+          "executorMetadata": {
+            "model": "gpt-5.6-luna",

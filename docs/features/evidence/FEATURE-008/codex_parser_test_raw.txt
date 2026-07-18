@@ -1,0 +1,22 @@
+TAP version 13
+# Subtest: parsea header de modelo y JSON final de Codex
+ok 1 - parsea header de modelo y JSON final de Codex
+  ---
+  duration_ms: 1.277444
+  type: 'test'
+  ...
+# Subtest: rechaza status fuera del contrato
+ok 2 - rechaza status fuera del contrato
+  ---
+  duration_ms: 0.360277
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 167.02637

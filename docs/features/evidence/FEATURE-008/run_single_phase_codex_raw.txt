@@ -1,0 +1,10 @@
+
+> ai-orchestrator@0.1.0 cli
+> tsx src/cli/index.ts run:start --case docs/features/evidence/FEATURE-003/case_ok.json --executor codex --model gpt-5.6-luna
+
+[run:start] runId=32de063a-8b15-417e-ad74-35148ecaf526
+[run:start] pipeline=single-phase-architect@1 (1 fase/s lineales)
+[run:start] worktree creado: /home/asdru/ai-orchestrator-worktrees/32de063a-8b15-417e-ad74-35148ecaf526 (rama run/32de063a-8b15-417e-ad74-35148ecaf526)
+[run:start] worktree preservado (política de retención de 21 días): /home/asdru/ai-orchestrator-worktrees/32de063a-8b15-417e-ad74-35148ecaf526
+[run:start] status final: completed
+[run:start] run 32de063a-8b15-417e-ad74-35148ecaf526 persistido. Consultar con: npm run cli -- run:status --run 32de063a-8b15-417e-ad74-35148ecaf526

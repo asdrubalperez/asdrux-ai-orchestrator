@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ClaudeCodeExecutor } from "../../executor/claudeCodeExecutor.js";
+import { CodexExecutor } from "../../executor/codexExecutor.js";
 import {
   commitAllChanges,
   createRunWorktree,
@@ -25,16 +26,19 @@ import { TestExecutor, parseTestCommand } from "../../testing/testExecutor.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..", "..");
+type ExecutorProvider = "claude" | "codex";
+type RunExecutor = ClaudeCodeExecutor | CodexExecutor;
 
 export async function runStart(args: string[]): Promise<void> {
   const casePath = getFlag(args, "--case");
   const ownerId = getFlag(args, "--owner") ?? "asdru";
   const pipelineName = getFlag(args, "--pipeline") ?? SINGLE_PHASE_ARCHITECT.name;
   const model = getFlag(args, "--model");
+  const executorProvider = parseExecutorProvider(getFlag(args, "--executor") ?? "claude");
 
   if (!casePath) {
     throw new Error(
-      "Uso: npm run cli -- run:start --case <ruta-a-json> [--owner <id>] [--pipeline <nombre>] [--model <alias>]"
+      "Uso: npm run cli -- run:start --case <ruta-a-json> [--owner <id>] [--pipeline <nombre>] [--model <alias>] [--executor claude|codex]"
     );
   }
 
@@ -71,7 +75,7 @@ export async function runStart(args: string[]): Promise<void> {
     pipeline: `${pipelineSpec.name}@${pipelineSpec.version}`,
   });
 
-  const executor = new ClaudeCodeExecutor({ workingDirectory: worktree.worktreePath, model });
+  const executor = createExecutor(executorProvider, worktree.worktreePath, model);
   const readRole = (agentRole: string) =>
     readFile(path.join(repoRoot, "src", "executor", "roles", `${agentRole}.txt`), "utf8");
 
@@ -112,6 +116,10 @@ export async function runStart(args: string[]): Promise<void> {
 
     // --- Loop Developer↔QA (FEATURE-005) ---
     if (pipelineSpec.definition.loop) {
+      if (executorProvider === "codex") {
+        throw new Error("CodexExecutor todavia no soporta pipeline con loop en FEATURE-008 parte 1b.");
+      }
+
       // FEATURE-006 (resuelve H14): Developer corre en un Executor separado, en modo "container"
       // — su invocación completa (Bash incluido) queda confinada dentro de un contenedor Docker
       // endurecido, no en el host. QA sigue en modo "host" (ya no necesita Bash en absoluto).
@@ -154,7 +162,7 @@ export async function runStart(args: string[]): Promise<void> {
 }
 
 export async function runDeveloperQaLoop(params: {
-  executor: ClaudeCodeExecutor;
+  executor: RunExecutor;
   developerExecutor: ClaudeCodeExecutor;
   readRole: (agentRole: string) => Promise<string>;
   runId: string;
@@ -308,4 +316,17 @@ function getFlag(args: string[], name: string): string | undefined {
   const idx = args.indexOf(name);
   if (idx === -1) return undefined;
   return args[idx + 1];
+}
+
+function parseExecutorProvider(value: string): ExecutorProvider {
+  if (value === "claude" || value === "codex") return value;
+  throw new Error(`Executor desconocido: "${value}". Disponibles: claude, codex`);
+}
+
+function createExecutor(provider: ExecutorProvider, workingDirectory: string, model: string | undefined): RunExecutor {
+  if (provider === "codex") {
+    return new CodexExecutor({ workingDirectory, model });
+  }
+
+  return new ClaudeCodeExecutor({ workingDirectory, model });
 }

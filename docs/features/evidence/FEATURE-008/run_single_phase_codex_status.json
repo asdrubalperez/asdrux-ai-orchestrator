@@ -1,0 +1,68 @@
+
+> ai-orchestrator@0.1.0 cli
+> tsx src/cli/index.ts run:status --run 32de063a-8b15-417e-ad74-35148ecaf526
+
+{
+  "run": {
+    "id": "32de063a-8b15-417e-ad74-35148ecaf526",
+    "pipeline_definition_id": "a5b9cd3e-ec7e-4711-9864-c29c361b9637",
+    "owner_id": "asdru",
+    "current_phase": "architect",
+    "status": "completed",
+    "branch_name": "run/32de063a-8b15-417e-ad74-35148ecaf526",
+    "worktree_path": "/home/asdru/ai-orchestrator-worktrees/32de063a-8b15-417e-ad74-35148ecaf526",
+    "created_at": "2026-07-18T03:10:53.587Z",
+    "updated_at": "2026-07-18T03:11:00.073Z"
+  },
+  "events": [
+    {
+      "id": "221",
+      "event_type": "run_started",
+      "payload": {
+        "casePath": "docs/features/evidence/FEATURE-003/case_ok.json",
+        "pipeline": "single-phase-architect@1",
+        "branchName": "run/32de063a-8b15-417e-ad74-35148ecaf526",
+        "worktreePath": "/home/asdru/ai-orchestrator-worktrees/32de063a-8b15-417e-ad74-35148ecaf526"
+      },
+      "created_at": "2026-07-18T03:10:53.590Z"
+    },
+    {
+      "id": "222",
+      "event_type": "phase_started",
+      "payload": {
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-18T03:10:53.593Z"
+    },
+    {
+      "id": "223",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "completed",
+          "summary": "Se propone una arquitectura centralizada de reservas integrada con Google Calendar, con una base de datos propia, validación transaccional de concurrencia y sincronización resiliente para garantizar disponibilidad en tiempo real y evitar dobles reservas. La regla de máximo 2 horas se aplicará durante la confirmación de cada reserva.",
+          "outputArtifact": "- Portal interno como interfaz de reserva, reutilizando la autenticación corporativa existente.\n- Servicio de reservas centralizado como fuente de verdad para disponibilidad, validación de reglas y prevención de dobles reservas.\n- Adaptador de integración con Google Calendar para consultar eventos y crear, actualizar o cancelar reservas en calendarios corporativos.\n- Base de datos propia para mantener salas, reservas, usuarios, estados de sincronización y trazabilidad.\n- Control transaccional de concurrencia mediante bloqueo o restricción de unicidad por sala y rango temporal, con revalidación inmediata antes de confirmar.\n- Disponibilidad calculada combinando reservas internas y eventos provenientes de Google Calendar, con caché de corta duración e invalidación ante cambios relevantes.\n- Validaciones de negocio: usuario autenticado, sala existente, intervalo válido, ausencia de solapamientos y máximo acumulado de 2 horas de reserva continua por usuario por día.\n- Procesamiento asíncrono y mecanismo de reintentos para sincronizaciones con Google Calendar; estados explícitos para reservas pendientes, confirmadas o fallidas.\n- Manejo de conflictos externos: si Google Calendar rechaza o detecta un conflicto, la reserva interna debe revertirse o quedar marcada como fallida y notificarse al usuario.\n- API interna entre portal y servicio de reservas, con autorización basada en identidad corporativa y permisos para administrar salas.\n- Auditoría de operaciones, métricas de disponibilidad y sincronización, registros de errores y alertas operativas.\n- Pruebas de aceptación centradas en concurrencia, conflictos de calendario, límites de duración, fallos de integración y consistencia eventual.",
+          "escalationReason": null,
+          "executorMetadata": {
+            "model": "gpt-5.6-luna",
+            "provider": "codex"
+          }
+        },
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-18T03:11:00.070Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "9f51e81c-4fe1-4cee-a831-1981fa4607a6",
+      "phase": "architect",
+      "kind": "design",
+      "content": {
+        "summary": "Se propone una arquitectura centralizada de reservas integrada con Google Calendar, con una base de datos propia, validación transaccional de concurrencia y sincronización resiliente para garantizar disponibilidad en tiempo real y evitar dobles reservas. La regla de máximo 2 horas se aplicará durante la confirmación de cada reserva.",
+        "outputArtifact": "- Portal interno como interfaz de reserva, reutilizando la autenticación corporativa existente.\n- Servicio de reservas centralizado como fuente de verdad para disponibilidad, validación de reglas y prevención de dobles reservas.\n- Adaptador de integración con Google Calendar para consultar eventos y crear, actualizar o cancelar reservas en calendarios corporativos.\n- Base de datos propia para mantener salas, reservas, usuarios, estados de sincronización y trazabilidad.\n- Control transaccional de concurrencia mediante bloqueo o restricción de unicidad por sala y rango temporal, con revalidación inmediata antes de confirmar.\n- Disponibilidad calculada combinando reservas internas y eventos provenientes de Google Calendar, con caché de corta duración e invalidación ante cambios relevantes.\n- Validaciones de negocio: usuario autenticado, sala existente, intervalo válido, ausencia de solapamientos y máximo acumulado de 2 horas de reserva continua por usuario por día.\n- Procesamiento asíncrono y mecanismo de reintentos para sincronizaciones con Google Calendar; estados explícitos para reservas pendientes, confirmadas o fallidas.\n- Manejo de conflictos externos: si Google Calendar rechaza o detecta un conflicto, la reserva interna debe revertirse o quedar marcada como fallida y notificarse al usuario.\n- API interna entre portal y servicio de reservas, con autorización basada en identidad corporativa y permisos para administrar salas.\n- Auditoría de operaciones, métricas de disponibilidad y sincronización, registros de errores y alertas operativas.\n- Pruebas de aceptación centradas en concurrencia, conflictos de calendario, límites de duración, fallos de integración y consistencia eventual."
+      },
+      "created_at": "2026-07-18T03:11:00.072Z"
+    }
+  ]
+}
