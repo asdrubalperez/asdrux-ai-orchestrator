@@ -56,6 +56,12 @@ Excluye:
 No introduce reglas funcionales nuevas. Reutiliza las reglas aprobadas en FEATURE-003/004/005/006 y
 solo cambia el proveedor de ejecucion.
 
+Nota de diseño (confirmada con el owner): el commit dd7fd2e agregó la regla 3 a
+`src/executor/roles/architect.txt` y `src/executor/roles/functional.txt` — archivos compartidos
+entre `ClaudeCodeExecutor` y `CodexExecutor`. Es una mejora deliberada del pipeline completo (menos
+escalamientos por edge cases fuera de alcance), no un ajuste exclusivo para hacer pasar a Codex.
+Afecta el comportamiento de ambos proveedores de acá en adelante.
+
 ---
 
 ## 6. Estrategia Algoritmica
