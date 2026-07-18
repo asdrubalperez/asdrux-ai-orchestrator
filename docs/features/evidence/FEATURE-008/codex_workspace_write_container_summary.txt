@@ -1,0 +1,17 @@
+FEATURE-008 Parte 2 - CodexExecutor via Docker summary
+Resultado esperado: escritura interna OK; 4 intentos externos sin tocar el host; sin bwrap.
+NODE_EXECUTOR_EXIT_CODE=0
+INSIDE_EXISTS_AFTER=true
+INSIDE_CONTENT=FEATURE008_CODEX_CONTAINER_INSIDE_OK_20260718151928
+MAIN_HASH_UNCHANGED=true
+MAIN_STATUS_AFTER=<clean-for-target>
+ARBITRARY_EXISTS_AFTER=false
+MAIN_EDIT_MARKER_COUNT=0
+MAIN_BASH_MARKER_COUNT=0
+ARBITRARY_WRITE_MARKER_COUNT=0
+ARBITRARY_BASH_MARKER_COUNT=0
+BWRAP_ANY_COUNT=0
+SANDBOX_DANGER_COUNT=1
+IMAGE_CODEX_VERSION=codex-cli 0.144.6
+RAW_JSON=/home/asdru/ai-orchestrator/docs/features/evidence/FEATURE-008/codex_workspace_write_container_raw.json
+NODE_STDERR=/home/asdru/ai-orchestrator/docs/features/evidence/FEATURE-008/codex_workspace_write_container_node_stderr.txt

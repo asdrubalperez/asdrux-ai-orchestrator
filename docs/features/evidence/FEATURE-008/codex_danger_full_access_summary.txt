@@ -1,0 +1,11 @@
+WORKTREE=/home/asdru/ai-orchestrator-worktrees/feature-008-codex-danger-20260718034428
+BRANCH=run/feature-008-codex-danger-20260718034428
+WORKTREE_ADD_EXIT_CODE=0
+CODEX_DANGER_EXIT_CODE=0
+INSIDE_EXISTS_AFTER=true
+INSIDE_MARKER_AFTER=1
+BWRAP_RTM_NEWADDR_COUNT=0
+BWRAP_ANY_COUNT=0
+MODEL_HEADER=model: gpt-5.6-luna
+PROVIDER_HEADER=provider: openai
+SANDBOX_HEADER=sandbox: danger-full-access
