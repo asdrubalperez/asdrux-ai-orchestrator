@@ -9,6 +9,7 @@
 
 **🟡 Confirmado**
 - Milestone 2 — Validación end-to-end con caso de negocio real
+- Construcción de `CodexExecutor` de producción — paridad con Claude Code
 
 **⚪ Tentativo**
 - Loop Architect ↔ Functional
@@ -18,7 +19,6 @@
 - Limpieza automática de worktrees/branches vencidos
 - Egress de red con allowlist fino (Developer)
 - `PreToolUse` hooks como defensa en profundidad (QA)
-- Repetir aislamiento de escritura / confinamiento QA contra Codex
 - Creación real de PR vía API de GitHub / merge automático
 - Deployment Strategy y separación dev/staging/prod
 - Capa de UI (Disparo, Run en curso, Historial/admin)
@@ -44,12 +44,18 @@ invocación única, rol `architect`, `permissions.filesystem: "read-only"` — e
 FEATURE-001, no de FEATURE-002 (aislamiento de escritura), FEATURE-004/005 (secuencia multi-fase,
 pipeline completo) ni FEATURE-006 (confinamiento QA). La paridad completa con Claude Code
 (escritura, confinamiento QA, orquestación multi-fase) queda explícitamente en el ítem
-⚪ Tentativo "Repetir aislamiento de escritura / confinamiento QA contra Codex" — eso es lo que
-falta, no un extra opcional.
+🟡 Confirmado "Construcción de `CodexExecutor` de producción — paridad con Claude Code" — eso es
+lo que falta, no un extra opcional.
 
 ### 🟡 Milestone 2 — Validación end-to-end con caso de negocio real
 Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
 Confirmado y no Tentativo.
+
+### 🟡 Construcción de `CodexExecutor` de producción — paridad con Claude Code
+Confirmado con el owner: se construye `CodexExecutor` como implementación de producción, no solo
+el walking skeleton de FEATURE-007. Implica repetir para Codex el equivalente de FEATURE-002
+(aislamiento de escritura), FEATURE-004/005 (secuencia multi-fase, pipeline completo) y FEATURE-006
+(confinamiento QA) — es la paridad completa con Claude Code que el spike todavía no cubre.
 
 ### ⚪ Loop Architect ↔ Functional
 Evaluar solo si el escalamiento por esta causa resulta frecuente en la práctica. Requeriría su
@@ -87,10 +93,6 @@ Hoy el contenedor de Developer usa la red bridge default de Docker, sin allowlis
 ### ⚪ `PreToolUse` hooks como defensa en profundidad (QA)
 Prioridad muy baja, no descartado del todo. Dependen de una API específica de Claude Code — no
 portan a Codex.
-
-### ⚪ Repetir aislamiento de escritura / confinamiento QA contra Codex
-Equivalente de FEATURE-002 y FEATURE-006, pero para Codex — solo si se decide construir un
-`CodexExecutor` de producción en serio.
 
 ### ⚪ Creación real de PR vía API de GitHub / merge automático
 Hoy el flujo termina en rama lista, sin apertura de PR ni merge automatizado a `main`.
