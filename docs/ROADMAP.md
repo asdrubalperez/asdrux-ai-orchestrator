@@ -10,6 +10,7 @@
 
 **🟡 Confirmado**
 - Milestone 2 — Validación end-to-end con caso de negocio real
+- Adecuación del Playbook para el Orquestador AI automático
 
 **⚪ Tentativo**
 - Loop Architect ↔ Functional
@@ -50,6 +51,13 @@ lo que falta, no un extra opcional.
 ### 🟡 Milestone 2 — Validación end-to-end con caso de negocio real
 Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
 Confirmado y no Tentativo.
+
+### 🟡 Adecuación del Playbook para el Orquestador AI automático
+El playbook actual (`docs/playbook/`) está diseñado para que lo use un humano en conjunto con un
+asistente IA (Architect/Governance Guide para diseño, asistente de desarrollo para implementación)
+— asume lectura, confirmación y decisión humana en cada paso (Bootstrap, Approval Gate, elección de
+Playbook Mode, etc.). Falta adecuarlo para que el propio Orquestador AI automático lo consuma y
+opere sobre él sin loop humano — pendiente crítico, no evaluado como opcional.
 
 ### ✅ Construcción de `CodexExecutor` de producción — paridad con Claude Code
 Cerrado en FEATURE-008 (ver `docs/features/FEATURE-008-implementation-results.md`). Se replicó
