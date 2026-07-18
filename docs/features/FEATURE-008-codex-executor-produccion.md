@@ -73,6 +73,10 @@ No aplica logica de decision nueva.
   `read-only`. Para `workspace-write`, Codex corre dentro de Docker con `--sandbox
   danger-full-access`; el contenedor impone el limite real porque el sandbox nativo de Codex en la
   VPS dispara bubblewrap y falla con `RTM_NEWADDR`.
+- Confinamiento QA: como reaccion a la validacion positiva del pipeline completo, QA mantiene
+  `read-only` y ademas invoca Codex con `--config features.shell_tool=false`, equivalente a quitar
+  `Bash` del rol QA en FEATURE-006. El `TestExecutor` sigue siendo la unica via de ejecucion de
+  tests.
 - Modelo: se inyecta por opciones de clase y se pasa de forma explicita con `--model`; no se
   hardcodea ni se depende de `~/.codex/config.toml`.
 - Riesgo H17: no confiar en que el modelo reporte su propio aislamiento; validar con evidencia

@@ -145,6 +145,7 @@ export class CodexExecutor implements Executor {
         "exec",
         "--sandbox",
         runsInContainer ? "danger-full-access" : invocation.permissions.filesystem,
+        ...(this.shouldDisableShellTool(invocation) ? ["--config", "features.shell_tool=false"] : []),
         "--output-schema",
         runsInContainer ? CONTAINER_SCHEMA_PATH : schemaPath,
       ];
@@ -181,6 +182,10 @@ export class CodexExecutor implements Executor {
         )}`
       );
     }
+  }
+
+  private shouldDisableShellTool(invocation: PhaseInvocation): boolean {
+    return invocation.agentRole === "qa";
   }
 
   private buildPrompt(invocation: PhaseInvocation): string {
