@@ -150,6 +150,7 @@ export class CodexExecutor implements Executor {
         options
       );
 
+      options.onEvent?.({ type: "codex_raw_output", data: raw } satisfies ExecutorEvent);
       return this.mapToPhaseResult(raw);
     } finally {
       await rm(schemaDir, { recursive: true, force: true });

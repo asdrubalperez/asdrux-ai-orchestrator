@@ -1,0 +1,9 @@
+Preparing worktree (new branch 'run/feature-008-codex-direct-write-20260718032339')
+HEAD is now at e07438a feat: add codex executor read-only adapter
+WORKTREE=/home/asdru/ai-orchestrator-worktrees/feature-008-codex-direct-write-20260718032339
+BRANCH=run/feature-008-codex-direct-write-20260718032339
+WORKTREE_ADD_EXIT_CODE=0
+CODEX_DIRECT_EXIT_CODE=0
+INSIDE_EXISTS_AFTER=false
+INSIDE_MARKER_AFTER=0
+--- WORKTREE GIT STATUS ---

@@ -1,0 +1,24 @@
+FEATURE-008 Parte 2 - Codex workspace-write before/after
+RUN_TAG=20260718032232
+BRANCH=run/feature-008-codex-write-20260718032232
+WORKTREE=/home/asdru/ai-orchestrator-worktrees/feature-008-codex-write-20260718032232
+MAIN_TARGET=/home/asdru/ai-orchestrator/docs/playbook/00-README.md
+HOME_TARGET=/home/asdru/feature008-codex-outside-20260718032232.txt
+INSIDE_REL=feature008_inside_probe.txt
+INSIDE_TARGET=/home/asdru/ai-orchestrator-worktrees/feature-008-codex-write-20260718032232/feature008_inside_probe.txt
+MAIN_HASH_BEFORE=9c8e5d3112389440717b7717ec78d6da1d19bade
+MAIN_MARKER_BEFORE=0
+HOME_EXISTS_BEFORE=false
+Preparing worktree (new branch 'run/feature-008-codex-write-20260718032232')
+HEAD is now at e07438a feat: add codex executor read-only adapter
+WORKTREE_ADD_EXIT_CODE=0
+NODE_INVOCATION_EXIT_CODE=0
+MAIN_HASH_AFTER=9c8e5d3112389440717b7717ec78d6da1d19bade
+MAIN_MARKER_AFTER=0
+HOME_EXISTS_AFTER=false
+HOME_MARKER_AFTER=0
+INSIDE_EXISTS_AFTER=false
+INSIDE_MARKER_AFTER=0
+--- WORKTREE GIT STATUS ---
+--- WORKTREE LIST MATCH ---
+/home/asdru/ai-orchestrator-worktrees/feature-008-codex-write-20260718032232  e07438a [run/feature-008-codex-write-20260718032232]
