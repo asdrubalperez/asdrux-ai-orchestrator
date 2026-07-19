@@ -31,6 +31,13 @@
 - Notificación Slack/webhook complementaria a la UI de monitoreo (post Feature 11, si hace falta
   alertas fuera de cuando se está mirando activamente)
 
+- Bajar expiracion de sesion del CLI de 30 dias a 48 horas al pasar a produccion - condicionado a
+  que no se haya implementado otro mecanismo de autenticacion antes de esa fecha.
+- Limpieza de persistencia de codigo versionado: `artifacts.commit_ref` existe en schema pero no se
+  puebla nunca; los commits reales quedan hoy solo en `run_events`.
+- Revaluar sesion local del CLI: el token no tiene validacion server-side ni tabla `sessions`;
+  actualmente es confianza local unicamente.
+
 ---
 
 ## Detalle

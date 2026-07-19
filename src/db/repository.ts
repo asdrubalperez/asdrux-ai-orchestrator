@@ -13,12 +13,28 @@ export interface RunRow {
   id: string;
   pipeline_definition_id: string;
   owner_id: string;
+  project_id: string | null;
   current_phase: string | null;
   status: string;
   branch_name: string | null;
   worktree_path: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface UserRow {
+  id: string;
+  handle: string;
+  password_hash: string | null;
+  created_at: string;
+}
+
+export interface ProjectRow {
+  id: string;
+  name: string;
+  repo_path: string;
+  owner_id: string;
+  created_at: string;
 }
 
 /**
@@ -46,17 +62,57 @@ export async function createRun(params: {
   id: string;
   pipelineDefinitionId: string;
   ownerId: string;
+  projectId: string;
   firstPhase: string;
   branchName: string;
   worktreePath: string;
 }): Promise<RunRow> {
   const result = await pool.query<RunRow>(
-    `insert into runs (id, pipeline_definition_id, owner_id, current_phase, status, branch_name, worktree_path)
-     values ($1, $2, $3, $4, 'running', $5, $6)
+    `insert into runs (id, pipeline_definition_id, owner_id, project_id, current_phase, status, branch_name, worktree_path)
+     values ($1, $2, $3, $4, $5, 'running', $6, $7)
      returning *`,
-    [params.id, params.pipelineDefinitionId, params.ownerId, params.firstPhase, params.branchName, params.worktreePath]
+    [
+      params.id,
+      params.pipelineDefinitionId,
+      params.ownerId,
+      params.projectId,
+      params.firstPhase,
+      params.branchName,
+      params.worktreePath,
+    ]
   );
   return result.rows[0];
+}
+
+export async function findUserByHandle(handle: string): Promise<UserRow | null> {
+  const result = await pool.query<UserRow>("select * from users where handle = $1", [handle]);
+  return result.rows[0] ?? null;
+}
+
+export async function findUserById(userId: string): Promise<UserRow | null> {
+  const result = await pool.query<UserRow>("select * from users where id = $1", [userId]);
+  return result.rows[0] ?? null;
+}
+
+export async function upsertUserPassword(handle: string, passwordHash: string): Promise<UserRow> {
+  const result = await pool.query<UserRow>(
+    `insert into users (handle, password_hash)
+     values ($1, $2)
+     on conflict (handle) do update set password_hash = excluded.password_hash
+     returning *`,
+    [handle, passwordHash]
+  );
+  return result.rows[0];
+}
+
+export async function getProjectForUser(userId: string, projectId?: string): Promise<ProjectRow | null> {
+  const result = projectId
+    ? await pool.query<ProjectRow>("select * from projects where id = $1 and owner_id = $2", [projectId, userId])
+    : await pool.query<ProjectRow>(
+        "select * from projects where owner_id = $1 order by created_at asc, name asc limit 1",
+        [userId]
+      );
+  return result.rows[0] ?? null;
 }
 
 export async function updateRunCurrentPhase(runId: string, phase: string): Promise<void> {
@@ -108,4 +164,10 @@ export async function getRunDetail(runId: string) {
   );
 
   return { run: run.rows[0], events: events.rows, artifacts: artifacts.rows };
+}
+
+export async function getRunDetailForUser(runId: string, userId: string) {
+  const detail = await getRunDetail(runId);
+  if (!detail || detail.run.owner_id !== userId) return null;
+  return detail;
 }

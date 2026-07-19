@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readValidSession } from "../../auth/session.js";
 import { ClaudeCodeExecutor } from "../../executor/claudeCodeExecutor.js";
 import { CodexExecutor } from "../../executor/codexExecutor.js";
 import {
@@ -15,6 +16,8 @@ import {
   createRun,
   ensurePipelineDefinition,
   finalizeRun,
+  findUserById,
+  getProjectForUser,
   recordArtifact,
   recordRunEvent,
   updateRunCurrentPhase,
@@ -25,20 +28,34 @@ import { extractTestCommand } from "../../pipelines/extractTestCommand.js";
 import { TestExecutor, parseTestCommand } from "../../testing/testExecutor.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, "..", "..", "..");
+const orchestratorRoot = path.resolve(__dirname, "..", "..", "..");
 type ExecutorProvider = "claude" | "codex";
 type RunExecutor = ClaudeCodeExecutor | CodexExecutor;
 
 export async function runStart(args: string[]): Promise<void> {
   const casePath = getFlag(args, "--case");
-  const ownerId = getFlag(args, "--owner") ?? "asdru";
+  if (getFlag(args, "--owner")) {
+    throw new Error("--owner ya no está soportado. Corré 'npm run cli -- login' y usá la sesión local.");
+  }
+
+  const session = await readValidSession();
+  const user = await findUserById(session.userId);
+  if (!user) {
+    throw new Error("Sesión expirada o inexistente. Corré 'npm run cli -- login'.");
+  }
+
+  const project = await getProjectForUser(user.id, getFlag(args, "--project"));
+  if (!project) {
+    throw new Error("No existe un proyecto disponible para la sesión actual.");
+  }
+
   const pipelineName = getFlag(args, "--pipeline") ?? SINGLE_PHASE_ARCHITECT.name;
   const model = getFlag(args, "--model");
   const executorProvider = parseExecutorProvider(getFlag(args, "--executor") ?? "claude");
 
   if (!casePath) {
     throw new Error(
-      "Uso: npm run cli -- run:start --case <ruta-a-json> [--owner <id>] [--pipeline <nombre>] [--model <alias>] [--executor claude|codex]"
+      "Uso: npm run cli -- run:start --case <ruta-a-json> [--project <id>] [--pipeline <nombre>] [--model <alias>] [--executor claude|codex]"
     );
   }
 
@@ -56,13 +73,15 @@ export async function runStart(args: string[]): Promise<void> {
     `[run:start] pipeline=${pipelineSpec.name}@${pipelineSpec.version} (${pipelineSpec.definition.phases.length} fase/s lineales${pipelineSpec.definition.loop ? " + loop Developer↔QA" : ""})`
   );
 
-  const worktree = await createRunWorktree(repoRoot, runId);
+  const projectRepoRoot = path.resolve(project.repo_path);
+  const worktree = await createRunWorktree(projectRepoRoot, runId);
   console.log(`[run:start] worktree creado: ${worktree.worktreePath} (rama ${worktree.branchName})`);
 
   const run = await createRun({
     id: runId,
     pipelineDefinitionId: pipelineDefinition.id,
-    ownerId,
+    ownerId: user.id,
+    projectId: project.id,
     firstPhase: pipelineSpec.definition.phases[0].agentRole,
     branchName: worktree.branchName,
     worktreePath: worktree.worktreePath,
@@ -73,11 +92,13 @@ export async function runStart(args: string[]): Promise<void> {
     worktreePath: worktree.worktreePath,
     casePath,
     pipeline: `${pipelineSpec.name}@${pipelineSpec.version}`,
+    projectId: project.id,
+    repoPath: projectRepoRoot,
   });
 
   const executor = createExecutor(executorProvider, worktree.worktreePath, model);
   const readRole = (agentRole: string) =>
-    readFile(path.join(repoRoot, "src", "executor", "roles", `${agentRole}.txt`), "utf8");
+    readFile(path.join(orchestratorRoot, "src", "executor", "roles", `${agentRole}.txt`), "utf8");
 
   try {
     // --- Fases lineales (FEATURE-004): transición automática solo si status === "completed" ---
@@ -109,7 +130,7 @@ export async function runStart(args: string[]): Promise<void> {
 
       if (result.status !== "completed") {
         console.log(`[run:start] fase "${phase.agentRole}" terminó con status "${result.status}" — pipeline detenido.`);
-        await finishRun(run.id, worktree, result, { pushAndClean: false });
+        await finishRun(projectRepoRoot, run.id, worktree, result, { pushAndClean: false });
         return;
       }
     }
@@ -131,11 +152,11 @@ export async function runStart(args: string[]): Promise<void> {
       });
 
       const approved = finalResult.status === "completed";
-      await finishRun(run.id, worktree, finalResult, { pushAndClean: approved });
+      await finishRun(projectRepoRoot, run.id, worktree, finalResult, { pushAndClean: approved });
       return;
     }
 
-    await finishRun(run.id, worktree, previousResult as PhaseResult, { pushAndClean: false });
+    await finishRun(projectRepoRoot, run.id, worktree, previousResult as PhaseResult, { pushAndClean: false });
   } catch (err) {
     // Un error inesperado (timeout, crash del CLI, etc.) no debe dejar el run colgado en
     // "running" para siempre sin ningún cierre persistido — se registra como failed y se
@@ -148,7 +169,7 @@ export async function runStart(args: string[]): Promise<void> {
       escalationReason: null,
     };
     await recordRunEvent(run.id, "run_error", { message });
-    await finishRun(run.id, worktree, failure, { pushAndClean: false });
+    await finishRun(projectRepoRoot, run.id, worktree, failure, { pushAndClean: false });
     throw err;
   }
 }
@@ -277,6 +298,7 @@ export async function runDeveloperQaLoop(params: {
 }
 
 async function finishRun(
+  repoRoot: string,
   runId: string,
   worktree: RunWorktree,
   finalResult: PhaseResult,

@@ -1,4 +1,5 @@
-import { getRunDetail } from "../../db/repository.js";
+import { readValidSession } from "../../auth/session.js";
+import { getRunDetailForUser } from "../../db/repository.js";
 
 export async function runStatus(args: string[]): Promise<void> {
   const runId = getFlag(args, "--run");
@@ -6,7 +7,8 @@ export async function runStatus(args: string[]): Promise<void> {
     throw new Error("Uso: npm run cli -- run:status --run <runId>");
   }
 
-  const detail = await getRunDetail(runId);
+  const session = await readValidSession();
+  const detail = await getRunDetailForUser(runId, session.userId);
   if (!detail) {
     console.log(`No existe ningún run con id ${runId}`);
     return;
