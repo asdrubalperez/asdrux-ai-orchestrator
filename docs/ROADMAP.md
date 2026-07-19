@@ -11,9 +11,12 @@
 **🟡 Confirmado**
 - Milestone 2 — Validación end-to-end con caso de negocio real
 - Adecuación del Playbook para el Orquestador AI automático
+- Capa de UI — "Run en curso" (solo lectura, sin Disparo ni Historial/admin todavía)
+- Agregar tabla `projects` al schema para persistencia de configuración por proyecto gestionado
+- Mecanismo técnico de persistencia de contexto/hallazgos en el circuito de escalamiento
 
 **⚪ Tentativo**
-- Loop Architect ↔ Functional
+- Escalamiento optimizado sin reinicio completo
 - Selección de proveedor/modelo/credenciales por rol
 - Approval Model por Release
 - Concurrencia de runs simultáneos
@@ -22,7 +25,9 @@
 - `PreToolUse` hooks como defensa en profundidad (QA)
 - Creación real de PR vía API de GitHub / merge automático
 - Deployment Strategy y separación dev/staging/prod
-- Capa de UI (Disparo, Run en curso, Historial/admin)
+- Capa de UI (Disparo, Historial/admin — "Run en curso" ya pasó a Confirmado, ver arriba)
+- Notificación Slack/webhook complementaria a la UI de monitoreo (post Feature 10, si hace falta
+  alertas fuera de cuando se está mirando activamente)
 
 ---
 
@@ -59,6 +64,20 @@ asistente IA (Architect/Governance Guide para diseño, asistente de desarrollo p
 Playbook Mode, etc.). Falta adecuarlo para que el propio Orquestador AI automático lo consuma y
 opere sobre él sin loop humano — pendiente crítico, no evaluado como opcional.
 
+### 🟡 Agregar tabla `projects` al schema
+El resto ya lo resuelve la tabla `artifacts` existente vía JSONB (ver
+`docs/playbook/02-ARCHITECTURE.md`, sección 5) — código en git vía `commit_ref`, diseño como
+contenido JSON. Falta la tabla `projects` para modelar múltiples productos gestionados y persistir
+ahí la configuración "Editable por producto" de cada uno. Marcador `[PENDIENTE-DB-PROJECTS]` (9
+apariciones en `00`, `01`, `02`, `03`, `04`, `AGENTS.md`, `BOOTSTRAP.md` de `docs/runbook/`) a
+reemplazar una vez resuelto esto.
+
+### 🟡 Mecanismo técnico de persistencia de contexto/hallazgos en el circuito de escalamiento
+Necesario para que el circuito de escalamiento de `06-DELIVERY-WORKFLOW.md` (Stage 3) funcione en
+la práctica — hoy solo está descrito conceptualmente. Revisar primero si la tabla `run_events` ya
+existente (log append-only de todo lo ocurrido en un run) resuelve esto directamente, antes de
+diseñar un mecanismo nuevo.
+
 ### ✅ Construcción de `CodexExecutor` de producción — paridad con Claude Code
 Cerrado en FEATURE-008 (ver `docs/features/FEATURE-008-implementation-results.md`). Se replicó
 para Codex el equivalente de FEATURE-002 (aislamiento de escritura, resuelto vía Docker con
@@ -67,9 +86,13 @@ problema de privilegio de red del kernel), FEATURE-004/005 (secuencia multi-fase
 completo) y FEATURE-006 (confinamiento QA, vía `--config features.shell_tool=false`). Paridad
 completa alcanzada y validada con evidencia real contra la VPS.
 
-### ⚪ Loop Architect ↔ Functional
-Evaluar solo si el escalamiento por esta causa resulta frecuente en la práctica. Requeriría su
-propio límite de reintentos y condición de corte, no se asume por analogía con Developer↔QA.
+### ⚪ Escalamiento optimizado sin reinicio completo
+La v1 ya diseñada en Feature 09 (`03-AI-CONSTITUTION.md`, Reglas 8 y 10) resuelve el escalamiento
+con una vía única: todo hallazgo entra por Architect y avanza en el orden normal del pipeline
+hasta llegar al dueño real, llevando el contexto acumulado — no reinicia todo desde cero, pero sí
+recorre secuencialmente los pasos intermedios aunque no tengan nada que resolver. Este ítem es la
+optimización futura: permitir que el circuito llegue directo al dueño real sin recorrer los pasos
+intermedios, cuando el costo de la v1 secuencial resulte un problema real en la práctica.
 
 ### ⚪ Selección de proveedor/modelo/credenciales por rol
 Ítem ampliado en la sesión de FEATURE-007, cubre tres superficies de configuración, todas parte de
@@ -86,9 +109,14 @@ la misma pantalla de Disparo de la UI:
   aplica a los tres puntos — proveedor, modelo y credenciales — no solo a proveedor/modelo.
 
 ### ⚪ Approval Model por Release
-Cuarta configuración de `06-DELIVERY-WORKFLOW.md` — aprobación humana obligatoria al cierre de una
-Release, con autonomía del Orquestador para encadenar Features dentro de ella sin gate individual.
-Aplica cuando el Orquestador opere sobre proyectos externos.
+Feature 09 (`06-DELIVERY-WORKFLOW.md`, Stage 6) ya diseñó la v1: Modo A (default — automático
+hasta el push de cada Feature, humano revisa antes del merge a la rama principal) y Modo Auto
+(también el merge es automático; solo el deploy a producción requiere humano, sin excepción, por
+la Regla 9 de `03-AI-CONSTITUTION.md`).
+
+Lo que queda Tentativo: exponer el rigor (Modo A / Modo Auto) como configuración parametrizable
+real para el usuario final — hoy es fijo, decidido por quienes operan el Orquestador. Aplica
+cuando el Orquestador opere sobre proyectos externos.
 
 ### ⚪ Concurrencia de runs simultáneos
 H9 (FEATURE-003): solo se probaron invocaciones secuenciales; comportamiento bajo múltiples runs
@@ -105,11 +133,27 @@ Prioridad muy baja, no descartado del todo. Dependen de una API específica de C
 portan a Codex.
 
 ### ⚪ Creación real de PR vía API de GitHub / merge automático
-Hoy el flujo termina en rama lista, sin apertura de PR ni merge automatizado a `main`.
+Hoy el flujo termina en rama lista, sin apertura de PR ni merge automatizado a `main`. La política
+que este código futuro debería seguir ya quedó diseñada en Feature 09 (`06-DELIVERY-WORKFLOW.md`,
+Stage 6, Modo A / Modo Auto) — este ítem es la implementación real, todavía sin código.
 
 ### ⚪ Deployment Strategy y separación dev/staging/prod
 Sin diseñar.
 
-### ⚪ Capa de UI
-Tres pantallas — Disparo, Run en curso, Historial/admin — siguen `[Pendiente]` en
-`02-ARCHITECTURE.md`.
+### 🟡 Capa de UI — "Run en curso"
+Confirmado como Feature 10, decidido en la sesión de diseño del Runbook (Feature 09): UI mínima de
+solo lectura que muestra el estado de un run en curso, apoyada en la persistencia ya existente
+(`getRunDetail` / tabla `artifacts`, ver `docs/playbook/02-ARCHITECTURE.md`, sección 5) — no
+requiere construir nada nuevo en esa capa, solo un endpoint fino más una página que lo consulte.
+Disparo e Historial/admin quedan fuera de esta Feature, ver ítem Tentativo "Capa de UI" abajo.
+
+### ⚪ Capa de UI (Disparo, Historial/admin)
+Dos pantallas — Disparo (crear un run nuevo desde la UI) e Historial/admin (listado de runs
+propios o del equipo) — siguen `[Pendiente]` en `02-ARCHITECTURE.md`. "Run en curso" ya se
+promovió a Confirmado (Feature 10, ver arriba) — este ítem es solo el resto.
+
+### ⚪ Notificación Slack/webhook complementaria
+Evaluada en la misma sesión que "Run en curso" como alternativa de monitoreo — se descartó como
+primera opción porque, a esfuerzo comparable, una UI mínima de solo lectura daba más valor y era
+reusable hacia la Capa de UI completa. Queda como complemento futuro si hace falta alertas push
+(fase completada/fallida) fuera de cuando alguien está mirando la UI activamente.
