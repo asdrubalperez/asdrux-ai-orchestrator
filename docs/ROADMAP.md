@@ -9,10 +9,12 @@
 - Construcción de `CodexExecutor` de producción — paridad con Claude Code
 
 **🟡 Confirmado**
-- Milestone 2 — Validación end-to-end con caso de negocio real
-- Adecuación del Playbook para el Orquestador AI automático
-- Capa de UI — "Run en curso" (solo lectura, sin Disparo ni Historial/admin todavía)
-- Agregar tabla `projects` al schema para persistencia de configuración por proyecto gestionado
+- Feature 10 — Investigación y adecuación de base de datos: persistencia de sesiones/usuarios,
+  proyectos y su relación con `runs`/`artifacts` (arranca como investigación a cargo de Codex, no
+  como implementación directa)
+- Feature 11 — Capa de UI — "Run en curso" (solo lectura, sin Disparo ni Historial/admin todavía)
+- Feature 12 — Milestone 2 — Validación end-to-end con caso de negocio real
+- Adecuación del Playbook para el Orquestador AI automático (En curso, pendiente de dependencia de adecuación de base de datos)
 - Mecanismo técnico de persistencia de contexto/hallazgos en el circuito de escalamiento
 
 **⚪ Tentativo**
@@ -26,7 +28,7 @@
 - Creación real de PR vía API de GitHub / merge automático
 - Deployment Strategy y separación dev/staging/prod
 - Capa de UI (Disparo, Historial/admin — "Run en curso" ya pasó a Confirmado, ver arriba)
-- Notificación Slack/webhook complementaria a la UI de monitoreo (post Feature 10, si hace falta
+- Notificación Slack/webhook complementaria a la UI de monitoreo (post Feature 11, si hace falta
   alertas fuera de cuando se está mirando activamente)
 
 ---
@@ -53,7 +55,7 @@ pipeline completo) ni FEATURE-006 (confinamiento QA). La paridad completa con Cl
 ✅ Ejecutado "Construcción de `CodexExecutor` de producción — paridad con Claude Code" — eso es
 lo que falta, no un extra opcional.
 
-### 🟡 Milestone 2 — Validación end-to-end con caso de negocio real
+### 🟡 Feature 12 — Milestone 2 — Validación end-to-end con caso de negocio real
 Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
 Confirmado y no Tentativo.
 
@@ -64,13 +66,24 @@ asistente IA (Architect/Governance Guide para diseño, asistente de desarrollo p
 Playbook Mode, etc.). Falta adecuarlo para que el propio Orquestador AI automático lo consuma y
 opere sobre él sin loop humano — pendiente crítico, no evaluado como opcional.
 
-### 🟡 Agregar tabla `projects` al schema
-El resto ya lo resuelve la tabla `artifacts` existente vía JSONB (ver
-`docs/playbook/02-ARCHITECTURE.md`, sección 5) — código en git vía `commit_ref`, diseño como
-contenido JSON. Falta la tabla `projects` para modelar múltiples productos gestionados y persistir
-ahí la configuración "Editable por producto" de cada uno. Marcador `[PENDIENTE-DB-PROJECTS]` (9
-apariciones en `00`, `01`, `02`, `03`, `04`, `AGENTS.md`, `BOOTSTRAP.md` de `docs/runbook/`) a
-reemplazar una vez resuelto esto.
+### 🟡 Feature 10 — Investigación y adecuación de base de datos
+Arranca como **investigación a cargo de Codex** (el asistente IA de desarrollo), no como diseño ni
+implementación directa. Objetivo: persistir sesiones/usuarios, proyectos y el proceso que
+transcurre con cada proyecto.
+
+- **Sesiones/usuarios**: no se sabe con certeza si ya existe resguardo real detrás de
+  `runs.owner_id`, o si hoy es un valor de desarrollo hardcodeado sin autenticación real. Codex
+  debe reportar el estado real antes de diseñar nada.
+- **Proyectos**: confirmado que **no existe** hoy tabla `projects` ni equivalente. Falta modelar
+  múltiples productos gestionados y persistir ahí la configuración "Editable por producto" de cada
+  uno. Marcador `[PENDIENTE-DB-PROJECTS]` (9 apariciones en `00`, `01`, `02`, `03`, `04`,
+  `AGENTS.md`, `BOOTSTRAP.md` de `docs/runbook/`) a reemplazar una vez resuelto esto.
+- **Proceso por proyecto**: en gran parte ya lo resuelve la tabla `artifacts` existente vía JSONB
+  (ver `docs/playbook/02-ARCHITECTURE.md`, sección 5) — código en git vía `commit_ref`, diseño como
+  contenido JSON. Falta conectarlo a un modelo de "proyecto" real.
+
+El diseño de la tabla `projects` (y su relación con `runs`/`artifacts`) se hace recién con el
+resultado de la investigación de Codex, no antes.
 
 ### 🟡 Mecanismo técnico de persistencia de contexto/hallazgos en el circuito de escalamiento
 Necesario para que el circuito de escalamiento de `06-DELIVERY-WORKFLOW.md` (Stage 3) funcione en
@@ -140,17 +153,18 @@ Stage 6, Modo A / Modo Auto) — este ítem es la implementación real, todavía
 ### ⚪ Deployment Strategy y separación dev/staging/prod
 Sin diseñar.
 
-### 🟡 Capa de UI — "Run en curso"
-Confirmado como Feature 10, decidido en la sesión de diseño del Runbook (Feature 09): UI mínima de
+### 🟡 Feature 11 — Capa de UI — "Run en curso"
+Confirmado como Feature 11, decidido en la sesión de diseño del Runbook (Feature 09): UI mínima de
 solo lectura que muestra el estado de un run en curso, apoyada en la persistencia ya existente
 (`getRunDetail` / tabla `artifacts`, ver `docs/playbook/02-ARCHITECTURE.md`, sección 5) — no
 requiere construir nada nuevo en esa capa, solo un endpoint fino más una página que lo consulte.
 Disparo e Historial/admin quedan fuera de esta Feature, ver ítem Tentativo "Capa de UI" abajo.
+Feature 10 (investigación de base de datos, ver arriba) ya no compite por este número.
 
 ### ⚪ Capa de UI (Disparo, Historial/admin)
 Dos pantallas — Disparo (crear un run nuevo desde la UI) e Historial/admin (listado de runs
 propios o del equipo) — siguen `[Pendiente]` en `02-ARCHITECTURE.md`. "Run en curso" ya se
-promovió a Confirmado (Feature 10, ver arriba) — este ítem es solo el resto.
+promovió a Confirmado (Feature 11, ver arriba) — este ítem es solo el resto.
 
 ### ⚪ Notificación Slack/webhook complementaria
 Evaluada en la misma sesión que "Run en curso" como alternativa de monitoreo — se descartó como
