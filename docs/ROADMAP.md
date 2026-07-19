@@ -7,11 +7,13 @@
 - Milestone 1 — Pipeline completo Claude Code (FEATURE-001 a 006)
 - Spike Codex — walking skeleton, invocación única read-only (FEATURE-007)
 - Construcción de `CodexExecutor` de producción — paridad con Claude Code
+- Feature 10 — `users`, `projects` y login del CLI: tablas `users`/`projects` creadas, migración
+  de `runs.owner_id`/`project_id` (19/19 backfilleados), comandos `login`/`logout`/`seed:user` con
+  `bcryptjs`, sesión local de 30 días
+- Evolución del Playbook: declaración de rama/checkout de origen movida de Stage 6 a Stage 3 en
+  `06-DELIVERY-WORKFLOW.md` (v1.2), Lessons Learned de Feature 10
 
 **🟡 Confirmado**
-- Feature 10 — Investigación y adecuación de base de datos: persistencia de sesiones/usuarios,
-  proyectos y su relación con `runs`/`artifacts` (arranca como investigación a cargo de Codex, no
-  como implementación directa)
 - Feature 11 — Capa de UI — "Run en curso" (solo lectura, sin Disparo ni Historial/admin todavía)
 - Feature 12 — Milestone 2 — Validación end-to-end con caso de negocio real
 - Adecuación del Playbook para el Orquestador AI automático (En curso, pendiente de dependencia de adecuación de base de datos)
@@ -73,21 +75,18 @@ asistente IA (Architect/Governance Guide para diseño, asistente de desarrollo p
 Playbook Mode, etc.). Falta adecuarlo para que el propio Orquestador AI automático lo consuma y
 opere sobre él sin loop humano — pendiente crítico, no evaluado como opcional.
 
-### 🟡 Feature 10 — Investigación y adecuación de base de datos
-Arranca como **investigación a cargo de Codex** (el asistente IA de desarrollo), no como diseño ni
-implementación directa. Objetivo: persistir sesiones/usuarios, proyectos y el proceso que
-transcurre con cada proyecto.
+### ✅ Feature 10 — `users`, `projects` y login del CLI
+Implementada y mergeada en `main`. Tablas `users` (con `password_hash` vía `bcryptjs`) y `projects`
+creadas; `runs.owner_id`/`project_id` migrados a FK real, 19/19 filas backfilleadas. Comandos
+`login`/`logout`/`seed:user`, sesión local de 30 días en `~/.orquestador/session.json`.
 
-- **Sesiones/usuarios**: no se sabe con certeza si ya existe resguardo real detrás de
-  `runs.owner_id`, o si hoy es un valor de desarrollo hardcodeado sin autenticación real. Codex
-  debe reportar el estado real antes de diseñar nada.
-- **Proyectos**: confirmado que **no existe** hoy tabla `projects` ni equivalente. Falta modelar
-  múltiples productos gestionados y persistir ahí la configuración "Editable por producto" de cada
-  uno. Marcador `[PENDIENTE-DB-PROJECTS]` (9 apariciones en `00`, `01`, `02`, `03`, `04`,
-  `AGENTS.md`, `BOOTSTRAP.md` de `docs/runbook/`) a reemplazar una vez resuelto esto.
-- **Proceso por proyecto**: en gran parte ya lo resuelve la tabla `artifacts` existente vía JSONB
-  (ver `docs/playbook/02-ARCHITECTURE.md`, sección 5) — código en git vía `commit_ref`, diseño como
-  contenido JSON. Falta conectarlo a un modelo de "proyecto" real.
+- **Sesiones/usuarios**: resuelto — `users` con `password_hash` real, validado por invocación.
+  Sin tabla `sessions` ni validación server-side del token (ver ítem Tentativo correspondiente).
+- **Proyectos**: resuelto — tabla `projects` con `repo_path`, `owner_id` FK a `users`. Marcador
+  `[PENDIENTE-DB-PROJECTS]` (9 apariciones en `docs/runbook/`) queda pendiente de reemplazar por la
+  referencia real — parte del cierre formal de Feature 09, todavía no hecho.
+- **Proceso por proyecto**: sin cambios respecto al diseño original — la tabla `artifacts`
+  existente (JSONB, `commit_ref`) sigue cubriendo esto, ahora conectada a `projects` vía `runs`.
 
 El diseño de la tabla `projects` (y su relación con `runs`/`artifacts`) se hace recién con el
 resultado de la investigación de Codex, no antes.

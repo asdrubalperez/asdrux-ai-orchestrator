@@ -2,7 +2,7 @@
 
 # Delivery Workflow
 
-Versión: v1.1
+Versión: v1.2
 
 ## Propósito
 
@@ -119,7 +119,10 @@ Diseño aprobado antes de Development.
 
 Entregable esperado:
 
-Go / No-Go explícito.
+Go / No-Go explícito, que incluye —antes de habilitar Stage 4— la rama de la Feature ya creada
+desde `main`, y (si existe más de un checkout o agente activo) la declaración explícita de cuál es
+el checkout de origen para esta Feature (ver Stage 6, "Checkout de origen"). Sin estos dos datos
+fijados, Development no debe comenzar.
 
 ---
 
@@ -214,11 +217,11 @@ Evitar:
 
 Basado en la regla "una feature por branch" de 03-AI-CONSTITUTION.md (Strict Change Mode) — se activa esta regla puntual, sin activar el modo completo.
 
-Cada Feature vive en su propia rama, creada desde `main` al aprobarse (Stage 3 — Approval Gate). Todo el trabajo de esa Feature —spec, implementación, evidencia, y el cierre de lessons learned descrito abajo— se commitea en esa rama, nunca directo en `main`.
+Cada Feature vive en su propia rama. Su creación desde `main`, y la declaración de checkout de origen si aplica, ya ocurrieron en Stage 3 — Approval Gate, como parte del entregable de Go/No-Go — no son un paso de este Stage. Todo el trabajo de esa Feature —spec, implementación, evidencia, y el cierre de lessons learned descrito abajo— se commitea en esa rama ya existente, nunca directo en `main`.
 
 Pasos obligatorios, en este orden — ningún paso se salta ni se combina con el siguiente sin pausa para revisión:
 
-1. Commit del trabajo en la rama de la Feature, incluyendo la sección de Lecciones Aprendidas (ver "Cierre de Stage 6" abajo) — el commit de cierre incluye la Feature completa, no solo el código.
+1. Commit del trabajo en la rama de la Feature (ya creada en Stage 3), incluyendo la sección de Lecciones Aprendidas (ver "Cierre de Stage 6" abajo) — el commit de cierre incluye la Feature completa, no solo el código.
 2. Push de la rama (no de `main`) — habilita revisión externa antes de mergear.
 3. Esperar confirmación explícita de revisión antes de continuar.
 4. Checkout a `main`.
