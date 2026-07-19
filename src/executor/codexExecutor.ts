@@ -16,7 +16,7 @@ import type {
 // Adaptador real de Executor para Codex CLI, basado en FEATURE-007/008:
 // - invocacion headless via `codex exec`;
 // - autenticacion explicita via CODEX_API_KEY;
-// - sandbox nativo de Codex (`read-only` / `workspace-write`);
+// - sandbox nativo de Codex (`read-only`) o Docker + `danger-full-access` para escritura;
 // - salida estructurada con `--output-schema`.
 const ALLOWED_ENV_PASSTHROUGH_KEYS = [
   "PATH",
@@ -57,11 +57,22 @@ const PHASE_RESULT_SCHEMA = {
   required: ["status", "outputArtifact", "summary", "escalationReason"],
 };
 
+const DEFAULT_CODEX_DEVELOPER_CONTAINER_IMAGE = "ai-orchestrator-codex-developer:latest";
+const CONTAINER_SCHEMA_PATH = "/schema/phase-result.schema.json";
+
 export interface CodexExecutorOptions {
   /** Directorio de trabajo del run (el worktree). Todas las invocaciones de esta instancia corren ahi. */
   workingDirectory: string;
   /** Modelo a pasar explicitamente con `--model`. */
   model?: string;
+  /**
+   * "container" corre `codex exec` completo dentro de Docker con `--sandbox danger-full-access`;
+   * el contenedor impone el limite real para workspace-write. "host" preserva el camino validado
+   * para read-only con el sandbox nativo de Codex.
+   */
+  sandbox?: "host" | "container";
+  /** Imagen a usar cuando sandbox === "container". Default: ai-orchestrator-codex-developer:latest. */
+  containerImage?: string;
 }
 
 interface RawCodexResult {
@@ -128,12 +139,15 @@ export class CodexExecutor implements Executor {
     try {
       await writeFile(schemaPath, JSON.stringify(PHASE_RESULT_SCHEMA, null, 2), "utf8");
 
+      const runsInContainer =
+        this.options.sandbox === "container" && invocation.permissions.filesystem === "workspace-write";
       const args = [
         "exec",
         "--sandbox",
-        invocation.permissions.filesystem,
+        runsInContainer ? "danger-full-access" : invocation.permissions.filesystem,
+        ...(this.shouldDisableShellTool(invocation) ? ["--config", "features.shell_tool=false"] : []),
         "--output-schema",
-        schemaPath,
+        runsInContainer ? CONTAINER_SCHEMA_PATH : schemaPath,
       ];
 
       if (this.options.model) {
@@ -142,13 +156,15 @@ export class CodexExecutor implements Executor {
 
       args.push(this.buildPrompt(invocation));
 
-      const raw = await this.execAndCapture(
-        this.codexBinary,
-        args,
-        this.options.workingDirectory,
-        this.buildChildEnv(apiKey),
-        options
-      );
+      const raw = runsInContainer
+        ? await this.spawnCodexInContainer(args, apiKey, schemaDir, options)
+        : await this.execAndCapture(
+            this.codexBinary,
+            args,
+            this.options.workingDirectory,
+            this.buildChildEnv(apiKey),
+            options
+          );
 
       options.onEvent?.({ type: "codex_raw_output", data: raw } satisfies ExecutorEvent);
       return this.mapToPhaseResult(raw);
@@ -166,6 +182,10 @@ export class CodexExecutor implements Executor {
         )}`
       );
     }
+  }
+
+  private shouldDisableShellTool(invocation: PhaseInvocation): boolean {
+    return invocation.agentRole === "qa";
   }
 
   private buildPrompt(invocation: PhaseInvocation): string {
@@ -193,11 +213,52 @@ export class CodexExecutor implements Executor {
     return env;
   }
 
+  /**
+   * FEATURE-008 Parte 2: en la VPS, `workspace-write` nativo de Codex dispara bubblewrap y falla
+   * por privilegios de red del kernel (`RTM_NEWADDR`). En modo contenedor, Codex corre sin su
+   * sandbox propio (`danger-full-access`) y el confinamiento lo imponen los mounts/capabilities de
+   * Docker, igual que el camino Developer ya validado para Claude Code.
+   */
+  private spawnCodexInContainer(
+    args: string[],
+    apiKey: string,
+    schemaDir: string,
+    options: RunPhaseOptions
+  ): Promise<RawCodexResult> {
+    const image = this.options.containerImage ?? DEFAULT_CODEX_DEVELOPER_CONTAINER_IMAGE;
+    const dockerArgs = [
+      "run",
+      "--rm",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges",
+      "--pids-limit",
+      "256",
+      "--memory",
+      "512m",
+      "--cpus",
+      "1",
+      "-v",
+      `${this.options.workingDirectory}:/workspace:rw`,
+      "-v",
+      `${schemaDir}:/schema:ro`,
+      "--workdir",
+      "/workspace",
+      "-e",
+      `CODEX_API_KEY=${apiKey}`,
+      image,
+      "codex",
+      ...args,
+    ];
+    return this.execAndCapture("docker", dockerArgs, undefined, undefined, options);
+  }
+
   private execAndCapture(
     command: string,
     args: string[],
-    cwd: string,
-    env: NodeJS.ProcessEnv,
+    cwd: string | undefined,
+    env: NodeJS.ProcessEnv | undefined,
     options: RunPhaseOptions
   ): Promise<RawCodexResult> {
     return new Promise((resolve, reject) => {

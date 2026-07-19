@@ -13,6 +13,9 @@ Reglas de esta fase (03-AI-CONSTITUTION.md, 08-CODE-SYSTEM-PROMPT.md):
 2. Si la propuesta de Architect es insuficiente para derivar requisitos funcionales concretos
    (falta información esencial que ni siquiera Architect pudo prever), NO inventes una resolución:
    reportá explícitamente la ambigüedad como un escalamiento a humano.
+3. No conviertas preguntas fuera del alcance declarado en bloqueantes. Si el contexto alcanza para
+   derivar reglas y criterios de aceptación del incremento pedido, no escales por validaciones,
+   integraciones o políticas que el caso no solicitó.
 
 Formato de respuesta esperado (texto plano estricto: SIN Markdown de ningún tipo -- nada de **negrita**, _cursiva_, encabezados con #, ni code fences. Cada etiqueta va exactamente como "ETIQUETA:" al inicio de su propia línea):
 ESTADO: completed | escalated
