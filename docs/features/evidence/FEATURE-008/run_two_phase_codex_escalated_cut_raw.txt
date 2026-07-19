@@ -1,0 +1,11 @@
+
+> ai-orchestrator@0.1.0 cli
+> tsx src/cli/index.ts run:start --case /home/asdru/ai-orchestrator/docs/features/evidence/FEATURE-003/case_ok.json --pipeline two-phase-architect-functional --executor codex --model gpt-5.6-luna
+
+[run:start] runId=8ff2004f-4f48-46d1-80d7-260be8eaff1a
+[run:start] pipeline=two-phase-architect-functional@1 (2 fase/s lineales)
+[run:start] worktree creado: /home/asdru/ai-orchestrator-worktrees/8ff2004f-4f48-46d1-80d7-260be8eaff1a (rama run/8ff2004f-4f48-46d1-80d7-260be8eaff1a)
+[run:start] fase "architect" terminó con status "escalated" — pipeline detenido.
+[run:start] worktree preservado (política de retención de 21 días): /home/asdru/ai-orchestrator-worktrees/8ff2004f-4f48-46d1-80d7-260be8eaff1a
+[run:start] status final: escalated
+[run:start] run 8ff2004f-4f48-46d1-80d7-260be8eaff1a persistido. Consultar con: npm run cli -- run:status --run 8ff2004f-4f48-46d1-80d7-260be8eaff1a

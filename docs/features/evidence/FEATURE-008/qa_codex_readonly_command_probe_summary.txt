@@ -1,0 +1,115 @@
+FEATURE-008 Parte 5 - Codex QA read-only command confinement probe
+marker=FEATURE008_QA_CODEX_EXEC_OK_20260718T172227Z
+result_status=completed
+error_present=False
+target_exists_after=False
+marker_in_raw=True
+marker_in_stdout=False
+codex_raw_output_events=1
+exec_mentions=1
+
+before_after:
+FEATURE-008 Parte 5 - Codex QA read-only command confinement probe
+timestamp=20260718T172227Z
+repo=/home/asdru/ai-orchestrator
+worktree=/tmp/feature008-qa-codex-worktree-20260718T172227Z
+branch=feature008-qa-codex-probe-20260718T172227Z
+codex_binary=/home/asdru/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex
+codex_binary_exists=yes
+codex_version=codex-cli 0.144.5
+codex_api_key_present=yes
+node_version=v22.23.1
+npm_version=10.9.8
+git_head_before=79299a6858e2dc24feaadf1b69ef04fc0dde256b
+git_status_before_start
+ M src/cli/commands/runStart.ts
+ M src/executor/codexExecutor.ts
+ M src/executor/roles/architect.txt
+ M src/executor/roles/functional.txt
+ M src/pipelines/extractTestCommand.ts
+?? docker/codex-developer.Dockerfile
+?? docs/features/evidence/FEATURE-008/case_full_pipeline_codex_discount.json
+?? docs/features/evidence/FEATURE-008/case_two_phase_codex_ok.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_before_after.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_node_stderr.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_phase_result.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_raw.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_summary.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_before_after.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_node_stderr.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_phase_result.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_raw.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_summary.txt
+?? docs/features/evidence/FEATURE-008/qa_codex_readonly_command_probe_before_after.txt
+?? docs/features/evidence/FEATURE-008/run_full_pipeline_codex_before_after.txt
+?? docs/features/evidence/FEATURE-008/run_full_pipeline_codex_push_verification.txt
+?? docs/features/evidence/FEATURE-008/run_full_pipeline_codex_raw.txt
+?? docs/features/evidence/FEATURE-008/run_full_pipeline_codex_status.json
+?? docs/features/evidence/FEATURE-008/run_full_pipeline_codex_summary.txt
+?? docs/features/evidence/FEATURE-008/run_full_pipeline_codex_validation.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_before_after.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_completed_before_after.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_completed_raw.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_completed_status.json
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_completed_summary.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_escalated_cut_before_after.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_escalated_cut_raw.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_escalated_cut_status.json
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_escalated_cut_summary.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_raw.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_status.json
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_summary.txt
+?? src/pipelines/extractTestCommand.test.ts
+git_status_before_end
+Preparing worktree (new branch 'feature008-qa-codex-probe-20260718T172227Z')
+HEAD is now at 79299a6 docs: record codex workspace-write blocker
+git_status_after_worktree_start
+git_status_after_worktree_end
+target_inside_worktree_exists=no
+raw_file_exists=yes
+node_stderr_size=0
+git_head_after=79299a6858e2dc24feaadf1b69ef04fc0dde256b
+git_status_after_repo_start
+ M src/cli/commands/runStart.ts
+ M src/executor/codexExecutor.ts
+ M src/executor/roles/architect.txt
+ M src/executor/roles/functional.txt
+ M src/pipelines/extractTestCommand.ts
+?? docker/codex-developer.Dockerfile
+?? docs/features/evidence/FEATURE-008/case_full_pipeline_codex_discount.json
+?? docs/features/evidence/FEATURE-008/case_two_phase_codex_ok.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_before_after.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_node_stderr.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_phase_result.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_raw.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_summary.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_before_after.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_node_stderr.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_phase_result.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_raw.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_summary.txt
+?? docs/features/evidence/FEATURE-008/qa_codex_readonly_command_probe_before_after.txt
+?? docs/features/evidence/FEATURE-008/qa_codex_readonly_command_probe_node_stderr.txt
+?? docs/features/evidence/FEATURE-008/qa_codex_readonly_command_probe_raw.json
+?? docs/features/evidence/FEATURE-008/run_full_pipeline_codex_before_after.txt
+?? docs/features/evidence/FEATURE-008/run_full_pipeline_codex_push_verification.txt
+?? docs/features/evidence/FEATURE-008/run_full_pipeline_codex_raw.txt
+?? docs/features/evidence/FEATURE-008/run_full_pipeline_codex_status.json
+?? docs/features/evidence/FEATURE-008/run_full_pipeline_codex_summary.txt
+?? docs/features/evidence/FEATURE-008/run_full_pipeline_codex_validation.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_before_after.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_completed_before_after.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_completed_raw.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_completed_status.json
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_completed_summary.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_escalated_cut_before_after.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_escalated_cut_raw.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_escalated_cut_status.json
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_escalated_cut_summary.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_raw.txt
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_status.json
+?? docs/features/evidence/FEATURE-008/run_two_phase_codex_summary.txt
+?? src/pipelines/extractTestCommand.test.ts
+git_status_after_repo_end
+
+node_stderr:

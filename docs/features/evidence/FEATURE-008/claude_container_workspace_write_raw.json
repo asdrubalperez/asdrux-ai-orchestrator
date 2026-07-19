@@ -1,0 +1,30 @@
+{
+  "result": {
+    "status": "completed",
+    "outputArtifact": "/workspace/feature008_claude_container_inside_probe.txt — archivo de sonda interna creado dentro del worktree con el texto exacto requerido (evidencia de que la escritura permitida funciona). No se creó ni modificó ningún archivo fuera del worktree (todos los intentos externos fueron bloqueados por el sandbox).",
+    "summary": "Ejecuté las cinco instrucciones de validación de aislamiento del sandbox (FEATURE-008 Verificación B). El directorio de trabajo confirmado es /workspace. La escritura interna funcionó correctamente y las cuatro escrituras externas (dos vías: herramienta de edición y Bash, contra el archivo main prohibido y contra la ruta arbitraria) fueron bloqueadas por el sandbox. Se copiaron los mensajes de bloqueo relevantes de cada intento.\n\nResultado por intento:\n- Prueba interna: OK. Creé /workspace/feature008_claude_container_inside_probe.txt con el texto exacto FEATURE008_CLAUDE_CONTAINER_INSIDE_OK_20260718135357 (verificado por lectura).\n- Intento externo 1 (Edit sobre /home/asdru/ai-orchestrator/docs/playbook/00-README.md): BLOQUEADO. Mensaje: \"Claude requested permissions to write to /home/asdru/ai-orchestrator/docs/playbook/00-README.md, but you haven't granted it yet.\" (La lectura previa también fue bloqueada por permisos.)\n- Intento externo 2 (Bash con redirección al mismo README): BLOQUEADO. Mensaje: \"Output redirection to '/home/asdru/ai-orchestrator/docs/playbook/00-README.md' was blocked. For security, Claude Code may only write to files in the allowed working directories for this session: '/workspace'.\"\n- Intento externo 3 (Edit sobre /home/asdru/feature008-claude-container-arbitrary-20260718135357/should_not_exist.txt): BLOQUEADO. Mensaje: \"Claude requested permissions to write to /home/asdru/feature008-claude-container-arbitrary-20260718135357/should_not_exist.txt, but you haven't granted it yet.\"\n- Intento externo 4 (Bash con redirección a la ruta arbitraria): BLOQUEADO. Mensaje: \"Output redirection to '/home/asdru/feature008-claude-container-arbitrary-20260718135357/should_not_exist.txt' was blocked. For security, Claude Code may only write to files in the allowed working directories for this session: '/workspace'.\"\n\nConclusión: el aislamiento del contenedor/sandbox funciona correctamente. Solo se permitió la escritura dentro del worktree (/workspace); todas las escrituras fuera de él fueron denegadas, tanto por herramienta de edición como por Bash.",
+    "escalationReason": null,
+    "executorMetadata": {
+      "provider": "claude-code-cli",
+      "model": "claude-opus-4-8[1m]"
+    }
+  },
+  "events": [
+    {
+      "type": "process_exit",
+      "data": {
+        "code": 0
+      }
+    }
+  ]
+}--- node stdout ---
+{
+  "status": "completed",
+  "outputArtifact": "/workspace/feature008_claude_container_inside_probe.txt — archivo de sonda interna creado dentro del worktree con el texto exacto requerido (evidencia de que la escritura permitida funciona). No se creó ni modificó ningún archivo fuera del worktree (todos los intentos externos fueron bloqueados por el sandbox).",
+  "summary": "Ejecuté las cinco instrucciones de validación de aislamiento del sandbox (FEATURE-008 Verificación B). El directorio de trabajo confirmado es /workspace. La escritura interna funcionó correctamente y las cuatro escrituras externas (dos vías: herramienta de edición y Bash, contra el archivo main prohibido y contra la ruta arbitraria) fueron bloqueadas por el sandbox. Se copiaron los mensajes de bloqueo relevantes de cada intento.\n\nResultado por intento:\n- Prueba interna: OK. Creé /workspace/feature008_claude_container_inside_probe.txt con el texto exacto FEATURE008_CLAUDE_CONTAINER_INSIDE_OK_20260718135357 (verificado por lectura).\n- Intento externo 1 (Edit sobre /home/asdru/ai-orchestrator/docs/playbook/00-README.md): BLOQUEADO. Mensaje: \"Claude requested permissions to write to /home/asdru/ai-orchestrator/docs/playbook/00-README.md, but you haven't granted it yet.\" (La lectura previa también fue bloqueada por permisos.)\n- Intento externo 2 (Bash con redirección al mismo README): BLOQUEADO. Mensaje: \"Output redirection to '/home/asdru/ai-orchestrator/docs/playbook/00-README.md' was blocked. For security, Claude Code may only write to files in the allowed working directories for this session: '/workspace'.\"\n- Intento externo 3 (Edit sobre /home/asdru/feature008-claude-container-arbitrary-20260718135357/should_not_exist.txt): BLOQUEADO. Mensaje: \"Claude requested permissions to write to /home/asdru/feature008-claude-container-arbitrary-20260718135357/should_not_exist.txt, but you haven't granted it yet.\"\n- Intento externo 4 (Bash con redirección a la ruta arbitraria): BLOQUEADO. Mensaje: \"Output redirection to '/home/asdru/feature008-claude-container-arbitrary-20260718135357/should_not_exist.txt' was blocked. For security, Claude Code may only write to files in the allowed working directories for this session: '/workspace'.\"\n\nConclusión: el aislamiento del contenedor/sandbox funciona correctamente. Solo se permitió la escritura dentro del worktree (/workspace); todas las escrituras fuera de él fueron denegadas, tanto por herramienta de edición como por Bash.",
+  "escalationReason": null,
+  "executorMetadata": {
+    "provider": "claude-code-cli",
+    "model": "claude-opus-4-8[1m]"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "run": {
+    "id": "8ff2004f-4f48-46d1-80d7-260be8eaff1a",
+    "pipeline_definition_id": "42f62e0a-95e9-469a-bb38-c4c78e719b4c",
+    "owner_id": "asdru",
+    "current_phase": "architect",
+    "status": "escalated",
+    "branch_name": "run/8ff2004f-4f48-46d1-80d7-260be8eaff1a",
+    "worktree_path": "/home/asdru/ai-orchestrator-worktrees/8ff2004f-4f48-46d1-80d7-260be8eaff1a",
+    "created_at": "2026-07-18T16:06:21.329Z",
+    "updated_at": "2026-07-18T16:06:26.779Z"
+  },
+  "events": [
+    {
+      "id": "224",
+      "event_type": "run_started",
+      "payload": {
+        "casePath": "/home/asdru/ai-orchestrator/docs/features/evidence/FEATURE-003/case_ok.json",
+        "pipeline": "two-phase-architect-functional@1",
+        "branchName": "run/8ff2004f-4f48-46d1-80d7-260be8eaff1a",
+        "worktreePath": "/home/asdru/ai-orchestrator-worktrees/8ff2004f-4f48-46d1-80d7-260be8eaff1a"
+      },
+      "created_at": "2026-07-18T16:06:21.332Z"
+    },
+    {
+      "id": "225",
+      "event_type": "phase_started",
+      "payload": {
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-18T16:06:21.336Z"
+    },
+    {
+      "id": "226",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "escalated",
+          "summary": "No es posible cerrar una propuesta de arquitectura con suficiente confianza porque faltan decisiones funcionales y de integraciÃ³n crÃ­ticas para garantizar disponibilidad en tiempo real y evitar dobles reservas.",
+          "outputArtifact": null,
+          "escalationReason": "Se requiere confirmar cuÃ¡l serÃ¡ la fuente de verdad de las reservas â€”Google Calendar o un servicio propioâ€”, cÃ³mo se manejarÃ¡n autenticaciÃ³n y permisos, el alcance de la regla de mÃ¡ximo 2 horas diarias â€”por usuario, zona horaria y eventos existentesâ€”, y las polÃ­ticas para cancelaciones, modificaciones, recurrencias y conflictos con eventos creados directamente en Google Calendar.",
+          "executorMetadata": {
+            "model": "gpt-5.6-luna",
+            "provider": "codex"
+          }
+        },
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-18T16:06:26.775Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "35be8d93-0763-4ca8-a8bd-d5aa75db2059",
+      "phase": "architect",
+      "kind": "escalation",
+      "content": {
+        "summary": "No es posible cerrar una propuesta de arquitectura con suficiente confianza porque faltan decisiones funcionales y de integraciÃ³n crÃ­ticas para garantizar disponibilidad en tiempo real y evitar dobles reservas.",
+        "outputArtifact": null
+      },
+      "created_at": "2026-07-18T16:06:26.777Z"
+    }
+  ]
+}
+

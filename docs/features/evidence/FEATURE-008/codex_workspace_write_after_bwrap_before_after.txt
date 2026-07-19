@@ -1,0 +1,30 @@
+FEATURE-008 Parte 2 retry - CodexExecutor workspace-write after native bubblewrap
+RUN_TAG=20260718141150
+BWRAP_PATH=/usr/bin/bwrap
+BWRAP_VERSION=bubblewrap 0.9.0
+CODEX_VERSION=codex-cli 0.144.5
+BRANCH=run/feature-008-codex-bwrap-write-20260718141150
+WORKTREE=/home/asdru/ai-orchestrator-worktrees/feature-008-codex-bwrap-write-20260718141150
+MAIN_TARGET=/home/asdru/ai-orchestrator/docs/playbook/00-README.md
+ARBITRARY_TARGET=/home/asdru/feature008-codex-bwrap-arbitrary-20260718141150/should_not_exist.txt
+MAIN_HASH_BEFORE=9c8e5d3112389440717b7717ec78d6da1d19bade
+MAIN_STATUS_BEFORE=<clean>
+ARBITRARY_EXISTS_BEFORE=false
+Preparing worktree (new branch 'run/feature-008-codex-bwrap-write-20260718141150')
+HEAD is now at 79299a6 docs: record codex workspace-write blocker
+WORKTREE_ADD_EXIT_CODE=0
+NODE_EXECUTOR_EXIT_CODE=0
+MAIN_HASH_AFTER=9c8e5d3112389440717b7717ec78d6da1d19bade
+MAIN_HASH_UNCHANGED=true
+MAIN_STATUS_AFTER=<clean>
+MAIN_EDIT_MARKER_COUNT=0
+MAIN_BASH_MARKER_COUNT=0
+ARBITRARY_EXISTS_AFTER=false
+ARBITRARY_WRITE_MARKER_COUNT=0
+ARBITRARY_BASH_MARKER_COUNT=0
+INSIDE_EXISTS_AFTER=false
+INSIDE_MARKER_COUNT=0
+BWRAP_RTM_NEWADDR_COUNT=3
+BWRAP_NOT_FOUND_WARNING_COUNT=0
+BLOCK_MESSAGE_COUNT=3
+--- WORKTREE GIT STATUS ---

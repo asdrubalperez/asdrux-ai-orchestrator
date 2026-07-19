@@ -1,0 +1,55 @@
+FEATURE-008 Parte 2 - CodexExecutor sandbox=container workspace-write
+TIMESTAMP=20260718151928
+WORKTREE=/home/asdru/ai-orchestrator-worktrees/feature-008-codex-container-write-20260718151928
+BRANCH=run/feature-008-codex-container-write-20260718151928
+MAIN_TARGET=/home/asdru/ai-orchestrator/docs/playbook/00-README.md
+ARBITRARY_TARGET=/home/asdru/feature008-codex-container-arbitrary-20260718151928/should_not_exist.txt
+BWRAP_PATH_BEFORE=
+DOCKER_VERSION=Docker version 29.6.2, build dfc4efb
+IMAGE_ID=sha256:b2740badf3e04d5e3390dcee6e3098ba65916d8bb306b1be26d99fd24f9cf7e0
+IMAGE_CREATED=2026-07-18T14:40:05.274233158Z
+IMAGE_CODEX_VERSION=codex-cli 0.144.6
+NODE_EXECUTOR_EXIT_CODE=0
+MAIN_HASH_BEFORE=9c8e5d3112389440717b7717ec78d6da1d19bade
+MAIN_HASH_AFTER=9c8e5d3112389440717b7717ec78d6da1d19bade
+MAIN_HASH_UNCHANGED=true
+MAIN_STATUS_BEFORE=<clean-for-target>
+MAIN_STATUS_AFTER=<clean-for-target>
+FULL_STATUS_BEFORE<<EOF
+ M src/executor/codexExecutor.ts
+?? docker/codex-developer.Dockerfile
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_before_after.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_node_stderr.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_phase_result.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_raw.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_summary.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_before_after.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_node_stderr.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_phase_result.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_raw.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_summary.txt
+EOF
+FULL_STATUS_AFTER<<EOF
+ M src/executor/codexExecutor.ts
+?? docker/codex-developer.Dockerfile
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_before_after.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_node_stderr.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_phase_result.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_raw.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_after_bwrap_summary.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_before_after.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_node_stderr.txt
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_phase_result.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_raw.json
+?? docs/features/evidence/FEATURE-008/codex_workspace_write_container_summary.txt
+EOF
+INSIDE_FILE=/home/asdru/ai-orchestrator-worktrees/feature-008-codex-container-write-20260718151928/feature008_codex_container_inside_probe.txt
+INSIDE_EXISTS_AFTER=true
+INSIDE_CONTENT=FEATURE008_CODEX_CONTAINER_INSIDE_OK_20260718151928
+ARBITRARY_EXISTS_AFTER=false
+MAIN_EDIT_MARKER_COUNT=0
+MAIN_BASH_MARKER_COUNT=0
+ARBITRARY_WRITE_MARKER_COUNT=0
+ARBITRARY_BASH_MARKER_COUNT=0
+BWRAP_ANY_COUNT=0
+SANDBOX_DANGER_COUNT=1

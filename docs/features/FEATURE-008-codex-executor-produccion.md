@@ -33,8 +33,8 @@ Incluye, en este orden:
 
 1. Adaptador `CodexExecutor implements Executor` de produccion para rol `architect`, `read-only`,
    validado dentro de la maquinaria real del Orquestador.
-2. Aislamiento de escritura para Codex en rol `developer`, usando el sandbox nativo
-   `--sandbox workspace-write`.
+2. Aislamiento de escritura para Codex en rol `developer`, usando Docker como limite real de
+   escritura y ejecutando Codex dentro del contenedor con `--sandbox danger-full-access`.
 3. Secuencia de 2 fases con Codex (`architect -> functional`) y transicion automatica.
 4. Orquestacion multi-fase completa con Codex: 5 fases, loop Developer-QA con limite 3, push real al
    aprobar.
@@ -56,6 +56,12 @@ Excluye:
 No introduce reglas funcionales nuevas. Reutiliza las reglas aprobadas en FEATURE-003/004/005/006 y
 solo cambia el proveedor de ejecucion.
 
+Nota de diseño (confirmada con el owner): el commit dd7fd2e agregó la regla 3 a
+`src/executor/roles/architect.txt` y `src/executor/roles/functional.txt` — archivos compartidos
+entre `ClaudeCodeExecutor` y `CodexExecutor`. Es una mejora deliberada del pipeline completo (menos
+escalamientos por edge cases fuera de alcance), no un ajuste exclusivo para hacer pasar a Codex.
+Afecta el comportamiento de ambos proveedores de acá en adelante.
+
 ---
 
 ## 6. Estrategia Algoritmica
@@ -69,7 +75,14 @@ No aplica logica de decision nueva.
 - Afecta `src/executor/` con un nuevo `CodexExecutor`, sin cambiar
   `Executor`/`PhaseInvocation`/`PhaseResult`.
 - Autenticacion: `CODEX_API_KEY`, validado en FEATURE-007. No usar `OPENAI_API_KEY`.
-- Invocacion: `codex exec` con `--output-schema`, entorno allowlisted y sandbox nativo.
+- Invocacion: `codex exec` con `--output-schema`, entorno allowlisted y sandbox nativo para
+  `read-only`. Para `workspace-write`, Codex corre dentro de Docker con `--sandbox
+  danger-full-access`; el contenedor impone el limite real porque el sandbox nativo de Codex en la
+  VPS dispara bubblewrap y falla con `RTM_NEWADDR`.
+- Confinamiento QA: como reaccion a la validacion positiva del pipeline completo, QA mantiene
+  `read-only` y ademas invoca Codex con `--config features.shell_tool=false`, equivalente a quitar
+  `Bash` del rol QA en FEATURE-006. El `TestExecutor` sigue siendo la unica via de ejecucion de
+  tests.
 - Modelo: se inyecta por opciones de clase y se pasa de forma explicita con `--model`; no se
   hardcodea ni se depende de `~/.codex/config.toml`.
 - Riesgo H17: no confiar en que el modelo reporte su propio aislamiento; validar con evidencia

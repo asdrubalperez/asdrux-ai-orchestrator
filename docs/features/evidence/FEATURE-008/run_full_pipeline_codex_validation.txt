@@ -1,0 +1,40 @@
+FEATURE-008 Parte 4 - local validation on VPS
+TS=2026-07-18T16:59:47Z
+COMMAND: ./node_modules/.bin/tsc --noEmit
+TSC_EXIT=0
+COMMAND: node --import tsx --test src/executor/codexExecutor.parser.test.ts src/pipelines/extractTestCommand.test.ts
+TAP version 13
+# Subtest: parsea header de modelo y JSON final de Codex
+ok 1 - parsea header de modelo y JSON final de Codex
+  ---
+  duration_ms: 1.121301
+  type: 'test'
+  ...
+# Subtest: rechaza status fuera del contrato
+ok 2 - rechaza status fuera del contrato
+  ---
+  duration_ms: 0.316756
+  type: 'test'
+  ...
+# Subtest: extrae COMANDO_TEST desde el artifact estructurado de Claude
+ok 3 - extrae COMANDO_TEST desde el artifact estructurado de Claude
+  ---
+  duration_ms: 0.633111
+  type: 'test'
+  ...
+# Subtest: extrae COMANDO_TEST desde el artifact textual de Codex
+ok 4 - extrae COMANDO_TEST desde el artifact textual de Codex
+  ---
+  duration_ms: 0.198793
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 210.956318
+TEST_EXIT=0

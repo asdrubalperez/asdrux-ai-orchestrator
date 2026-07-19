@@ -116,18 +116,10 @@ export async function runStart(args: string[]): Promise<void> {
 
     // --- Loop Developer↔QA (FEATURE-005) ---
     if (pipelineSpec.definition.loop) {
-      if (executorProvider === "codex") {
-        throw new Error("CodexExecutor todavia no soporta pipeline con loop en FEATURE-008 parte 1b.");
-      }
-
       // FEATURE-006 (resuelve H14): Developer corre en un Executor separado, en modo "container"
       // — su invocación completa (Bash incluido) queda confinada dentro de un contenedor Docker
-      // endurecido, no en el host. QA sigue en modo "host" (ya no necesita Bash en absoluto).
-      const developerExecutor = new ClaudeCodeExecutor({
-        workingDirectory: worktree.worktreePath,
-        model,
-        sandbox: "container",
-      });
+      // endurecido, no en el host. QA sigue en read-only (ya no necesita Bash en absoluto).
+      const developerExecutor = createDeveloperExecutor(executorProvider, worktree.worktreePath, model);
 
       const finalResult = await runDeveloperQaLoop({
         executor,
@@ -163,7 +155,7 @@ export async function runStart(args: string[]): Promise<void> {
 
 export async function runDeveloperQaLoop(params: {
   executor: RunExecutor;
-  developerExecutor: ClaudeCodeExecutor;
+  developerExecutor: RunExecutor;
   readRole: (agentRole: string) => Promise<string>;
   runId: string;
   planningResult: PhaseResult;
@@ -329,4 +321,12 @@ function createExecutor(provider: ExecutorProvider, workingDirectory: string, mo
   }
 
   return new ClaudeCodeExecutor({ workingDirectory, model });
+}
+
+function createDeveloperExecutor(provider: ExecutorProvider, workingDirectory: string, model: string | undefined): RunExecutor {
+  if (provider === "codex") {
+    return new CodexExecutor({ workingDirectory, model, sandbox: "container" });
+  }
+
+  return new ClaudeCodeExecutor({ workingDirectory, model, sandbox: "container" });
 }

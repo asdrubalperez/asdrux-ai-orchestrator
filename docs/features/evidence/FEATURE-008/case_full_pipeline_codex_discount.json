@@ -1,0 +1,13 @@
+{
+  "caso_negocio": "Calculo de total de compra con descuento",
+  "descripcion": "Agregar una funcion aislada (modulo de utilidad puro, sin persistencia ni exposicion HTTP) que calcule el total de una compra aplicando descuento: si el monto supera 100, 10% de descuento; si no, sin descuento. No debe permitir montos negativos.",
+  "restricciones_conocidas": [
+    "Si el monto es negativo, debe rechazarse (lanzar error o similar), no calcular un total",
+    "El descuento del 10% aplica solo cuando el monto es estrictamente mayor a 100",
+    "Montos de 100 o menos no reciben descuento",
+    "Es una funcion de calculo pura, sin efectos secundarios: no escribe en base de datos, no expone endpoint HTTP, no se integra a los comandos run:start/run:status existentes",
+    "No incluye otros tipos de descuento, cupones ni impuestos -- unicamente esta regla de descuento por monto",
+    "El monto de entrada y el resultado se manejan como numeros con hasta 2 decimales (redondeo estandar, no bancario)",
+    "No requiere logging ni auditoria -- es un ejercicio acotado para validar el pipeline del Orquestador, no una feature de negocio real del producto"
+  ]
+}
