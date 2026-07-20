@@ -6,17 +6,37 @@
   "type": "module",
   "scripts": {
     "migrate": "tsx src/db/migrate.ts",
-    "cli": "tsx src/cli/index.ts"
+    "cli": "tsx src/cli/index.ts",
+    "server:dev": "tsx src/server/index.ts",
+    "web:dev": "vite --host 127.0.0.1",
+    "web:typecheck": "tsc -p web/tsconfig.json --noEmit",
+    "web:build": "vite build",
+    "build": "tsc --noEmit && tsc -p web/tsconfig.json --noEmit && vite build",
+    "test": "tsx --test src/**/*.test.ts"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.101.3",
     "bcryptjs": "^3.0.3",
     "dotenv": "^16.4.5",
-    "pg": "^8.13.1"
+    "express": "^5.2.1",
+    "lucide-react": "^1.25.0",
+    "pg": "^8.13.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "autoprefixer": "^10.5.4",
+    "postcss": "^8.5.20",
+    "tailwindcss": "^4.3.3",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vite": "^8.1.5"
   }
 }
