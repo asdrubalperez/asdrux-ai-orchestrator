@@ -1,6 +1,7 @@
 import { pool } from "../db/pool.js";
 import { login } from "./commands/login.js";
 import { logout } from "./commands/logout.js";
+import { runRespond } from "./commands/runRespond.js";
 import { runStart } from "./commands/runStart.js";
 import { runStatus } from "./commands/runStatus.js";
 import { seedUser } from "./commands/seedUser.js";
@@ -15,6 +16,9 @@ async function main() {
     case "run:status":
       await runStatus(rest);
       break;
+    case "run:respond":
+      await runRespond(rest);
+      break;
     case "seed:user":
       await seedUser();
       break;
@@ -25,7 +29,7 @@ async function main() {
       await logout();
       break;
     default:
-      console.error("Comandos disponibles: run:start, run:status, seed:user, login, logout");
+      console.error("Comandos disponibles: run:start, run:status, run:respond, seed:user, login, logout");
       process.exitCode = 1;
   }
 }

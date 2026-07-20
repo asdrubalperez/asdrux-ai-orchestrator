@@ -7,6 +7,7 @@ export interface PipelineDefinitionRow {
   id: string;
   name: string;
   version: number;
+  definition?: unknown;
 }
 
 export interface RunRow {
@@ -18,8 +19,19 @@ export interface RunRow {
   status: string;
   branch_name: string | null;
   worktree_path: string | null;
+  originated_from_run_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ArtifactRow {
+  id: string;
+  run_id: string;
+  phase: string;
+  kind: string;
+  content: unknown;
+  commit_ref: string | null;
+  created_at: string;
 }
 
 export interface UserRow {
@@ -67,6 +79,14 @@ export async function ensurePipelineDefinition(spec: PipelineSpec): Promise<Pipe
   return inserted.rows[0];
 }
 
+export async function getPipelineDefinitionById(id: string): Promise<PipelineDefinitionRow | null> {
+  const result = await pool.query<PipelineDefinitionRow>(
+    "select id, name, version, definition from pipeline_definitions where id = $1",
+    [id]
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function createRun(params: {
   id: string;
   pipelineDefinitionId: string;
@@ -75,12 +95,16 @@ export async function createRun(params: {
   firstPhase: string;
   branchName: string;
   worktreePath: string;
+  originatedFromRunId?: string;
   client?: PoolClient;
 }): Promise<RunRow> {
   const db = params.client ?? pool;
   const result = await db.query<RunRow>(
-    `insert into runs (id, pipeline_definition_id, owner_id, project_id, current_phase, status, branch_name, worktree_path)
-     values ($1, $2, $3, $4, $5, 'running', $6, $7)
+    `insert into runs (
+       id, pipeline_definition_id, owner_id, project_id, current_phase, status,
+       branch_name, worktree_path, originated_from_run_id
+     )
+     values ($1, $2, $3, $4, $5, 'running', $6, $7, $8)
      returning *`,
     [
       params.id,
@@ -90,6 +114,7 @@ export async function createRun(params: {
       params.firstPhase,
       params.branchName,
       params.worktreePath,
+      params.originatedFromRunId ?? null,
     ]
   );
   return result.rows[0];
@@ -232,6 +257,10 @@ export async function updateRunCurrentPhase(runId: string, phase: string): Promi
   await pool.query("update runs set current_phase = $1, updated_at = now() where id = $2", [phase, runId]);
 }
 
+export async function updateRunStatus(runId: string, status: "running" | "retrying"): Promise<void> {
+  await pool.query("update runs set status = $1, updated_at = now() where id = $2", [status, runId]);
+}
+
 export async function recordRunEvent(
   runId: string,
   eventType: string,
@@ -251,11 +280,12 @@ export async function recordArtifact(params: {
   phase: string;
   kind: string;
   content: unknown;
-}): Promise<void> {
-  await pool.query(
-    "insert into artifacts (run_id, phase, kind, content) values ($1, $2, $3, $4)",
+}): Promise<ArtifactRow> {
+  const result = await pool.query<ArtifactRow>(
+    "insert into artifacts (run_id, phase, kind, content) values ($1, $2, $3, $4) returning *",
     [params.runId, params.phase, params.kind, params.content]
   );
+  return result.rows[0];
 }
 
 export async function finalizeRun(runId: string, result: PhaseResult): Promise<void> {
