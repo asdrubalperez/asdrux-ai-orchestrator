@@ -14,6 +14,10 @@
   `0004_project_config_versions.sql`, tabla dedicada versionada, funciones de repositorio
   (`getCurrentProjectConfig`, `getCurrentProjectConfigs`, `setProjectConfig`,
   `getProjectConfigHistory`) e integración en `runStart.ts`
+- FEATURE-012 — Persistencia de contexto/hallazgos en escalamiento: migración
+  `0005_escalation_context_persistence.sql`, `runs.originated_from_run_id`, estado `retrying`,
+  comando `run:respond`, worktree hijo ramificado desde la rama del padre y validación E2E real
+  documentada en `docs/features/FEATURE-012-implementation-results.md`
 - Feature 09 — Runbook para el Orquestador AI automático: 12 archivos en `docs/runbook/`, v1.0,
   marcador `[PENDIENTE-DB-PROJECTS]` reemplazado por la referencia real a
   `project_config_versions` (FEATURE-011), pasada de consistencia cruzada completa
@@ -21,7 +25,6 @@
   `06-DELIVERY-WORKFLOW.md` (v1.2), Lessons Learned de Feature 10
 
 **🟡 Confirmado**
-- FEATURE-012 — Mecanismo técnico de persistencia de contexto/hallazgos en el circuito de escalamiento
 - FEATURE-013 — Capa de UI — "Run en curso" (solo lectura, sin Disparo ni Historial/admin todavía)
 - FEATURE-014 — Milestone 2 — Validación end-to-end con caso de negocio real
 
@@ -109,11 +112,17 @@ creadas; `runs.owner_id`/`project_id` migrados a FK real, 19/19 filas backfillea
 El diseño de la tabla `projects` (y su relación con `runs`/`artifacts`) se hace recién con el
 resultado de la investigación de Codex, no antes.
 
-### 🟡 FEATURE-012 — Mecanismo técnico de persistencia de contexto/hallazgos en el circuito de escalamiento
-Necesario para que el circuito de escalamiento de `06-DELIVERY-WORKFLOW.md` (Stage 3) funcione en
-la práctica — hoy solo está descrito conceptualmente. Revisar primero si la tabla `run_events` ya
-existente (log append-only de todo lo ocurrido en un run) resuelve esto directamente, antes de
-diseñar un mecanismo nuevo.
+### ✅ FEATURE-012 — Persistencia de contexto/hallazgos en el circuito de escalamiento
+Implementada y mergeada en `main`. El circuito de escalamiento de `06-DELIVERY-WORKFLOW.md`
+(Stage 3) ya distingue reintento interno de escalamiento terminal mediante el estado `retrying`,
+persiste la continuidad entre runs con `runs.originated_from_run_id`, conserva el contexto del
+hallazgo en `run_events`/`artifacts`, y agrega `run:respond --solution|--abort` para la respuesta
+humana. El run hijo usa worktree/branch propio ramificado desde la rama del padre.
+
+Implementación principal: migración `0005_escalation_context_persistence.sql`, cambios en
+`src/db/repository.ts`, `src/cli/commands/runStart.ts`, `src/cli/commands/runRespond.ts` y
+`src/isolation/worktree.ts`. Validación E2E real con Postgres, Codex CLI y worktrees reales
+documentada en `docs/features/FEATURE-012-implementation-results.md`.
 
 ### ✅ Construcción de `CodexExecutor` de producción — paridad con Claude Code
 Cerrado en FEATURE-008 (ver `docs/features/FEATURE-008-implementation-results.md`). Se replicó
