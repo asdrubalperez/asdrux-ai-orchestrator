@@ -14,7 +14,8 @@ proceso (eso vive en `06-DELIVERY-WORKFLOW.md`) — es la estructura de datos qu
 producir.
 
 El Project Brief resultante es un entregable **por proyecto gestionado**, no un documento del
-Runbook en sí — **[PENDIENTE-DB-PROJECTS]**
+Runbook en sí; las configuraciones editables por producto se persisten en
+`project_config_versions` (FEATURE-011).
 
 ---
 

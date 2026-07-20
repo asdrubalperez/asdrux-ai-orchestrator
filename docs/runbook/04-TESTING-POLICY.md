@@ -33,7 +33,8 @@ Su objetivo es asegurar:
 El testing es una actividad diseñada, no exploratoria.
 
 Las secciones marcadas **[Editable por producto]** siguen la misma lógica ya fijada en
-`03-AI-CONSTITUTION.md`: **[PENDIENTE-DB-PROJECTS]**
+`03-AI-CONSTITUTION.md`: se persisten por producto en `project_config_versions` (FEATURE-011),
+con una fila vigente por `config_key`.
 
 ---
 

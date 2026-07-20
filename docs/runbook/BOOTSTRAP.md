@@ -24,7 +24,7 @@ ya provisto, o los artefactos que ya existan para ese producto — nunca pregunt
 
 Se determina consultando si ya existen Project Brief y Architecture (`01`, `02`) para el producto
 al que pertenece este business case — no se pregunta, se verifica contra lo que ya esté
-persistido. **[PENDIENTE-DB-PROJECTS]**
+persistido en `project_config_versions` (FEATURE-011).
 
 **Si no existen** → este es un producto nuevo. Continuar en Stage 2.
 
@@ -39,7 +39,8 @@ inicialización de Stage 2 para un producto que ya la tiene.
 # Stage 2 — Inicialización del Runbook (solo para un producto nuevo)
 
 1. Copiar el Runbook de referencia (`docs/runbook/` del propio repo del Orquestador) hacia la
-   ubicación que corresponda para este producto. **[PENDIENTE-DB-PROJECTS]**
+   ubicación que corresponda para este producto. Las configuraciones vigentes se consultan desde
+   `project_config_versions` (FEATURE-011).
 2. La ubicación y forma de acceso al código fuente del producto ya quedó cubierta como campo
    declarativo obligatorio en `01-PROJECT-BRIEF-TEMPLATE.md`, sección 0 (incluyendo el caso
    greenfield, marcado "No Aplica") — este Bootstrap no vuelve a preguntarlo por separado.

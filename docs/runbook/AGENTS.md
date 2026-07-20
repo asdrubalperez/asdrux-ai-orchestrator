@@ -28,7 +28,8 @@ templates.
 
 Las Features definen qué se construye.
 
-La documentación funcional de este producto gestionado vive junto a él. **[PENDIENTE-DB-PROJECTS]**
+La documentación funcional de este producto gestionado vive junto a él. Las configuraciones
+editables por producto se persisten en `project_config_versions` (FEATURE-011).
 
 ## Prioridad
 
