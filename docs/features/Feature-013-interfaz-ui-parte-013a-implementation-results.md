@@ -61,7 +61,33 @@
 - Archivos SQL temporales usados para validar fueron eliminados de `/tmp` del host y del
   contenedor.
 
-## Validación real pendiente para cierre completo de 013A
+## Validación funcional real de UI/SSE
 
-- Ejecutar un run real por CLI y observar la UI por túnel SSH.
-- Probar reconexión con `Last-Event-ID`.
+- Ambiente:
+  - backend + frontend corriendo en la VPS
+  - UI observada desde Windows vía túnel SSH
+  - runs disparados por `npm run cli -- run:start` contra la base real de la VPS
+- Run real `d8f02930-3b91-418b-b477-fe85a8766127`:
+  - pipeline: `single-phase-architect`
+  - caso: `case_descuento.json`
+  - resultado observado: `Architect` completó; los otros 5 nodos quedaron en `pendiente` de forma
+    permanente, como define la Regla Funcional 1 de 013A para pipelines cortos.
+  - la bitácora mostró el `summary` real de `PhaseResult`, sin síntesis adicional del lado de la
+    UI.
+- Run real `e0f37e33-2082-4b86-bca5-b4882bf7d17c`:
+  - pipeline: `two-phase-architect-functional`
+  - caso: `case_descuento.json`
+  - resultado observado: `Architect` y `Functional` pasaron en vivo de `pendiente` a `en_curso` y
+    luego a `completado`, sin refresco manual, vía SSE.
+- Reconexión a mitad de run:
+  - durante `e0f37e33-2082-4b86-bca5-b4882bf7d17c`, el owner recargó el navegador con `Architect`
+    todavía `en_curso`.
+  - el snapshot inicial de reconexión reconstruyó correctamente timeline y bitácora completa hasta
+    ese momento.
+  - después de la reconexión, la UI siguió actualizándose sola hasta completar ambas fases, sin
+    pérdida observable de eventos ni segundo refresco manual.
+
+## Cierre de 013A
+
+Con la validación funcional real anterior, los pendientes de cierre completo de 013A quedan
+cubiertos. La Parte 013A queda validada funcionalmente.
