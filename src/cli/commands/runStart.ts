@@ -19,9 +19,11 @@ import {
   findUserById,
   getProjectForUser,
   recordArtifact,
+  recordRunConfigVersions,
   recordRunEvent,
   updateRunCurrentPhase,
 } from "../../db/repository.js";
+import { pool } from "../../db/pool.js";
 import type { PhaseInvocation, PhaseResult } from "../../contracts/executor.js";
 import { PIPELINES, SINGLE_PHASE_ARCHITECT } from "../../pipelines/definitions.js";
 import { extractTestCommand } from "../../pipelines/extractTestCommand.js";
@@ -77,24 +79,41 @@ export async function runStart(args: string[]): Promise<void> {
   const worktree = await createRunWorktree(projectRepoRoot, runId);
   console.log(`[run:start] worktree creado: ${worktree.worktreePath} (rama ${worktree.branchName})`);
 
-  const run = await createRun({
-    id: runId,
-    pipelineDefinitionId: pipelineDefinition.id,
-    ownerId: user.id,
-    projectId: project.id,
-    firstPhase: pipelineSpec.definition.phases[0].agentRole,
-    branchName: worktree.branchName,
-    worktreePath: worktree.worktreePath,
-  });
-
-  await recordRunEvent(run.id, "run_started", {
-    branchName: worktree.branchName,
-    worktreePath: worktree.worktreePath,
-    casePath,
-    pipeline: `${pipelineSpec.name}@${pipelineSpec.version}`,
-    projectId: project.id,
-    repoPath: projectRepoRoot,
-  });
+  const client = await pool.connect();
+  let run;
+  try {
+    await client.query("begin");
+    run = await createRun({
+      id: runId,
+      pipelineDefinitionId: pipelineDefinition.id,
+      ownerId: user.id,
+      projectId: project.id,
+      firstPhase: pipelineSpec.definition.phases[0].agentRole,
+      branchName: worktree.branchName,
+      worktreePath: worktree.worktreePath,
+      client,
+    });
+    await recordRunConfigVersions(run.id, client);
+    await recordRunEvent(
+      run.id,
+      "run_started",
+      {
+        branchName: worktree.branchName,
+        worktreePath: worktree.worktreePath,
+        casePath,
+        pipeline: `${pipelineSpec.name}@${pipelineSpec.version}`,
+        projectId: project.id,
+        repoPath: projectRepoRoot,
+      },
+      client
+    );
+    await client.query("commit");
+  } catch (err) {
+    await client.query("rollback");
+    throw err;
+  } finally {
+    client.release();
+  }
 
   const executor = createExecutor(executorProvider, worktree.worktreePath, model);
   const readRole = (agentRole: string) =>

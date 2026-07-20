@@ -18,7 +18,8 @@ Feature a Feature a medida que surgen nuevas decisiones técnicas — análogo a
 `docs/playbook/02-ARCHITECTURE.md` de este mismo repo acumula decisiones desde Milestone 0.
 
 Es mayormente **investigable** — el Architect ya tiene lo que el humano solo él puede aportar (vía
-el Project Brief), y ahora explora, diseña y decide. **[PENDIENTE-DB-PROJECTS]**
+el Project Brief), y ahora explora, diseña y decide. Las decisiones editables por producto se
+persisten en `project_config_versions` (FEATURE-011).
 
 El mecanismo concreto de *cuándo y cómo* se retroalimenta este documento durante el ciclo de una
 Feature en curso (no solo entre Features) es un tema abierto — depende de cómo se resuelva el loop

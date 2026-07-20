@@ -14,8 +14,9 @@
   `06-DELIVERY-WORKFLOW.md` (v1.2), Lessons Learned de Feature 10
 
 **🟡 Confirmado**
-- Feature 11 — Capa de UI — "Run en curso" (solo lectura, sin Disparo ni Historial/admin todavía)
-- Feature 12 — Milestone 2 — Validación end-to-end con caso de negocio real
+- FEATURE-011 — Configuración vigente por proyecto (tabla dedicada versionada)
+- FEATURE-012 — Capa de UI — "Run en curso" (solo lectura, sin Disparo ni Historial/admin todavía)
+- FEATURE-013 — Milestone 2 — Validación end-to-end con caso de negocio real
 - Adecuación del Playbook para el Orquestador AI automático (En curso, pendiente de dependencia de adecuación de base de datos)
 - Mecanismo técnico de persistencia de contexto/hallazgos en el circuito de escalamiento
 
@@ -30,7 +31,7 @@
 - Creación real de PR vía API de GitHub / merge automático
 - Deployment Strategy y separación dev/staging/prod
 - Capa de UI (Disparo, Historial/admin — "Run en curso" ya pasó a Confirmado, ver arriba)
-- Notificación Slack/webhook complementaria a la UI de monitoreo (post Feature 11, si hace falta
+- Notificación Slack/webhook complementaria a la UI de monitoreo (post FEATURE-012, si hace falta
   alertas fuera de cuando se está mirando activamente)
 
 - Bajar expiracion de sesion del CLI de 30 dias a 48 horas al pasar a produccion - condicionado a
@@ -64,7 +65,12 @@ pipeline completo) ni FEATURE-006 (confinamiento QA). La paridad completa con Cl
 ✅ Ejecutado "Construcción de `CodexExecutor` de producción — paridad con Claude Code" — eso es
 lo que falta, no un extra opcional.
 
-### 🟡 Feature 12 — Milestone 2 — Validación end-to-end con caso de negocio real
+### 🟡 FEATURE-011 — Configuración vigente por proyecto
+Tabla dedicada versionada por `project_id` + `config_key` para persistir configuraciones editables
+por producto, consultar la vigente por índice único parcial y registrar qué versiones estaban
+vigentes al iniciar cada run. Ver `docs/features/FEATURE-011-project-config-versions.md`.
+
+### 🟡 FEATURE-013 — Milestone 2 — Validación end-to-end con caso de negocio real
 Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
 Confirmado y no Tentativo.
 
@@ -82,9 +88,9 @@ creadas; `runs.owner_id`/`project_id` migrados a FK real, 19/19 filas backfillea
 
 - **Sesiones/usuarios**: resuelto — `users` con `password_hash` real, validado por invocación.
   Sin tabla `sessions` ni validación server-side del token (ver ítem Tentativo correspondiente).
-- **Proyectos**: resuelto — tabla `projects` con `repo_path`, `owner_id` FK a `users`. Marcador
-  `[PENDIENTE-DB-PROJECTS]` (9 apariciones en `docs/runbook/`) queda pendiente de reemplazar por la
-  referencia real — parte del cierre formal de Feature 09, todavía no hecho.
+- **Proyectos**: resuelto — tabla `projects` con `repo_path`, `owner_id` FK a `users`. El marcador
+  `[PENDIENTE-DB-PROJECTS]` de `docs/runbook/` quedó reemplazado por la referencia real a
+  `project_config_versions` en FEATURE-011.
 - **Proceso por proyecto**: sin cambios respecto al diseño original — la tabla `artifacts`
   existente (JSONB, `commit_ref`) sigue cubriendo esto, ahora conectada a `projects` vía `runs`.
 
@@ -159,8 +165,8 @@ Stage 6, Modo A / Modo Auto) — este ítem es la implementación real, todavía
 ### ⚪ Deployment Strategy y separación dev/staging/prod
 Sin diseñar.
 
-### 🟡 Feature 11 — Capa de UI — "Run en curso"
-Confirmado como Feature 11, decidido en la sesión de diseño del Runbook (Feature 09): UI mínima de
+### 🟡 FEATURE-012 — Capa de UI — "Run en curso"
+Confirmado como FEATURE-012, decidido en la sesión de diseño del Runbook (Feature 09): UI mínima de
 solo lectura que muestra el estado de un run en curso, apoyada en la persistencia ya existente
 (`getRunDetail` / tabla `artifacts`, ver `docs/playbook/02-ARCHITECTURE.md`, sección 5) — no
 requiere construir nada nuevo en esa capa, solo un endpoint fino más una página que lo consulte.
@@ -170,7 +176,7 @@ Feature 10 (investigación de base de datos, ver arriba) ya no compite por este 
 ### ⚪ Capa de UI (Disparo, Historial/admin)
 Dos pantallas — Disparo (crear un run nuevo desde la UI) e Historial/admin (listado de runs
 propios o del equipo) — siguen `[Pendiente]` en `02-ARCHITECTURE.md`. "Run en curso" ya se
-promovió a Confirmado (Feature 11, ver arriba) — este ítem es solo el resto.
+promovió a Confirmado (FEATURE-012, ver arriba) — este ítem es solo el resto.
 
 ### ⚪ Notificación Slack/webhook complementaria
 Evaluada en la misma sesión que "Run en curso" como alternativa de monitoreo — se descartó como

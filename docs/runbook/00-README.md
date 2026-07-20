@@ -35,7 +35,8 @@ corresponde, y entrega el business case a Architect.
 
 ## 3. Documentación del Runbook
 
-Ubicada en `docs/runbook/` de este repo (la copia de referencia). **[PENDIENTE-DB-PROJECTS]**
+Ubicada en `docs/runbook/` de este repo (la copia de referencia). Las secciones editables por
+producto se persisten en `project_config_versions` por `project_id` + `config_key` (FEATURE-011).
 
 ---
 
@@ -69,7 +70,8 @@ Ubicada en `docs/runbook/` de este repo (la copia de referencia). **[PENDIENTE-D
 El Runbook define cómo se trabaja. Cada Feature (`07`) define qué se construye.
 
 La documentación funcional de cada producto gestionado (sus Features ya completadas, análogas a
-`docs/features/` de este mismo repo) vive junto a ese producto. **[PENDIENTE-DB-PROJECTS]**
+`docs/features/` de este mismo repo) vive junto a ese producto; las configuraciones vigentes por
+producto se consultan desde `project_config_versions` (FEATURE-011).
 
 ---
 

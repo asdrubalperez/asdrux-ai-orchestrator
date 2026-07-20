@@ -37,6 +37,15 @@ export interface ProjectRow {
   created_at: string;
 }
 
+export interface ProjectConfigVersionRow {
+  id: string;
+  project_id: string;
+  config_key: string;
+  value: unknown;
+  valid_from: string;
+  valid_to: string | null;
+}
+
 /**
  * Busca o crea la fila de `pipeline_definitions` para un `PipelineSpec` dado. La secuencia de
  * fases vive como datos (JSONB), no hardcodeada — este repositorio es agnóstico de qué pipeline
@@ -66,8 +75,10 @@ export async function createRun(params: {
   firstPhase: string;
   branchName: string;
   worktreePath: string;
+  client?: PoolClient;
 }): Promise<RunRow> {
-  const result = await pool.query<RunRow>(
+  const db = params.client ?? pool;
+  const result = await db.query<RunRow>(
     `insert into runs (id, pipeline_definition_id, owner_id, project_id, current_phase, status, branch_name, worktree_path)
      values ($1, $2, $3, $4, $5, 'running', $6, $7)
      returning *`,
@@ -82,6 +93,108 @@ export async function createRun(params: {
     ]
   );
   return result.rows[0];
+}
+
+export async function getCurrentProjectConfig(
+  projectId: string,
+  configKey: string
+): Promise<ProjectConfigVersionRow | null> {
+  const result = await pool.query<ProjectConfigVersionRow>(
+    `select id, project_id, config_key, value, valid_from, valid_to
+     from project_config_versions
+     where project_id = $1 and config_key = $2 and valid_to is null`,
+    [projectId, configKey]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function getCurrentProjectConfigs(
+  projectId: string,
+  client?: PoolClient
+): Promise<ProjectConfigVersionRow[]> {
+  const db = client ?? pool;
+  const result = await db.query<ProjectConfigVersionRow>(
+    `select id, project_id, config_key, value, valid_from, valid_to
+     from project_config_versions
+     where project_id = $1 and valid_to is null`,
+    [projectId]
+  );
+  return result.rows;
+}
+
+export async function setProjectConfig(params: {
+  projectId: string;
+  configKey: string;
+  value: unknown;
+  changedByUserId?: string;
+  changedInRunId?: string;
+  changeReason?: string;
+}): Promise<ProjectConfigVersionRow> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await client.query(
+      `update project_config_versions
+       set valid_to = now()
+       where project_id = $1 and config_key = $2 and valid_to is null`,
+      [params.projectId, params.configKey]
+    );
+    const inserted = await client.query<ProjectConfigVersionRow>(
+      `insert into project_config_versions (
+         project_id, config_key, value, changed_by_user_id, changed_in_run_id, change_reason
+       )
+       values ($1, $2, $3, $4, $5, $6)
+       returning id, project_id, config_key, value, valid_from, valid_to`,
+      [
+        params.projectId,
+        params.configKey,
+        params.value,
+        params.changedByUserId ?? null,
+        params.changedInRunId ?? null,
+        params.changeReason ?? null,
+      ]
+    );
+    await client.query("commit");
+    return inserted.rows[0];
+  } catch (err) {
+    await client.query("rollback");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getProjectConfigHistory(
+  projectId: string,
+  configKey: string
+): Promise<ProjectConfigVersionRow[]> {
+  const result = await pool.query<ProjectConfigVersionRow>(
+    `select id, project_id, config_key, value, valid_from, valid_to
+     from project_config_versions
+     where project_id = $1 and config_key = $2
+     order by valid_from desc`,
+    [projectId, configKey]
+  );
+  return result.rows;
+}
+
+export async function recordRunConfigVersions(runId: string, client?: PoolClient): Promise<void> {
+  const db = client ?? pool;
+  const run = await db.query<Pick<RunRow, "project_id">>("select project_id from runs where id = $1", [runId]);
+  if (!run.rows[0]) {
+    throw new Error(`Run inexistente: ${runId}`);
+  }
+  if (run.rows[0].project_id === null) {
+    return;
+  }
+
+  const configs = await getCurrentProjectConfigs(run.rows[0].project_id, client);
+  for (const config of configs) {
+    await db.query("insert into run_config_versions (run_id, config_version_id) values ($1, $2)", [
+      runId,
+      config.id,
+    ]);
+  }
 }
 
 export async function findUserByHandle(handle: string): Promise<UserRow | null> {

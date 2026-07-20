@@ -18,7 +18,8 @@ lleva al proyecto puntual. Ahí, las secciones marcadas **[Editable por producto
 para ese proyecto específico, y esa copia vive y se actualiza junto al proyecto de ahí en
 adelante — nunca vuelve a tocar la plantilla original.
 
-**[PENDIENTE-DB-PROJECTS]**
+Estas secciones se persisten por producto en `project_config_versions` (FEATURE-011), usando una
+fila vigente por `config_key`.
 
 Este documento no asume que un humano confirma cada paso. La autoridad de decisión sigue una
 jerarquía definida (ver Regla 8), y la aprobación humana explícita se reserva para los casos donde
