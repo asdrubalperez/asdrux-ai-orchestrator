@@ -103,8 +103,13 @@ arquitectónico, requisito ambiguo, riesgo relevante) o un dato genuinamente dec
 Si se dispara un escalamiento: el circuito entra siempre por Architect (camino único, ver Regla
 10 de `03-AI-CONSTITUTION.md`) y avanza en el orden normal de este mismo workflow hasta llegar al
 dueño real que corresponde resolver el hallazgo, llevando consigo los hallazgos que registró el
-agente de origen (el mecanismo concreto de persistencia de ese contexto entre reinicios queda
-pendiente de diseño técnico — no bloquea el resto de este documento).
+agente de origen. El mecanismo de persistencia de ese contexto entre reinicios ya está resuelto:
+cada hallazgo se persiste como un `artifact` de tipo `escalation` (con `escalationReason` y el
+`outputArtifact` rechazado) en `run_events`/`artifacts`, y el run que retoma el hallazgo queda
+enlazado al run original vía `originated_from_run_id` — el contexto viaja completo de un
+reinicio al siguiente sin perderse. Detalle de implementación y evidencia:
+`docs/features/FEATURE-012-escalation-context-persistence.md` y
+`docs/features/FEATURE-012-implementation-results.md`.
 
 ### Cuándo este circuito escala al humano
 
@@ -119,9 +124,11 @@ al humano cuando ocurra cualquiera de estas dos condiciones:
   inmediato, sin esperar a agotar el tope de 3, porque es una señal más fuerte de que nadie se está
   haciendo cargo que solo contar intentos.
 
-Ambos mecanismos dependen del mismo diseño técnico de persistencia de contexto que ya quedó
-pendiente arriba — no se pueden implementar sin resolver primero cómo se lleva el hallazgo de un
-paso al siguiente.
+Ambos mecanismos ya cuentan con el diseño técnico de persistencia de contexto necesario (ver
+arriba). El circuito distingue internamente entre reintento interno (`runs.status = retrying`,
+el propio sistema reintenta solo con el contexto acumulado, sin intervención humana) y
+escalamiento terminal a humano (`runs.status = escalated`), disparado por cualquiera de las dos
+condiciones descritas arriba.
 
 No debe: asumir aprobación de algo que sí requiere escalar; avanzar por iniciativa propia cuando
 el Approval Model indica detenerse.
