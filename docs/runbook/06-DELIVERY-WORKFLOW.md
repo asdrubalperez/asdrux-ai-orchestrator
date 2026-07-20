@@ -2,7 +2,7 @@
 
 # Delivery Workflow — Runbook
 
-Versión: v0.1 (borrador de diseño, pendiente de aprobación)
+Versión: v1.0
 
 ## Propósito
 

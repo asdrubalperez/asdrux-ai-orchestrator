@@ -2,7 +2,7 @@
 
 # Feature Template — Runbook
 
-Versión: v0.1 (borrador de diseño, pendiente de aprobación)
+Versión: v1.0
 Dueño: Functional (ver `03-AI-CONSTITUTION.md`, Regla 10, Ownership de Artefactos)
 Consumido por: Planning (construye el Release Plan — `09-RELEASE-PLAN-TEMPLATE.md` — a partir de
 esto),

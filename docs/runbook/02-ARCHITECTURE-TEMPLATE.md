@@ -2,7 +2,7 @@
 
 # Architecture Template — Runbook
 
-Versión: v0.1 (borrador de diseño, pendiente de aprobación)
+Versión: v1.0
 Rol que lo produce: Architect
 Rol que lo consume: Functional (y, en adelante, todo el pipeline)
 Precondición: existe un `01-PROJECT-BRIEF-TEMPLATE.md` completo y sin huecos conocidos para el

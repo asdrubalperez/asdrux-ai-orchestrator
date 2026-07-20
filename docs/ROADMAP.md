@@ -10,6 +10,9 @@
 - Feature 10 — `users`, `projects` y login del CLI: tablas `users`/`projects` creadas, migración
   de `runs.owner_id`/`project_id` (19/19 backfilleados), comandos `login`/`logout`/`seed:user` con
   `bcryptjs`, sesión local de 30 días
+- Feature 09 — Runbook para el Orquestador AI automático: 12 archivos en `docs/runbook/`, v1.0,
+  marcador `[PENDIENTE-DB-PROJECTS]` reemplazado por la referencia real a
+  `project_config_versions` (FEATURE-011), pasada de consistencia cruzada completa
 - Evolución del Playbook: declaración de rama/checkout de origen movida de Stage 6 a Stage 3 en
   `06-DELIVERY-WORKFLOW.md` (v1.2), Lessons Learned de Feature 10
 
@@ -17,7 +20,6 @@
 - FEATURE-011 — Configuración vigente por proyecto (tabla dedicada versionada)
 - FEATURE-012 — Capa de UI — "Run en curso" (solo lectura, sin Disparo ni Historial/admin todavía)
 - FEATURE-013 — Milestone 2 — Validación end-to-end con caso de negocio real
-- Adecuación del Playbook para el Orquestador AI automático (En curso, pendiente de dependencia de adecuación de base de datos)
 - Mecanismo técnico de persistencia de contexto/hallazgos en el circuito de escalamiento
 
 **⚪ Tentativo**
@@ -74,12 +76,16 @@ vigentes al iniciar cada run. Ver `docs/features/FEATURE-011-project-config-vers
 Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
 Confirmado y no Tentativo.
 
-### 🟡 Adecuación del Playbook para el Orquestador AI automático
-El playbook actual (`docs/playbook/`) está diseñado para que lo use un humano en conjunto con un
-asistente IA (Architect/Governance Guide para diseño, asistente de desarrollo para implementación)
-— asume lectura, confirmación y decisión humana en cada paso (Bootstrap, Approval Gate, elección de
-Playbook Mode, etc.). Falta adecuarlo para que el propio Orquestador AI automático lo consuma y
-opere sobre él sin loop humano — pendiente crítico, no evaluado como opcional.
+### ✅ Feature 09 — Runbook para el Orquestador AI automático
+Diseño completo y cerrado: 12 archivos en `docs/runbook/` (equivalente al `docs/playbook/` actual
+de este mismo repo, pero pensado para que el Orquestador AI automático los consuma y opere sobre
+ellos sin loop humano, salvo en los 6 puntos taxativos definidos en `00-README.md`). El marcador
+`[PENDIENTE-DB-PROJECTS]` (9 apariciones en 7 archivos) fue reemplazado por la referencia real al
+mecanismo de persistencia de configuración por producto (`project_config_versions`, FEATURE-011).
+Pasada de consistencia cruzada de los 12 archivos completada — corrigió una referencia cruzada
+real (`BOOTSTRAP.md` y `08-CODE-SYSTEM-PROMPT.md` mencionaban erróneamente que las secciones
+"Editable por producto" incluían `07-FEATURE-TEMPLATE.md`, que no tiene ninguna). Bump de versión
+a `v1.0` en los 12 archivos.
 
 ### ✅ Feature 10 — `users`, `projects` y login del CLI
 Implementada y mergeada en `main`. Tablas `users` (con `password_hash` vía `bcryptjs`) y `projects`

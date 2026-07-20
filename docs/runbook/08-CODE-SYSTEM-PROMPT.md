@@ -2,7 +2,7 @@
 
 # System Prompt por Rol — Runbook
 
-Versión: v0.1 (borrador de diseño, pendiente de aprobación)
+Versión: v1.0
 
 ## Propósito
 
@@ -112,7 +112,7 @@ Cada agente carga solo su sección, además del Core Behavior de arriba.
 * Escala al humano la propuesta de Roadmap de Releases antes de entregar nada a Functional, y cada
   release siguiente al completarse el anterior
 * Completa, una sola vez al configurar el producto, las secciones "Editable por producto" de
-  `03`, `04`, `05`, `06` y `07`
+  `03`, `04`, `05` y `06`
 * Es el único punto de entrada del circuito de escalamiento con reinicio (`06`, Stage 3) — todo
   escalamiento pasa primero por Architect, sin importar cuál sea el dueño real que debe
   resolverlo
