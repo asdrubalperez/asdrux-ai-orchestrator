@@ -10,6 +10,10 @@
 - Feature 10 — `users`, `projects` y login del CLI: tablas `users`/`projects` creadas, migración
   de `runs.owner_id`/`project_id` (19/19 backfilleados), comandos `login`/`logout`/`seed:user` con
   `bcryptjs`, sesión local de 30 días
+- FEATURE-011 — Configuración vigente por proyecto: migración
+  `0004_project_config_versions.sql`, tabla dedicada versionada, funciones de repositorio
+  (`getCurrentProjectConfig`, `getCurrentProjectConfigs`, `setProjectConfig`,
+  `getProjectConfigHistory`) e integración en `runStart.ts`
 - Feature 09 — Runbook para el Orquestador AI automático: 12 archivos en `docs/runbook/`, v1.0,
   marcador `[PENDIENTE-DB-PROJECTS]` reemplazado por la referencia real a
   `project_config_versions` (FEATURE-011), pasada de consistencia cruzada completa
@@ -17,10 +21,9 @@
   `06-DELIVERY-WORKFLOW.md` (v1.2), Lessons Learned de Feature 10
 
 **🟡 Confirmado**
-- FEATURE-011 — Configuración vigente por proyecto (tabla dedicada versionada)
-- FEATURE-012 — Capa de UI — "Run en curso" (solo lectura, sin Disparo ni Historial/admin todavía)
-- FEATURE-013 — Milestone 2 — Validación end-to-end con caso de negocio real
-- Mecanismo técnico de persistencia de contexto/hallazgos en el circuito de escalamiento
+- FEATURE-012 — Mecanismo técnico de persistencia de contexto/hallazgos en el circuito de escalamiento
+- FEATURE-013 — Capa de UI — "Run en curso" (solo lectura, sin Disparo ni Historial/admin todavía)
+- FEATURE-014 — Milestone 2 — Validación end-to-end con caso de negocio real
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
@@ -33,7 +36,7 @@
 - Creación real de PR vía API de GitHub / merge automático
 - Deployment Strategy y separación dev/staging/prod
 - Capa de UI (Disparo, Historial/admin — "Run en curso" ya pasó a Confirmado, ver arriba)
-- Notificación Slack/webhook complementaria a la UI de monitoreo (post FEATURE-012, si hace falta
+- Notificación Slack/webhook complementaria a la UI de monitoreo (post FEATURE-013, si hace falta
   alertas fuera de cuando se está mirando activamente)
 
 - Bajar expiracion de sesion del CLI de 30 dias a 48 horas al pasar a produccion - condicionado a
@@ -67,12 +70,15 @@ pipeline completo) ni FEATURE-006 (confinamiento QA). La paridad completa con Cl
 ✅ Ejecutado "Construcción de `CodexExecutor` de producción — paridad con Claude Code" — eso es
 lo que falta, no un extra opcional.
 
-### 🟡 FEATURE-011 — Configuración vigente por proyecto
+### ✅ FEATURE-011 — Configuración vigente por proyecto
 Tabla dedicada versionada por `project_id` + `config_key` para persistir configuraciones editables
 por producto, consultar la vigente por índice único parcial y registrar qué versiones estaban
-vigentes al iniciar cada run. Ver `docs/features/FEATURE-011-project-config-versions.md`.
+vigentes al iniciar cada run. Implementada con la migración `0004_project_config_versions.sql`,
+funciones en `src/db/repository.ts` (`getCurrentProjectConfig`, `getCurrentProjectConfigs`,
+`setProjectConfig`, `getProjectConfigHistory`) e integración del snapshot vigente en
+`src/cli/commands/runStart.ts`. Ver `docs/features/FEATURE-011-project-config-versions.md`.
 
-### 🟡 FEATURE-013 — Milestone 2 — Validación end-to-end con caso de negocio real
+### 🟡 FEATURE-014 — Milestone 2 — Validación end-to-end con caso de negocio real
 Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
 Confirmado y no Tentativo.
 
@@ -103,7 +109,7 @@ creadas; `runs.owner_id`/`project_id` migrados a FK real, 19/19 filas backfillea
 El diseño de la tabla `projects` (y su relación con `runs`/`artifacts`) se hace recién con el
 resultado de la investigación de Codex, no antes.
 
-### 🟡 Mecanismo técnico de persistencia de contexto/hallazgos en el circuito de escalamiento
+### 🟡 FEATURE-012 — Mecanismo técnico de persistencia de contexto/hallazgos en el circuito de escalamiento
 Necesario para que el circuito de escalamiento de `06-DELIVERY-WORKFLOW.md` (Stage 3) funcione en
 la práctica — hoy solo está descrito conceptualmente. Revisar primero si la tabla `run_events` ya
 existente (log append-only de todo lo ocurrido en un run) resuelve esto directamente, antes de
@@ -171,8 +177,8 @@ Stage 6, Modo A / Modo Auto) — este ítem es la implementación real, todavía
 ### ⚪ Deployment Strategy y separación dev/staging/prod
 Sin diseñar.
 
-### 🟡 FEATURE-012 — Capa de UI — "Run en curso"
-Confirmado como FEATURE-012, decidido en la sesión de diseño del Runbook (Feature 09): UI mínima de
+### 🟡 FEATURE-013 — Capa de UI — "Run en curso"
+Confirmado como FEATURE-013, decidido en la sesión de diseño del Runbook (Feature 09): UI mínima de
 solo lectura que muestra el estado de un run en curso, apoyada en la persistencia ya existente
 (`getRunDetail` / tabla `artifacts`, ver `docs/playbook/02-ARCHITECTURE.md`, sección 5) — no
 requiere construir nada nuevo en esa capa, solo un endpoint fino más una página que lo consulte.
@@ -182,7 +188,7 @@ Feature 10 (investigación de base de datos, ver arriba) ya no compite por este 
 ### ⚪ Capa de UI (Disparo, Historial/admin)
 Dos pantallas — Disparo (crear un run nuevo desde la UI) e Historial/admin (listado de runs
 propios o del equipo) — siguen `[Pendiente]` en `02-ARCHITECTURE.md`. "Run en curso" ya se
-promovió a Confirmado (FEATURE-012, ver arriba) — este ítem es solo el resto.
+promovió a Confirmado (FEATURE-013, ver arriba) — este ítem es solo el resto.
 
 ### ⚪ Notificación Slack/webhook complementaria
 Evaluada en la misma sesión que "Run en curso" como alternativa de monitoreo — se descartó como
