@@ -1,0 +1,220 @@
+import express from "express";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  authenticateWebRequest,
+  clearLoginRateLimit,
+  clientIpForRateLimit,
+  createWebLoginSession,
+  expiredSessionCookieHeader,
+  loginRateLimitExceeded,
+  recordFailedLogin,
+  requireAllowedOrigin,
+  revokeSessionFromRequest,
+  sessionCookieHeader,
+  WEB_SESSION_TTL_MS,
+  type AuthenticatedRequest,
+} from "../auth/webSession.js";
+import { getRunDetailForUser } from "../db/repository.js";
+import { buildRunViewModel } from "./runView.js";
+import { openRunEventsStream } from "./sse.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export interface ServerConfig {
+  allowedOrigin: string;
+  cookieSecure: boolean;
+  cookieDomain?: string;
+}
+
+export function createApp(config: ServerConfig): express.Express {
+  const app = express();
+  app.set("trust proxy", 1);
+
+  app.use(corsMiddleware(config.allowedOrigin));
+  app.use(express.json());
+
+  app.get("/health", (_req, res) => {
+    res.json({ ok: true });
+  });
+
+  app.post("/auth/login", async (req, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+
+      const clientIp = clientIpForRateLimit(req);
+      if (loginRateLimitExceeded(clientIp)) {
+        res.status(429).json({ error: "rate_limited" });
+        return;
+      }
+
+      const { handle, password } = loginBody(req.body);
+      if (!handle || !password) {
+        recordFailedLogin(clientIp);
+        res.status(401).json({ error: "invalid_credentials" });
+        return;
+      }
+
+      const login = await createWebLoginSession(handle, password);
+      if (!login) {
+        recordFailedLogin(clientIp);
+        res.status(401).json({ error: "invalid_credentials" });
+        return;
+      }
+
+      clearLoginRateLimit(clientIp);
+      res.setHeader(
+        "Set-Cookie",
+        sessionCookieHeader({
+          value: login.cookieValue,
+          maxAgeSeconds: Math.floor(WEB_SESSION_TTL_MS / 1000),
+          secure: config.cookieSecure,
+          domain: config.cookieDomain,
+        })
+      );
+      res.status(200).json({ user: publicUser(login.user) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/auth/logout", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      await revokeSessionFromRequest(req);
+      res.setHeader(
+        "Set-Cookie",
+        expiredSessionCookieHeader({ secure: config.cookieSecure, domain: config.cookieDomain })
+      );
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/auth/me", requireSession, (req: AuthenticatedRequest, res) => {
+    res.json({ user: publicUser(req.user) });
+  });
+
+  app.get("/runs/:id", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const runId = stringParam(req.params.id);
+      if (!runId) {
+        res.status(400).json({ error: "invalid_run_id" });
+        return;
+      }
+      const detail = await getRunDetailForUser(runId, req.user?.id ?? "");
+      if (!detail) {
+        res.status(404).json({ error: "run_not_found" });
+        return;
+      }
+      res.json(buildRunViewModel(detail));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/runs/:id/stream", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const runId = stringParam(req.params.id);
+      if (!runId) {
+        res.status(400).json({ error: "invalid_run_id" });
+        return;
+      }
+      await openRunEventsStream({
+        runId,
+        userId: req.user?.id ?? "",
+        lastEventId: parseLastEventId(req.header("Last-Event-ID")),
+        response: res,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  const frontendDist = path.resolve(__dirname, "..", "..", "web", "dist");
+  app.use(express.static(frontendDist));
+  app.get(/.*/, (_req, res) => {
+    res.sendFile(path.join(frontendDist, "index.html"));
+  });
+
+  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    const message = err instanceof Error ? err.message : "Error desconocido";
+    res.status(500).json({ error: message });
+  });
+
+  return app;
+}
+
+export function serverConfigFromEnv(): ServerConfig {
+  const allowedOrigin = process.env.ORCHESTRATOR_WEB_ORIGIN;
+  if (!allowedOrigin) throw new Error("ORCHESTRATOR_WEB_ORIGIN requerido para sesiones web.");
+
+  return {
+    allowedOrigin,
+    cookieSecure: process.env.ORCHESTRATOR_COOKIE_SECURE !== "false",
+    cookieDomain: process.env.ORCHESTRATOR_COOKIE_DOMAIN || undefined,
+  };
+}
+
+async function requireSession(req: AuthenticatedRequest, res: express.Response, next: express.NextFunction) {
+  try {
+    const auth = await authenticateWebRequest(req);
+    if (!auth) {
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+    req.user = auth.user;
+    req.sessionId = auth.sessionId;
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+function corsMiddleware(allowedOrigin: string): express.RequestHandler {
+  return (req, res, next) => {
+    const origin = req.header("Origin");
+    if (origin === allowedOrigin) {
+      res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Vary", "Origin");
+    }
+
+    if (req.method === "OPTIONS") {
+      if (origin !== allowedOrigin) {
+        res.status(403).end();
+        return;
+      }
+      res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type,Last-Event-ID");
+      res.status(204).end();
+      return;
+    }
+
+    next();
+  };
+}
+
+function loginBody(body: unknown): { handle: string | null; password: string | null } {
+  if (body === null || typeof body !== "object") return { handle: null, password: null };
+  const record = body as Record<string, unknown>;
+  return {
+    handle: typeof record.handle === "string" ? record.handle : null,
+    password: typeof record.password === "string" ? record.password : null,
+  };
+}
+
+function publicUser(user: AuthenticatedRequest["user"]) {
+  return user ? { id: user.id, handle: user.handle } : null;
+}
+
+function stringParam(value: string | string[] | undefined): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function parseLastEventId(value: string | undefined): number {
+  if (!value) return 0;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+}
