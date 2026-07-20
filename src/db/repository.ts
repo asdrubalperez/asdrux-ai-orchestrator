@@ -314,3 +314,14 @@ export async function getRunDetailForUser(runId: string, userId: string) {
   if (!detail || detail.run.owner_id !== userId) return null;
   return detail;
 }
+
+export async function getRunEventsAfterForUser(runId: string, userId: string, afterEventId: number) {
+  const run = await pool.query<Pick<RunRow, "owner_id">>("select owner_id from runs where id = $1", [runId]);
+  if (!run.rows[0] || run.rows[0].owner_id !== userId) return null;
+
+  const events = await pool.query(
+    "select id, event_type, payload, created_at from run_events where run_id = $1 and id > $2 order by id asc",
+    [runId, afterEventId]
+  );
+  return events.rows;
+}
