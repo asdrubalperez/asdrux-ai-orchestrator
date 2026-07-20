@@ -2,7 +2,7 @@
 
 # Testing Policy — Runbook
 
-Versión: v0.1 (borrador de diseño, pendiente de aprobación)
+Versión: v1.0
 Dueño y único consultor directo de este documento: Planning (lo usa para diseñar el Test Plan de
 cada Feature, dentro del Release Plan — `09-RELEASE-PLAN-TEMPLATE.md`, sección 2 — ver
 `03-AI-CONSTITUTION.md`, Regla 10, Ownership de Artefactos)

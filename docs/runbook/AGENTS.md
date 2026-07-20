@@ -2,7 +2,7 @@
 
 # AGENTS.md — Runbook
 
-Versión: v0.1 (borrador de diseño, pendiente de aprobación)
+Versión: v1.0
 
 Este producto gestionado usa el Runbook del Orquestador. Este archivo es el punto de entrada
 obligatorio para inicializar el contexto de trabajo de cualquier agente antes de operar sobre

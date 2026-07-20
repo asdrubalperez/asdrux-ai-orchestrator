@@ -2,7 +2,7 @@
 
 # Release Plan Template — Runbook
 
-Versión: v0.1 (borrador de diseño, pendiente de aprobación)
+Versión: v1.0
 Dueño: Planning (ver `03-AI-CONSTITUTION.md`, Regla 10, Ownership de Artefactos)
 Consumido por: Developer (implementa dentro del enfoque técnico de cada Feature), QA (ejecuta
 contra el Test Plan de cada Feature)

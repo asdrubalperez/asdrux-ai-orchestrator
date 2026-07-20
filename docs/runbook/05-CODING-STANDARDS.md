@@ -2,7 +2,7 @@
 
 # Coding Standards — Runbook
 
-Versión: v0.1 (borrador de diseño, pendiente de aprobación)
+Versión: v1.0
 Dueño y consultor directo: Developer (lo aplica directamente al escribir código — no hay un
 entregable intermedio tipo Test Plan acá; el código mismo es el entregable, y Developer es su
 dueño, ver `03-AI-CONSTITUTION.md`, Regla 10, Ownership de Artefactos)

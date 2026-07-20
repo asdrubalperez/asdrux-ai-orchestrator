@@ -2,7 +2,7 @@
 
 # Runbook Bootstrap
 
-Versión: v0.1 (borrador de diseño, pendiente de aprobación)
+Versión: v1.0
 Dueño: Architect (ejecuta este proceso; ver `03-AI-CONSTITUTION.md`, Regla 10, Ownership de
 Artefactos)
 
@@ -44,7 +44,7 @@ inicialización de Stage 2 para un producto que ya la tiene.
 2. La ubicación y forma de acceso al código fuente del producto ya quedó cubierta como campo
    declarativo obligatorio en `01-PROJECT-BRIEF-TEMPLATE.md`, sección 0 (incluyendo el caso
    greenfield, marcado "No Aplica") — este Bootstrap no vuelve a preguntarlo por separado.
-3. Las secciones "Editable por producto" de `03`, `04`, `05`, `06` y `07` se completan como parte
+3. Las secciones "Editable por producto" de `03`, `04`, `05` y `06` se completan como parte
    del mismo trabajo de Architect en Stage 3 — no antes, no como un paso separado que bloquee el
    inicio del Project Brief.
 

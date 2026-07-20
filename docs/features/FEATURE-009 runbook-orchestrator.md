@@ -2,8 +2,9 @@
 
 Fecha de esta sesión: 2026-07-18/19
 Rama sugerida: `feature/009-runbook`
-Estado: **diseño completo, borrador v0.1 en los 12 archivos — no está cerrada del todo** (ver
-sección "Pendientes explícitos" antes de asumir que sí).
+Estado: **cerrada formalmente** — ver sección "Cierre formal" al final de este documento. La
+sección "Decisión final" más abajo es el registro histórico de por qué se decidió cerrarla en una
+sesión aparte, no una descripción del estado actual.
 
 ## Resumen
 
@@ -129,3 +130,23 @@ Esto no bloquea arrancar Feature 10 — al contrario, Feature 10 (investigación
 base de datos: tabla `projects` y persistencia de sesiones/usuarios) es la que resuelve el
 pendiente real que impide cerrar Feature 09 (el marcador `[PENDIENTE-DB-PROJECTS]`). El cierre
 formal de Feature 09 queda entonces, a propósito, después del cierre de Feature 10.
+
+## Cierre formal (sesión posterior)
+
+Los dos pendientes explícitos de la sección "Decisión final" ya están resueltos:
+
+- **Feature 10** (`users`/`projects`/login) resolvió la dependencia real: existe tabla `projects`,
+  y el marcador `[PENDIENTE-DB-PROJECTS]` (9 apariciones en 7 archivos) fue reemplazado por la
+  referencia real al mecanismo de persistencia de configuración por producto.
+- **Feature 11** (`project_config_versions`) definió ese mecanismo — investigado sin sesgo antes
+  de aprobarlo (se evaluaron 4 opciones, incluyendo reutilizar `artifacts`, descartada
+  explícitamente por buenas razones). Es lo que hoy referencian `03`, `04`, `05` y `06` en sus
+  secciones "Editable por producto".
+- **Pasada de consistencia cruzada** de los 12 archivos completada. Encontró una inconsistencia
+  real, repetida en `BOOTSTRAP.md` y `08-CODE-SYSTEM-PROMPT.md`: ambos afirmaban que las secciones
+  "Editable por producto" incluían `07-FEATURE-TEMPLATE.md`, que no tiene ninguna — corregido a
+  `03`, `04`, `05` y `06`.
+- **Bump de versión a `v1.0`** aplicado en los 12 archivos.
+
+Con esto, Feature 09 queda cerrada en los términos que exige `06-DELIVERY-WORKFLOW.md` (Stage 7,
+Post-Release Review) del propio Playbook de este repo.
