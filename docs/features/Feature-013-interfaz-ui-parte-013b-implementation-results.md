@@ -27,6 +27,7 @@
   - `fetch` con `credentials: "include"`
   - `EventSource` con `{ withCredentials: true }`
   - soporte `VITE_API_BASE_URL` para frontend desplegado fuera del backend
+  - proxy de desarrollo de Vite actualizado para `/auth`, además de `/runs` y `/health`
 
 ## Decisiones de implementación
 
@@ -38,6 +39,9 @@
   habilitan credenciales cross-origin.
 - No se agregó una dependencia externa de CORS/cookies/rate-limit; el comportamiento queda
   implementado explícitamente para mantener el cambio mínimo.
+- Lección aprendida para los próximos incrementos: cualquier endpoint backend nuevo que deba
+  usarse en desarrollo local con Vite debe sumarse también al proxy de `vite.config.ts`, no solo
+  al contrato de CORS/producción.
 
 ## Validación local
 
