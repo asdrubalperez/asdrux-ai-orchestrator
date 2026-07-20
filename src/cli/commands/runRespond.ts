@@ -76,6 +76,12 @@ export async function runRespond(args: string[]): Promise<void> {
 
   const escalationArtifact = latestEscalationArtifact(parentDetail.artifacts);
   const escalationContent = escalationArtifactContent(escalationArtifact);
+  const retryContext = buildEscalationContext({
+    escalationReason: escalationContent.escalationReason,
+    rejectedArtifact: escalationContent.outputArtifact,
+    originAgentRole: escalationArtifact.phase,
+    humanSolution,
+  });
 
   const childRunId = randomUUID();
   const childWorktree = await createRunWorktree(projectRepoRoot, childRunId, parentWorktree.branchName);
@@ -113,6 +119,16 @@ export async function runRespond(args: string[]): Promise<void> {
       },
       client
     );
+    await recordRunEvent(
+      childRun.id,
+      "escalation_retry_context_prepared",
+      {
+        parentRunId,
+        parentArtifactId: escalationArtifact.id,
+        context: retryContext,
+      },
+      client
+    );
     await recordRunEvent(parentRunId, "escalation_human_response", { solution: humanSolution, newRunId: childRun.id }, client);
     await client.query("commit");
   } catch (err) {
@@ -127,12 +143,7 @@ export async function runRespond(args: string[]): Promise<void> {
     runId: childRunId,
     worktree: childWorktree,
     pipelineSpec,
-    initialContext: buildEscalationContext({
-      escalationReason: escalationContent.escalationReason,
-      rejectedArtifact: escalationContent.outputArtifact,
-      originAgentRole: escalationArtifact.phase,
-      humanSolution,
-    }),
+    initialContext: retryContext,
     executorProvider,
     model,
   });

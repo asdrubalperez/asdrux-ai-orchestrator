@@ -287,15 +287,21 @@ async function handleLinearEscalation(params: {
     return { retry: false };
   }
 
+  const context = buildEscalationContext({
+    escalationReason: params.result.escalationReason,
+    rejectedArtifact: params.result.outputArtifact,
+    originAgentRole: params.agentRole,
+    humanSolution: null,
+  });
+  await recordRunEvent(params.runId, "escalation_retry_context_prepared", {
+    agentRole: params.agentRole,
+    attempt,
+    context,
+  });
   await updateRunStatus(params.runId, "retrying");
   return {
     retry: true,
-    context: buildEscalationContext({
-      escalationReason: params.result.escalationReason,
-      rejectedArtifact: params.result.outputArtifact,
-      originAgentRole: params.agentRole,
-      humanSolution: null,
-    }),
+    context,
   };
 }
 

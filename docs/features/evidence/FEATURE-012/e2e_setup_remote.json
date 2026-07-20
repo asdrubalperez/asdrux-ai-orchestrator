@@ -1,0 +1,15 @@
+{
+  "user": {
+    "id": "f31146ef-32ed-49e6-8478-cf1759f7bc51",
+    "handle": "asdru"
+  },
+  "project": {
+    "id": "7058aeb5-aa36-4d79-bab7-e317a6ecca6f",
+    "name": "feature-012-e2e-local",
+    "repo_path": "/home/asdru/ai-orchestrator",
+    "owner_id": "f31146ef-32ed-49e6-8478-cf1759f7bc51"
+  },
+  "tempHome": "/home/asdru/ai-orchestrator/.tmp-feature012-home",
+  "sessionCreated": true,
+  "sessionExpiresAt": "2026-08-19T14:28:25.758Z"
+}

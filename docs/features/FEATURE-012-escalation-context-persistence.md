@@ -225,6 +225,9 @@ Después de esta Feature, el sistema debe poder:
     - `escalation_human_response` — payload: `{ solution, newRunId }` (respuesta humana con
       solución, vía `run:respond --solution`).
     - `escalation_aborted` — payload: `{}` (respuesta humana de aborto, vía `run:respond --abort`).
+    - `escalation_retry_context_prepared` — payload: `{ context, ...metadata }` (evento adicional
+      de observabilidad para validar en DB el contexto exacto entregado a Architect en reintentos
+      internos y continuaciones por respuesta humana).
 
 16. **`run:respond --solution` crea worktree/branch propio para el run hijo, ramificado desde la
     punta de la rama del padre** (reemplaza la versión anterior de esta regla, que proponía
