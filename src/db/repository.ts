@@ -58,6 +58,15 @@ export interface ProjectConfigVersionRow {
   valid_to: string | null;
 }
 
+export interface SessionRow {
+  id: string;
+  user_id: string;
+  token_hash: string;
+  created_at: string;
+  expires_at: string;
+  revoked_at: string | null;
+}
+
 /**
  * Busca o crea la fila de `pipeline_definitions` para un `PipelineSpec` dado. La secuencia de
  * fases vive como datos (JSONB), no hardcodeada — este repositorio es agnóstico de qué pipeline
@@ -324,4 +333,30 @@ export async function getRunEventsAfterForUser(runId: string, userId: string, af
     [runId, afterEventId]
   );
   return events.rows;
+}
+
+export async function createWebSession(params: {
+  userId: string;
+  tokenHash: string;
+  expiresAt: Date;
+}): Promise<SessionRow> {
+  const result = await pool.query<SessionRow>(
+    `insert into sessions (user_id, token_hash, expires_at)
+     values ($1, $2, $3)
+     returning id, user_id, token_hash, created_at, expires_at, revoked_at`,
+    [params.userId, params.tokenHash, params.expiresAt.toISOString()]
+  );
+  return result.rows[0];
+}
+
+export async function getWebSessionById(sessionId: string): Promise<SessionRow | null> {
+  const result = await pool.query<SessionRow>(
+    "select id, user_id, token_hash, created_at, expires_at, revoked_at from sessions where id = $1",
+    [sessionId]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function revokeWebSession(sessionId: string): Promise<void> {
+  await pool.query("update sessions set revoked_at = now() where id = $1 and revoked_at is null", [sessionId]);
 }

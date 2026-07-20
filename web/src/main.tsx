@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Circle, Clock3, Loader2, Radio, Search } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Circle, Clock3, Loader2, LogOut, Radio, Search } from "lucide-react";
 import "./styles.css";
 
 type TimelineStatus =
@@ -42,24 +42,56 @@ interface RunViewModel {
   };
 }
 
+interface CurrentUser {
+  id: string;
+  handle: string;
+}
+
 const queryClient = new QueryClient();
 
 function App() {
-  const [runId, setRunId] = React.useState(() => new URLSearchParams(window.location.search).get("run") ?? "");
-  const [activeRunId, setActiveRunId] = React.useState(runId);
-
   return (
     <QueryClientProvider client={queryClient}>
-      <RunDashboard runId={activeRunId} draftRunId={runId} onDraftChange={setRunId} onOpenRun={setActiveRunId} />
+      <AppInner />
     </QueryClientProvider>
+  );
+}
+
+function AppInner() {
+  const [runId, setRunId] = React.useState(() => new URLSearchParams(window.location.search).get("run") ?? "");
+  const [activeRunId, setActiveRunId] = React.useState(runId);
+  const auth = useCurrentUser();
+
+  return (
+    <>
+      {auth.isLoading ? (
+        <main className="flex min-h-screen items-center justify-center bg-zinc-50 text-zinc-700">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          Validando sesión...
+        </main>
+      ) : auth.user ? (
+        <RunDashboard
+          runId={activeRunId}
+          draftRunId={runId}
+          user={auth.user}
+          onDraftChange={setRunId}
+          onOpenRun={setActiveRunId}
+          onLogout={auth.logout}
+        />
+      ) : (
+        <LoginView onLogin={auth.refresh} />
+      )}
+    </>
   );
 }
 
 function RunDashboard(props: {
   runId: string;
   draftRunId: string;
+  user: CurrentUser;
   onDraftChange: (value: string) => void;
   onOpenRun: (value: string) => void;
+  onLogout: () => Promise<void>;
 }) {
   const query = useRunQuery(props.runId);
   useRunStream(props.runId, query.refresh);
@@ -73,27 +105,36 @@ function RunDashboard(props: {
             <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">FEATURE-013A</p>
             <h1 className="text-2xl font-semibold tracking-normal">Run en curso</h1>
           </div>
-          <form
-            className="flex w-full gap-2 lg:w-[34rem]"
-            onSubmit={(event) => {
-              event.preventDefault();
-              props.onOpenRun(props.draftRunId.trim());
-              const url = new URL(window.location.href);
-              url.searchParams.set("run", props.draftRunId.trim());
-              window.history.replaceState(null, "", url);
-            }}
-          >
-            <input
-              className="h-10 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none focus:border-zinc-900"
-              placeholder="Run ID"
-              value={props.draftRunId}
-              onChange={(event) => props.onDraftChange(event.target.value)}
-            />
-            <button className="inline-flex h-10 items-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-medium text-white hover:bg-zinc-800">
-              <Search className="h-4 w-4" />
-              Abrir
+          <div className="flex w-full flex-col gap-3 lg:w-auto lg:flex-row lg:items-center">
+            <form
+              className="flex w-full gap-2 lg:w-[34rem]"
+              onSubmit={(event) => {
+                event.preventDefault();
+                props.onOpenRun(props.draftRunId.trim());
+                const url = new URL(window.location.href);
+                url.searchParams.set("run", props.draftRunId.trim());
+                window.history.replaceState(null, "", url);
+              }}
+            >
+              <input
+                className="h-10 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none focus:border-zinc-900"
+                placeholder="Run ID"
+                value={props.draftRunId}
+                onChange={(event) => props.onDraftChange(event.target.value)}
+              />
+              <button className="inline-flex h-10 items-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-medium text-white hover:bg-zinc-800">
+                <Search className="h-4 w-4" />
+                Abrir
+              </button>
+            </form>
+            <button
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 hover:bg-zinc-100"
+              onClick={() => void props.onLogout()}
+            >
+              <LogOut className="h-4 w-4" />
+              {props.user.handle}
             </button>
-          </form>
+          </div>
         </div>
       </header>
 
@@ -126,7 +167,7 @@ function useRunQuery(runId: string) {
     queryKey: ["run", runId],
     enabled: runId.length > 0,
     queryFn: async () => {
-      const response = await fetch(`/runs/${encodeURIComponent(runId)}`);
+      const response = await fetch(apiUrl(`/runs/${encodeURIComponent(runId)}`), { credentials: "include" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return (await response.json()) as RunViewModel;
     },
@@ -147,7 +188,7 @@ function useRunQuery(runId: string) {
 function useRunStream(runId: string, refresh: () => void) {
   React.useEffect(() => {
     if (!runId) return;
-    const source = new EventSource(`/runs/${encodeURIComponent(runId)}/stream`);
+    const source = new EventSource(apiUrl(`/runs/${encodeURIComponent(runId)}/stream`), { withCredentials: true });
     source.addEventListener("snapshot", refresh);
     source.addEventListener("run_event", refresh);
     source.onerror = () => {
@@ -157,6 +198,93 @@ function useRunStream(runId: string, refresh: () => void) {
       source.close();
     };
   }, [runId, refresh]);
+}
+
+function useCurrentUser() {
+  const query = useQuery({
+    queryKey: ["auth", "me"],
+    retry: false,
+    queryFn: async () => {
+      const response = await fetch(apiUrl("/auth/me"), { credentials: "include" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const body = (await response.json()) as { user: CurrentUser };
+      return body.user;
+    },
+  });
+
+  return {
+    user: query.data ?? null,
+    isLoading: query.isLoading,
+    refresh: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+    },
+    logout: async () => {
+      await fetch(apiUrl("/auth/logout"), {
+        method: "POST",
+        credentials: "include",
+      });
+      queryClient.clear();
+    },
+  };
+}
+
+function LoginView({ onLogin }: { onLogin: () => Promise<void> }) {
+  const [handle, setHandle] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [error, setError] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(false);
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-zinc-50 px-4 text-zinc-950">
+      <section className="w-full max-w-sm rounded-lg border border-zinc-200 bg-white p-5">
+        <h1 className="text-xl font-semibold">Ingresar</h1>
+        <form
+          className="mt-5 space-y-3"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            setLoading(true);
+            setError(null);
+            try {
+              const response = await fetch(apiUrl("/auth/login"), {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ handle, password }),
+              });
+              if (!response.ok) throw new Error("Credenciales inválidas");
+              await onLogin();
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "No se pudo iniciar sesión");
+            } finally {
+              setLoading(false);
+            }
+          }}
+        >
+          <input
+            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-zinc-900"
+            placeholder="Handle"
+            value={handle}
+            onChange={(event) => setHandle(event.target.value)}
+          />
+          <input
+            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-zinc-900"
+            placeholder="Password"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+          {error ? <p className="text-sm text-rose-700">{error}</p> : null}
+          <button
+            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-60"
+            disabled={loading}
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Entrar
+          </button>
+        </form>
+      </section>
+    </main>
+  );
 }
 
 function EmptyState() {
@@ -315,6 +443,12 @@ function statusColor(status: TimelineStatus) {
 
 function statusLabel(status: TimelineStatus) {
   return status.replaceAll("_", " ");
+}
+
+function apiUrl(path: string): string {
+  const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+  if (!baseUrl) return path;
+  return new URL(path, baseUrl).toString();
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
