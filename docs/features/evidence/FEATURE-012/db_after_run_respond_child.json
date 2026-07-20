@@ -1,0 +1,86 @@
+{
+  "run": {
+    "id": "b0bf589e-00b2-4b25-9ec9-029cd647a469",
+    "pipeline_definition_id": "a5b9cd3e-ec7e-4711-9864-c29c361b9637",
+    "current_phase": "architect",
+    "status": "completed",
+    "branch_name": "run/b0bf589e-00b2-4b25-9ec9-029cd647a469",
+    "worktree_path": "/home/asdru/ai-orchestrator-worktrees-feature012/b0bf589e-00b2-4b25-9ec9-029cd647a469",
+    "created_at": "2026-07-20T14:36:05.786Z",
+    "updated_at": "2026-07-20T14:36:11.731Z",
+    "owner_id": "f31146ef-32ed-49e6-8478-cf1759f7bc51",
+    "project_id": "7058aeb5-aa36-4d79-bab7-e317a6ecca6f",
+    "originated_from_run_id": "9e142e0f-15c0-4c17-8ac5-2045b721fa9f"
+  },
+  "events": [
+    {
+      "id": "302",
+      "event_type": "run_started",
+      "payload": {
+        "model": "gpt-5.6-luna",
+        "pipeline": "single-phase-architect@1",
+        "provider": "codex",
+        "repoPath": "/home/asdru/ai-orchestrator",
+        "projectId": "7058aeb5-aa36-4d79-bab7-e317a6ecca6f",
+        "branchName": "run/b0bf589e-00b2-4b25-9ec9-029cd647a469",
+        "worktreePath": "/home/asdru/ai-orchestrator-worktrees-feature012/b0bf589e-00b2-4b25-9ec9-029cd647a469",
+        "originatedFromRunId": "9e142e0f-15c0-4c17-8ac5-2045b721fa9f"
+      },
+      "created_at": "2026-07-20T14:36:05.786Z"
+    },
+    {
+      "id": "303",
+      "event_type": "escalation_retry_context_prepared",
+      "payload": {
+        "context": {
+          "humanSolution": "FEATURE012_E2E_HUMAN_SOLUTION: el owner confirma que el comportamiento esperado es escalar hasta Architect y luego completar la continuación con este insumo humano.",
+          "originAgentRole": "architect",
+          "escalationReason": "Se requiere intervención humana para proporcionar el objetivo del incremento, alcance funcional, restricciones conocidas y criterios de aceptación.",
+          "rejectedArtifact": null
+        },
+        "parentRunId": "9e142e0f-15c0-4c17-8ac5-2045b721fa9f",
+        "parentArtifactId": "e2515a14-c5c6-4387-a661-ddbc92a4eae7"
+      },
+      "created_at": "2026-07-20T14:36:05.786Z"
+    },
+    {
+      "id": "305",
+      "event_type": "phase_started",
+      "payload": {
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-20T14:36:05.798Z"
+    },
+    {
+      "id": "306",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "completed",
+          "summary": "El insumo humano confirma que el comportamiento esperado es escalar hasta Architect y continuar el pipeline con esa resolución. La arquitectura propuesta incorpora la resolución humana como entrada explícita de reanudación, preserva el contexto y permite completar el diseño antes de avanzar a la siguiente fase.",
+          "outputArtifact": "- El pipeline debe reconocer la intervención humana como resolución válida del escalamiento en la fase Architect.\n- Debe conservar el contexto original y el insumo humano como entrada de continuación.\n- La continuación debe reanudar el flujo desde Architect, sin reiniciar fases previas ni generar implementación en esta etapa.\n- Tras incorporar el insumo humano, Architect debe producir la propuesta de diseño de alto nivel y entregar el control a la siguiente fase del pipeline.\n- El estado final del escalamiento debe quedar registrado como resuelto por intervención humana.",
+          "escalationReason": null,
+          "executorMetadata": {
+            "model": "gpt-5.6-luna",
+            "provider": "codex"
+          }
+        },
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-20T14:36:11.727Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "2d014aa3-2dc0-4448-91f1-8ad8f78bad57",
+      "phase": "architect",
+      "kind": "design",
+      "content": {
+        "summary": "El insumo humano confirma que el comportamiento esperado es escalar hasta Architect y continuar el pipeline con esa resolución. La arquitectura propuesta incorpora la resolución humana como entrada explícita de reanudación, preserva el contexto y permite completar el diseño antes de avanzar a la siguiente fase.",
+        "outputArtifact": "- El pipeline debe reconocer la intervención humana como resolución válida del escalamiento en la fase Architect.\n- Debe conservar el contexto original y el insumo humano como entrada de continuación.\n- La continuación debe reanudar el flujo desde Architect, sin reiniciar fases previas ni generar implementación en esta etapa.\n- Tras incorporar el insumo humano, Architect debe producir la propuesta de diseño de alto nivel y entregar el control a la siguiente fase del pipeline.\n- El estado final del escalamiento debe quedar registrado como resuelto por intervención humana."
+      },
+      "created_at": "2026-07-20T14:36:11.729Z"
+    }
+  ],
+  "children": []
+}

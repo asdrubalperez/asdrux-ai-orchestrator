@@ -22,17 +22,23 @@ import {
   recordRunConfigVersions,
   recordRunEvent,
   updateRunCurrentPhase,
+  updateRunStatus,
+  type ArtifactRow,
+  type RunRow,
 } from "../../db/repository.js";
 import { pool } from "../../db/pool.js";
-import type { PhaseInvocation, PhaseResult } from "../../contracts/executor.js";
+import type { AgentRole, PhaseInvocation, PhaseResult } from "../../contracts/executor.js";
 import { PIPELINES, SINGLE_PHASE_ARCHITECT } from "../../pipelines/definitions.js";
+import type { PipelineSpec } from "../../pipelines/definitions.js";
 import { extractTestCommand } from "../../pipelines/extractTestCommand.js";
 import { TestExecutor, parseTestCommand } from "../../testing/testExecutor.js";
+import { artifactsAreEquivalent, buildEscalationContext } from "../escalation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const orchestratorRoot = path.resolve(__dirname, "..", "..", "..");
-type ExecutorProvider = "claude" | "codex";
+export type ExecutorProvider = "claude" | "codex";
 type RunExecutor = ClaudeCodeExecutor | CodexExecutor;
+const MAX_ESCALATION_ATTEMPTS = 3;
 
 export async function runStart(args: string[]): Promise<void> {
   const casePath = getFlag(args, "--case");
@@ -80,7 +86,7 @@ export async function runStart(args: string[]): Promise<void> {
   console.log(`[run:start] worktree creado: ${worktree.worktreePath} (rama ${worktree.branchName})`);
 
   const client = await pool.connect();
-  let run;
+  let run: RunRow;
   try {
     await client.query("begin");
     run = await createRun({
@@ -101,6 +107,8 @@ export async function runStart(args: string[]): Promise<void> {
         branchName: worktree.branchName,
         worktreePath: worktree.worktreePath,
         casePath,
+        provider: executorProvider,
+        model: model ?? null,
         pipeline: `${pipelineSpec.name}@${pipelineSpec.version}`,
         projectId: project.id,
         repoPath: projectRepoRoot,
@@ -115,17 +123,43 @@ export async function runStart(args: string[]): Promise<void> {
     client.release();
   }
 
+  await executePipelineRun({
+    projectRepoRoot,
+    runId: run.id,
+    worktree,
+    pipelineSpec,
+    initialContext: businessCase,
+    executorProvider,
+    model,
+  });
+}
+
+export async function executePipelineRun(params: {
+  projectRepoRoot: string;
+  runId: string;
+  worktree: RunWorktree;
+  pipelineSpec: PipelineSpec;
+  initialContext: unknown;
+  executorProvider: ExecutorProvider;
+  model?: string;
+}): Promise<void> {
+  const { projectRepoRoot, runId, worktree, pipelineSpec, initialContext, executorProvider, model } = params;
   const executor = createExecutor(executorProvider, worktree.worktreePath, model);
   const readRole = (agentRole: string) =>
     readFile(path.join(orchestratorRoot, "src", "executor", "roles", `${agentRole}.txt`), "utf8");
 
   try {
-    // --- Fases lineales (FEATURE-004): transición automática solo si status === "completed" ---
     let previousResult: PhaseResult | null = null;
+    let phaseIndex = 0;
+    let currentInitialContext = initialContext;
+    let retrying = false;
+    const escalationAttemptsByRole = new Map<AgentRole, number>();
+    const previousEscalationArtifactByRole = new Map<AgentRole, ArtifactRow>();
 
-    for (const phase of pipelineSpec.definition.phases) {
-      await updateRunCurrentPhase(run.id, phase.agentRole);
-      const context = previousResult === null ? businessCase : previousResult.outputArtifact;
+    while (phaseIndex < pipelineSpec.definition.phases.length) {
+      const phase = pipelineSpec.definition.phases[phaseIndex];
+      await updateRunCurrentPhase(runId, phase.agentRole);
+      const context = previousResult === null ? currentInitialContext : previousResult.outputArtifact;
       const roleInstructions = await readRole(phase.agentRole);
 
       const invocation: PhaseInvocation = {
@@ -135,51 +169,74 @@ export async function runStart(args: string[]): Promise<void> {
         permissions: phase.permissions,
       };
 
-      await recordRunEvent(run.id, "phase_started", { agentRole: invocation.agentRole });
+      await recordRunEvent(runId, "phase_started", { agentRole: invocation.agentRole });
       const result = await executor.runPhase(invocation, { timeoutMs: 180_000 });
-      await recordRunEvent(run.id, "phase_finished", { agentRole: invocation.agentRole, result });
-      await recordArtifact({
-        runId: run.id,
+      await recordRunEvent(runId, "phase_finished", { agentRole: invocation.agentRole, result });
+      const artifact = await recordArtifact({
+        runId,
         phase: invocation.agentRole,
         kind: result.status === "escalated" ? "escalation" : "design",
-        content: { outputArtifact: result.outputArtifact, summary: result.summary },
+        content: artifactContentForResult(result),
       });
 
       previousResult = result;
 
-      if (result.status !== "completed") {
+      if (result.status === "completed") {
+        if (retrying) {
+          await updateRunStatus(runId, "running");
+          retrying = false;
+        }
+        phaseIndex += 1;
+        continue;
+      }
+
+      if (result.status === "escalated") {
+        const decision = await handleLinearEscalation({
+          runId,
+          worktree,
+          agentRole: invocation.agentRole,
+          result,
+          artifact,
+          escalationAttemptsByRole,
+          previousEscalationArtifactByRole,
+        });
+
+        if (decision.retry) {
+          retrying = true;
+          currentInitialContext = decision.context;
+          previousResult = null;
+          phaseIndex = 0;
+          continue;
+        }
+
         console.log(`[run:start] fase "${phase.agentRole}" terminó con status "${result.status}" — pipeline detenido.`);
-        await finishRun(projectRepoRoot, run.id, worktree, result, { pushAndClean: false });
+        await finishRun(projectRepoRoot, runId, worktree, result, { pushAndClean: false });
         return;
       }
+
+      console.log(`[run:start] fase "${phase.agentRole}" terminó con status "${result.status}" — pipeline detenido.`);
+      await finishRun(projectRepoRoot, runId, worktree, result, { pushAndClean: false });
+      return;
     }
 
-    // --- Loop Developer↔QA (FEATURE-005) ---
     if (pipelineSpec.definition.loop) {
-      // FEATURE-006 (resuelve H14): Developer corre en un Executor separado, en modo "container"
-      // — su invocación completa (Bash incluido) queda confinada dentro de un contenedor Docker
-      // endurecido, no en el host. QA sigue en read-only (ya no necesita Bash en absoluto).
       const developerExecutor = createDeveloperExecutor(executorProvider, worktree.worktreePath, model);
-
       const finalResult = await runDeveloperQaLoop({
         executor,
         developerExecutor,
         readRole,
-        runId: run.id,
+        runId,
         planningResult: previousResult as PhaseResult,
         maxAttempts: pipelineSpec.definition.loop.maxAttempts,
       });
 
       const approved = finalResult.status === "completed";
-      await finishRun(projectRepoRoot, run.id, worktree, finalResult, { pushAndClean: approved });
+      await finishRun(projectRepoRoot, runId, worktree, finalResult, { pushAndClean: approved });
       return;
     }
 
-    await finishRun(projectRepoRoot, run.id, worktree, previousResult as PhaseResult, { pushAndClean: false });
+    await finishRun(projectRepoRoot, runId, worktree, previousResult as PhaseResult, { pushAndClean: false });
   } catch (err) {
-    // Un error inesperado (timeout, crash del CLI, etc.) no debe dejar el run colgado en
-    // "running" para siempre sin ningún cierre persistido — se registra como failed y se
-    // preserva el worktree (no se sabe en qué estado quedó) para inspección manual.
     const message = err instanceof Error ? err.message : String(err);
     const failure: PhaseResult = {
       status: "failed",
@@ -187,10 +244,83 @@ export async function runStart(args: string[]): Promise<void> {
       summary: `Error inesperado durante la ejecución del run: ${message}`,
       escalationReason: null,
     };
-    await recordRunEvent(run.id, "run_error", { message });
-    await finishRun(projectRepoRoot, run.id, worktree, failure, { pushAndClean: false });
+    await recordRunEvent(runId, "run_error", { message });
+    await finishRun(projectRepoRoot, runId, worktree, failure, { pushAndClean: false });
     throw err;
   }
+}
+
+async function handleLinearEscalation(params: {
+  runId: string;
+  worktree: RunWorktree;
+  agentRole: AgentRole;
+  result: PhaseResult;
+  artifact: ArtifactRow;
+  escalationAttemptsByRole: Map<AgentRole, number>;
+  previousEscalationArtifactByRole: Map<AgentRole, ArtifactRow>;
+}): Promise<{ retry: true; context: unknown } | { retry: false }> {
+  const attempt = (params.escalationAttemptsByRole.get(params.agentRole) ?? 0) + 1;
+  params.escalationAttemptsByRole.set(params.agentRole, attempt);
+
+  await recordRunEvent(params.runId, "escalation_opened", {
+    agentRole: params.agentRole,
+    artifactId: params.artifact.id,
+    attempt,
+  });
+
+  const previousArtifact = params.previousEscalationArtifactByRole.get(params.agentRole);
+  params.previousEscalationArtifactByRole.set(params.agentRole, params.artifact);
+
+  if (previousArtifact && artifactsAreEquivalent(outputArtifactOf(previousArtifact), params.result.outputArtifact)) {
+    await recordRunEvent(params.runId, "escalation_repeated_detected", {
+      agentRole: params.agentRole,
+      artifactId: params.artifact.id,
+      previousArtifactId: previousArtifact.id,
+    });
+    await commitAllChanges(params.worktree, `chore: preserve escalated work (run ${params.runId})`);
+    return { retry: false };
+  }
+
+  if (attempt >= MAX_ESCALATION_ATTEMPTS) {
+    await recordRunEvent(params.runId, "escalation_exhausted", { agentRole: params.agentRole, attempts: attempt });
+    await commitAllChanges(params.worktree, `chore: preserve escalated work (run ${params.runId})`);
+    return { retry: false };
+  }
+
+  const context = buildEscalationContext({
+    escalationReason: params.result.escalationReason,
+    rejectedArtifact: params.result.outputArtifact,
+    originAgentRole: params.agentRole,
+    humanSolution: null,
+  });
+  await recordRunEvent(params.runId, "escalation_retry_context_prepared", {
+    agentRole: params.agentRole,
+    attempt,
+    context,
+  });
+  await updateRunStatus(params.runId, "retrying");
+  return {
+    retry: true,
+    context,
+  };
+}
+
+function artifactContentForResult(result: PhaseResult): Record<string, unknown> {
+  const content: Record<string, unknown> = {
+    outputArtifact: result.outputArtifact,
+    summary: result.summary,
+  };
+  if (result.status === "escalated") {
+    content.escalationReason = result.escalationReason;
+  }
+  return content;
+}
+
+function outputArtifactOf(artifact: ArtifactRow): unknown {
+  if (artifact.content !== null && typeof artifact.content === "object" && "outputArtifact" in artifact.content) {
+    return (artifact.content as { outputArtifact: unknown }).outputArtifact;
+  }
+  return null;
 }
 
 export async function runDeveloperQaLoop(params: {
@@ -238,7 +368,7 @@ export async function runDeveloperQaLoop(params: {
       runId,
       phase: "developer",
       kind: developerResult.status === "escalated" ? "escalation" : "code",
-      content: { attempt, outputArtifact: developerResult.outputArtifact, summary: developerResult.summary },
+      content: { attempt, ...artifactContentForResult(developerResult) },
     });
 
     lastDeveloperResult = developerResult;
@@ -280,7 +410,7 @@ export async function runDeveloperQaLoop(params: {
           : qaResult.status === "rejected"
             ? "verdict_rejected"
             : "escalation",
-      content: { attempt, outputArtifact: qaResult.outputArtifact, summary: qaResult.summary },
+      content: { attempt, ...artifactContentForResult(qaResult) },
     });
 
     lastQaResult = qaResult;
@@ -351,7 +481,7 @@ function getFlag(args: string[], name: string): string | undefined {
   return args[idx + 1];
 }
 
-function parseExecutorProvider(value: string): ExecutorProvider {
+export function parseExecutorProvider(value: string): ExecutorProvider {
   if (value === "claude" || value === "codex") return value;
   throw new Error(`Executor desconocido: "${value}". Disponibles: claude, codex`);
 }

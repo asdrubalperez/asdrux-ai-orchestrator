@@ -1,0 +1,31 @@
+# FEATURE-012 worktree cleanup
+date_utc=2026-07-20T14:50:57Z
+
+before:
+/home/asdru/ai-orchestrator-worktrees-feature012/451bb437-aa06-4838-8b47-6ea1063acde6    f7feb61 [run/451bb437-aa06-4838-8b47-6ea1063acde6]
+/home/asdru/ai-orchestrator-worktrees-feature012/66f30c4d-4d14-4b28-b794-7226d3080546    f7feb61 [run/66f30c4d-4d14-4b28-b794-7226d3080546]
+/home/asdru/ai-orchestrator-worktrees-feature012/77816498-c9d8-4dfb-9f16-6e7278b8db3e    f7feb61 [run/77816498-c9d8-4dfb-9f16-6e7278b8db3e]
+/home/asdru/ai-orchestrator-worktrees-feature012/9e142e0f-15c0-4c17-8ac5-2045b721fa9f    f7feb61 [run/9e142e0f-15c0-4c17-8ac5-2045b721fa9f]
+/home/asdru/ai-orchestrator-worktrees-feature012/b0bf589e-00b2-4b25-9ec9-029cd647a469    f7feb61 [run/b0bf589e-00b2-4b25-9ec9-029cd647a469]
+
+
+remove_worktree:/home/asdru/ai-orchestrator-worktrees-feature012/451bb437-aa06-4838-8b47-6ea1063acde6
+delete_branch:run/451bb437-aa06-4838-8b47-6ea1063acde6
+Deleted branch run/451bb437-aa06-4838-8b47-6ea1063acde6 (was f7feb61).
+
+remove_worktree:/home/asdru/ai-orchestrator-worktrees-feature012/66f30c4d-4d14-4b28-b794-7226d3080546
+delete_branch:run/66f30c4d-4d14-4b28-b794-7226d3080546
+Deleted branch run/66f30c4d-4d14-4b28-b794-7226d3080546 (was f7feb61).
+
+remove_worktree:/home/asdru/ai-orchestrator-worktrees-feature012/77816498-c9d8-4dfb-9f16-6e7278b8db3e
+delete_branch:run/77816498-c9d8-4dfb-9f16-6e7278b8db3e
+Deleted branch run/77816498-c9d8-4dfb-9f16-6e7278b8db3e (was f7feb61).
+
+after:
+/home/asdru/ai-orchestrator-worktrees-feature012/9e142e0f-15c0-4c17-8ac5-2045b721fa9f    f7feb61 [run/9e142e0f-15c0-4c17-8ac5-2045b721fa9f]
+/home/asdru/ai-orchestrator-worktrees-feature012/b0bf589e-00b2-4b25-9ec9-029cd647a469    f7feb61 [run/b0bf589e-00b2-4b25-9ec9-029cd647a469]
+
+preserved_parent:
+f7feb619d4d498cc69cd249208c5a71b8746837f
+preserved_child:
+f7feb619d4d498cc69cd249208c5a71b8746837f

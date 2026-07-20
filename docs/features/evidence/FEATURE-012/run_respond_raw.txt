@@ -1,0 +1,9 @@
+
+> ai-orchestrator@0.1.0 cli
+> tsx src/cli/index.ts run:respond --run 9e142e0f-15c0-4c17-8ac5-2045b721fa9f --solution FEATURE012_E2E_HUMAN_SOLUTION: el owner confirma que el comportamiento esperado es escalar hasta Architect y luego completar la continuación con este insumo humano.
+
+[run:respond] run hijo=b0bf589e-00b2-4b25-9ec9-029cd647a469; worktree=/home/asdru/ai-orchestrator-worktrees-feature012/b0bf589e-00b2-4b25-9ec9-029cd647a469 (rama run/b0bf589e-00b2-4b25-9ec9-029cd647a469, base run/9e142e0f-15c0-4c17-8ac5-2045b721fa9f)
+[run:start] worktree preservado (política de retención de 21 días): /home/asdru/ai-orchestrator-worktrees-feature012/b0bf589e-00b2-4b25-9ec9-029cd647a469
+[run:start] status final: completed
+[run:start] run b0bf589e-00b2-4b25-9ec9-029cd647a469 persistido. Consultar con: npm run cli -- run:status --run b0bf589e-00b2-4b25-9ec9-029cd647a469
+EXIT_CODE:0

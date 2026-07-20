@@ -1,0 +1,17 @@
+{
+  "feature": "FEATURE-012 E2E validation",
+  "objective": "Forzar un escalamiento real y repetido para validar persistencia de contexto/hallazgos.",
+  "instructions": [
+    "Este caso es deliberadamente incompleto: no hay reglas de negocio suficientes para producir una arquitectura válida.",
+    "Si recibís este caso como Architect, debés escalar en vez de completar.",
+    "Para que la validación de FEATURE-012 pueda detectar hallazgo repetido, usá exactamente el mismo ARTEFACTO/outputArtifact cada vez que escales: FEATURE012_E2E_REJECTED_ARTIFACT_STABLE.",
+    "Usá RAZON_ESCALAMIENTO/escalationReason: FEATURE012_E2E_FORCED_ESCALATION.",
+    "Si recibís como contexto un objeto con escalationReason, rejectedArtifact, originAgentRole y humanSolution, debés reflejar esos cuatro campos en tu respuesta. Si humanSolution es null o ausente, volvé a escalar con el mismo outputArtifact estable. Si humanSolution tiene texto, completá e incluí FEATURE012_E2E_HUMAN_SOLUTION_RECEIVED en el artifact."
+  ],
+  "missingInformation": [
+    "No hay alcance funcional.",
+    "No hay criterios de aceptación.",
+    "No hay restricciones de arquitectura.",
+    "No hay definición de éxito."
+  ]
+}

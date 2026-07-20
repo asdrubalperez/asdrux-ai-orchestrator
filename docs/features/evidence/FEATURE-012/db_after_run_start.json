@@ -1,0 +1,239 @@
+{
+  "run": {
+    "id": "9e142e0f-15c0-4c17-8ac5-2045b721fa9f",
+    "pipeline_definition_id": "a5b9cd3e-ec7e-4711-9864-c29c361b9637",
+    "current_phase": "architect",
+    "status": "escalated",
+    "branch_name": "run/9e142e0f-15c0-4c17-8ac5-2045b721fa9f",
+    "worktree_path": "/home/asdru/ai-orchestrator-worktrees-feature012/9e142e0f-15c0-4c17-8ac5-2045b721fa9f",
+    "created_at": "2026-07-20T14:35:10.530Z",
+    "updated_at": "2026-07-20T14:35:21.971Z",
+    "owner_id": "f31146ef-32ed-49e6-8478-cf1759f7bc51",
+    "project_id": "7058aeb5-aa36-4d79-bab7-e317a6ecca6f",
+    "originated_from_run_id": null
+  },
+  "events": [
+    {
+      "id": "289",
+      "event_type": "run_started",
+      "payload": {
+        "model": "gpt-5.6-luna",
+        "casePath": "docs/features/evidence/FEATURE-012/case_escalation_repeat.json",
+        "pipeline": "single-phase-architect@1",
+        "provider": "codex",
+        "repoPath": "/home/asdru/ai-orchestrator",
+        "projectId": "7058aeb5-aa36-4d79-bab7-e317a6ecca6f",
+        "branchName": "run/9e142e0f-15c0-4c17-8ac5-2045b721fa9f",
+        "worktreePath": "/home/asdru/ai-orchestrator-worktrees-feature012/9e142e0f-15c0-4c17-8ac5-2045b721fa9f"
+      },
+      "created_at": "2026-07-20T14:35:10.530Z"
+    },
+    {
+      "id": "290",
+      "event_type": "phase_started",
+      "payload": {
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-20T14:35:10.541Z"
+    },
+    {
+      "id": "291",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "escalated",
+          "summary": "No es posible producir una arquitectura válida porque faltan el alcance funcional, los criterios de aceptación, las restricciones de arquitectura y la definición de éxito.",
+          "outputArtifact": "FEATURE012_E2E_REJECTED_ARTIFACT_STABLE",
+          "escalationReason": "FEATURE012_E2E_FORCED_ESCALATION",
+          "executorMetadata": {
+            "model": "gpt-5.6-luna",
+            "provider": "codex"
+          }
+        },
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-20T14:35:15.097Z"
+    },
+    {
+      "id": "292",
+      "event_type": "escalation_opened",
+      "payload": {
+        "attempt": 1,
+        "agentRole": "architect",
+        "artifactId": "62486bbb-3f16-4428-8713-065fbb9fb24b"
+      },
+      "created_at": "2026-07-20T14:35:15.101Z"
+    },
+    {
+      "id": "293",
+      "event_type": "escalation_retry_context_prepared",
+      "payload": {
+        "attempt": 1,
+        "context": {
+          "humanSolution": null,
+          "originAgentRole": "architect",
+          "escalationReason": "FEATURE012_E2E_FORCED_ESCALATION",
+          "rejectedArtifact": "FEATURE012_E2E_REJECTED_ARTIFACT_STABLE"
+        },
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-20T14:35:15.102Z"
+    },
+    {
+      "id": "294",
+      "event_type": "phase_started",
+      "payload": {
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-20T14:35:15.105Z"
+    },
+    {
+      "id": "295",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "escalated",
+          "summary": "No es posible producir una propuesta de arquitectura porque el contexto recibido solo contiene metadatos de escalamiento y rechazo, sin caso de negocio, alcance ni restricciones funcionales o técnicas.",
+          "outputArtifact": null,
+          "escalationReason": "Falta el caso de negocio y la información crítica necesaria para diseñar con confianza; se requiere intervención humana para proporcionar esos datos.",
+          "executorMetadata": {
+            "model": "gpt-5.6-luna",
+            "provider": "codex"
+          }
+        },
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-20T14:35:18.398Z"
+    },
+    {
+      "id": "296",
+      "event_type": "escalation_opened",
+      "payload": {
+        "attempt": 2,
+        "agentRole": "architect",
+        "artifactId": "150bbb88-2f30-4bf9-8f50-a8e3a01d41ca"
+      },
+      "created_at": "2026-07-20T14:35:18.401Z"
+    },
+    {
+      "id": "297",
+      "event_type": "escalation_retry_context_prepared",
+      "payload": {
+        "attempt": 2,
+        "context": {
+          "humanSolution": null,
+          "originAgentRole": "architect",
+          "escalationReason": "Falta el caso de negocio y la información crítica necesaria para diseñar con confianza; se requiere intervención humana para proporcionar esos datos.",
+          "rejectedArtifact": null
+        },
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-20T14:35:18.402Z"
+    },
+    {
+      "id": "298",
+      "event_type": "phase_started",
+      "payload": {
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-20T14:35:18.405Z"
+    },
+    {
+      "id": "299",
+      "event_type": "phase_finished",
+      "payload": {
+        "result": {
+          "status": "escalated",
+          "summary": "No se proporcionó el caso de negocio ni la información crítica necesaria para elaborar una propuesta de arquitectura de alto nivel con confianza.",
+          "outputArtifact": null,
+          "escalationReason": "Se requiere intervención humana para proporcionar el objetivo del incremento, alcance funcional, restricciones conocidas y criterios de aceptación.",
+          "executorMetadata": {
+            "model": "gpt-5.6-luna",
+            "provider": "codex"
+          }
+        },
+        "agentRole": "architect"
+      },
+      "created_at": "2026-07-20T14:35:21.956Z"
+    },
+    {
+      "id": "300",
+      "event_type": "escalation_opened",
+      "payload": {
+        "attempt": 3,
+        "agentRole": "architect",
+        "artifactId": "e2515a14-c5c6-4387-a661-ddbc92a4eae7"
+      },
+      "created_at": "2026-07-20T14:35:21.958Z"
+    },
+    {
+      "id": "301",
+      "event_type": "escalation_repeated_detected",
+      "payload": {
+        "agentRole": "architect",
+        "artifactId": "e2515a14-c5c6-4387-a661-ddbc92a4eae7",
+        "previousArtifactId": "150bbb88-2f30-4bf9-8f50-a8e3a01d41ca"
+      },
+      "created_at": "2026-07-20T14:35:21.959Z"
+    },
+    {
+      "id": "304",
+      "event_type": "escalation_human_response",
+      "payload": {
+        "newRunId": "b0bf589e-00b2-4b25-9ec9-029cd647a469",
+        "solution": "FEATURE012_E2E_HUMAN_SOLUTION: el owner confirma que el comportamiento esperado es escalar hasta Architect y luego completar la continuación con este insumo humano."
+      },
+      "created_at": "2026-07-20T14:36:05.786Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "62486bbb-3f16-4428-8713-065fbb9fb24b",
+      "phase": "architect",
+      "kind": "escalation",
+      "content": {
+        "summary": "No es posible producir una arquitectura válida porque faltan el alcance funcional, los criterios de aceptación, las restricciones de arquitectura y la definición de éxito.",
+        "outputArtifact": "FEATURE012_E2E_REJECTED_ARTIFACT_STABLE",
+        "escalationReason": "FEATURE012_E2E_FORCED_ESCALATION"
+      },
+      "created_at": "2026-07-20T14:35:15.099Z"
+    },
+    {
+      "id": "150bbb88-2f30-4bf9-8f50-a8e3a01d41ca",
+      "phase": "architect",
+      "kind": "escalation",
+      "content": {
+        "summary": "No es posible producir una propuesta de arquitectura porque el contexto recibido solo contiene metadatos de escalamiento y rechazo, sin caso de negocio, alcance ni restricciones funcionales o técnicas.",
+        "outputArtifact": null,
+        "escalationReason": "Falta el caso de negocio y la información crítica necesaria para diseñar con confianza; se requiere intervención humana para proporcionar esos datos."
+      },
+      "created_at": "2026-07-20T14:35:18.399Z"
+    },
+    {
+      "id": "e2515a14-c5c6-4387-a661-ddbc92a4eae7",
+      "phase": "architect",
+      "kind": "escalation",
+      "content": {
+        "summary": "No se proporcionó el caso de negocio ni la información crítica necesaria para elaborar una propuesta de arquitectura de alto nivel con confianza.",
+        "outputArtifact": null,
+        "escalationReason": "Se requiere intervención humana para proporcionar el objetivo del incremento, alcance funcional, restricciones conocidas y criterios de aceptación."
+      },
+      "created_at": "2026-07-20T14:35:21.957Z"
+    }
+  ],
+  "children": [
+    {
+      "id": "b0bf589e-00b2-4b25-9ec9-029cd647a469",
+      "pipeline_definition_id": "a5b9cd3e-ec7e-4711-9864-c29c361b9637",
+      "current_phase": "architect",
+      "status": "completed",
+      "branch_name": "run/b0bf589e-00b2-4b25-9ec9-029cd647a469",
+      "worktree_path": "/home/asdru/ai-orchestrator-worktrees-feature012/b0bf589e-00b2-4b25-9ec9-029cd647a469",
+      "created_at": "2026-07-20T14:36:05.786Z",
+      "updated_at": "2026-07-20T14:36:11.731Z",
+      "owner_id": "f31146ef-32ed-49e6-8478-cf1759f7bc51",
+      "project_id": "7058aeb5-aa36-4d79-bab7-e317a6ecca6f",
+      "originated_from_run_id": "9e142e0f-15c0-4c17-8ac5-2045b721fa9f"
+    }
+  ]
+}

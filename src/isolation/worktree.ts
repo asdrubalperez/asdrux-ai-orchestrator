@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { access } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -12,12 +13,12 @@ export interface RunWorktree {
   worktreePath: string;
 }
 
-export async function createRunWorktree(repoRoot: string, runId: string): Promise<RunWorktree> {
+export async function createRunWorktree(repoRoot: string, runId: string, baseRef = "HEAD"): Promise<RunWorktree> {
   const branchName = `run/${runId}`;
   const worktreesBaseDir = process.env.WORKTREES_BASE_DIR ?? path.resolve(repoRoot, "..", "ai-orchestrator-worktrees");
   const worktreePath = path.join(worktreesBaseDir, runId);
 
-  await execFileAsync("git", ["worktree", "add", "-b", branchName, worktreePath, "HEAD"], {
+  await execFileAsync("git", ["worktree", "add", "-b", branchName, worktreePath, baseRef], {
     cwd: repoRoot,
   });
 
@@ -70,4 +71,9 @@ export async function pushRunBranch(worktree: RunWorktree): Promise<void> {
   await execFileAsync("git", ["push", "origin", worktree.branchName], {
     cwd: worktree.worktreePath,
   });
+}
+
+export async function assertRunWorktreeAvailable(repoRoot: string, worktree: RunWorktree): Promise<void> {
+  await access(worktree.worktreePath);
+  await execFileAsync("git", ["rev-parse", "--verify", worktree.branchName], { cwd: repoRoot });
 }
