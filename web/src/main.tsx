@@ -3,7 +3,6 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  Bug,
   Calendar,
   CheckCircle2,
   Circle,
@@ -15,6 +14,7 @@ import {
   Radio,
   Search,
   Settings,
+  ShieldCheck,
   User,
 } from "lucide-react";
 import { Badge } from "./components/ui/badge";
@@ -378,14 +378,12 @@ function Timeline({ nodes }: { nodes: RunViewModel["timeline"] }) {
       <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
         {nodes.map((node) => (
           <div key={node.id} className="min-h-32 rounded-md border border-zinc-200 p-3">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex items-center gap-3">
-                <RoleAvatar nodeId={node.id} status={node.status} />
-                <p className="text-sm font-medium">{node.label}</p>
-              </div>
+            <div className="flex flex-col items-center gap-2 text-center">
+              <RoleAvatar nodeId={node.id} status={node.status} />
+              <p className="text-sm font-medium">{node.label}</p>
+              <Badge variant={statusVariant(node.status)}>{statusLabel(node.status)}</Badge>
             </div>
-            <Badge className="mt-3" variant={statusVariant(node.status)}>{statusLabel(node.status)}</Badge>
-            {node.summary ? <p className="mt-2 line-clamp-3 text-sm text-zinc-600">{node.summary}</p> : null}
+            {node.summary ? <p className="mt-3 line-clamp-3 text-sm text-zinc-600">{node.summary}</p> : null}
           </div>
         ))}
       </div>
@@ -421,7 +419,7 @@ function roleIcon(nodeId: TimelineNodeId) {
     case "developer":
       return Code;
     case "qa":
-      return Bug;
+      return ShieldCheck;
   }
 }
 
