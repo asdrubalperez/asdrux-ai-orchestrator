@@ -350,7 +350,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4">
       <CardLabel>{label}</CardLabel>
-      <p className="mt-2 break-words text-lg font-semibold">{value}</p>
+      <p className="mt-3 text-sm text-zinc-600">{value}</p>
     </div>
   );
 }
@@ -489,7 +489,7 @@ function MetadataPanel({ run }: { run: RunViewModel }) {
   return (
     <section className="col-span-2 rounded-lg border border-zinc-200 bg-white p-4 md:col-span-4 xl:col-span-4">
       <CardLabel>Datos de la Ejecución</CardLabel>
-      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+      <dl className="mt-3 grid grid-cols-4 gap-x-4 gap-y-3 text-sm">
         <CopyableMetadataItem label="Run ID" value={run.run.id} />
         <CopyableMetadataItem label="Branch" value={run.run.branch_name ?? "sin branch"} />
         <MetadataItem label="Creado" value={new Date(run.run.created_at).toLocaleString()} />
