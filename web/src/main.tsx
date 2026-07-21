@@ -9,6 +9,7 @@ import {
   Clock3,
   Code,
   Compass,
+  Copy,
   Loader2,
   LogOut,
   Radio,
@@ -168,7 +169,7 @@ function RunDashboard(props: {
           {query.isError ? <ErrorState /> : null}
           {run ? (
             <>
-              <RunSummary run={run} />
+              <RunOverview run={run} />
               {run.escalation.isEscalated ? <EscalationBanner run={run} /> : null}
               <Timeline nodes={run.timeline} />
               <Narrative entries={run.narrative} />
@@ -178,7 +179,7 @@ function RunDashboard(props: {
 
         <aside className="space-y-4">
           <ConnectionPanel runId={props.runId} />
-          {run ? <MetadataPanel run={run} /> : null}
+          <ReleasePlanPanel />
         </aside>
       </div>
     </main>
@@ -335,12 +336,13 @@ function ErrorState() {
   );
 }
 
-function RunSummary({ run }: { run: RunViewModel }) {
+function RunOverview({ run }: { run: RunViewModel }) {
   return (
-    <section className="grid gap-3 sm:grid-cols-3">
+    <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
       <Metric label="Estado" value={run.run.status} />
       <Metric label="Fase actual" value={run.run.current_phase ?? "sin fase"} />
       <Metric label="Eventos" value={String(run.narrative.length)} />
+      <MetadataPanel run={run} />
     </section>
   );
 }
@@ -454,18 +456,79 @@ function ConnectionPanel({ runId }: { runId: string }) {
   );
 }
 
-function MetadataPanel({ run }: { run: RunViewModel }) {
+function ReleasePlanPanel() {
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4">
+      <h2 className="text-sm font-semibold">Release Plan</h2>
+      <p className="mt-2 text-sm text-zinc-600">
+        Disponible cuando el release activo tenga un plan generado por Planning. Funcionalidad en diseño.
+      </p>
+      <div className="mt-4 space-y-3 text-sm">
+        <ReleasePlanItem status="done" label="Roadmap validado" />
+        <ReleasePlanItem status="pending" label="Release activo pendiente" />
+        <ReleasePlanItem status="pending" label="Features del release" />
+      </div>
+    </section>
+  );
+}
+
+function ReleasePlanItem({ status, label }: { status: "done" | "pending"; label: string }) {
+  const Icon = status === "done" ? CheckCircle2 : Circle;
+  return (
+    <div className="flex items-center gap-2 text-zinc-700">
+      <Icon className={`h-4 w-4 ${status === "done" ? "text-emerald-600" : "text-zinc-400"}`} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function MetadataPanel({ run }: { run: RunViewModel }) {
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-4 md:col-span-3 xl:col-span-3">
       <h2 className="text-sm font-semibold">Metadata</h2>
       <dl className="mt-3 space-y-3 text-sm">
-        <MetadataItem label="Run ID" value={run.run.id} />
-        <MetadataItem label="Branch" value={run.run.branch_name ?? "sin branch"} />
+        <CopyableMetadataItem label="Run ID" value={run.run.id} />
+        <CopyableMetadataItem label="Branch" value={run.run.branch_name ?? "sin branch"} />
         <MetadataItem label="Creado" value={new Date(run.run.created_at).toLocaleString()} />
         <MetadataItem label="Actualizado" value={new Date(run.run.updated_at).toLocaleString()} />
       </dl>
     </section>
   );
+}
+
+function CopyableMetadataItem({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = React.useState(false);
+  const displayValue = truncateIdentifier(value);
+
+  return (
+    <div>
+      <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</dt>
+      <dd className="mt-1 flex items-center gap-2">
+        <span className="min-w-0 font-mono text-sm text-zinc-800" title={value}>{displayValue}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 shrink-0 text-zinc-500 hover:text-zinc-950"
+          aria-label={`Copiar ${label}`}
+          title={`Copiar ${value}`}
+          onClick={() => {
+            void navigator.clipboard.writeText(value).then(() => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1200);
+            });
+          }}
+        >
+          {copied ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+        </Button>
+      </dd>
+    </div>
+  );
+}
+
+function truncateIdentifier(value: string) {
+  if (value.length <= 12) return value;
+  return `${value.slice(0, 8)}...`;
 }
 
 function MetadataItem({ label, value }: { label: string; value: string }) {
