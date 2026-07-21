@@ -162,25 +162,23 @@ function RunDashboard(props: {
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-7xl gap-4 px-4 py-5 sm:px-6 lg:grid-cols-[1fr_22rem] lg:px-8">
+      <div className="mx-auto max-w-7xl space-y-4 px-4 py-5 sm:px-6 lg:px-8">
         <section className="space-y-4">
           {!props.runId ? <EmptyState /> : null}
           {query.isLoading ? <LoadingState /> : null}
           {query.isError ? <ErrorState /> : null}
           {run ? (
             <>
-              <RunOverview run={run} />
+              <RunOverview run={run} runId={props.runId} />
               {run.escalation.isEscalated ? <EscalationBanner run={run} /> : null}
               <Timeline nodes={run.timeline} />
-              <Narrative entries={run.narrative} />
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+                <Narrative entries={run.narrative} />
+                <ReleasePlanPanel />
+              </div>
             </>
           ) : null}
         </section>
-
-        <aside className="space-y-4">
-          <ConnectionPanel runId={props.runId} />
-          <ReleasePlanPanel />
-        </aside>
       </div>
     </main>
   );
@@ -336,12 +334,13 @@ function ErrorState() {
   );
 }
 
-function RunOverview({ run }: { run: RunViewModel }) {
+function RunOverview({ run, runId }: { run: RunViewModel; runId: string }) {
   return (
-    <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+    <section className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
       <Metric label="Estado" value={run.run.status} />
       <Metric label="Fase actual" value={run.run.current_phase ?? "sin fase"} />
       <Metric label="Eventos" value={String(run.narrative.length)} />
+      <ConnectionPanel runId={runId} />
       <MetadataPanel run={run} />
     </section>
   );
@@ -350,10 +349,14 @@ function RunOverview({ run }: { run: RunViewModel }) {
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</p>
+      <CardLabel>{label}</CardLabel>
       <p className="mt-2 break-words text-lg font-semibold">{value}</p>
     </div>
   );
+}
+
+function CardLabel({ children }: { children: React.ReactNode }) {
+  return <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">{children}</p>;
 }
 
 function EscalationBanner({ run }: { run: RunViewModel }) {
@@ -376,7 +379,7 @@ function EscalationBanner({ run }: { run: RunViewModel }) {
 function Timeline({ nodes }: { nodes: RunViewModel["timeline"] }) {
   return (
     <section data-testid="timeline" className="rounded-lg border border-zinc-200 bg-white p-4">
-      <h2 className="text-sm font-semibold">Timeline</h2>
+      <CardLabel>Timeline</CardLabel>
       <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
         {nodes.map((node) => (
           <div key={node.id} className="min-h-32 rounded-md border border-zinc-200 p-3">
@@ -428,7 +431,7 @@ function roleIcon(nodeId: TimelineNodeId) {
 function Narrative({ entries }: { entries: RunViewModel["narrative"] }) {
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4">
-      <h2 className="text-sm font-semibold">Bitácora narrativa</h2>
+      <CardLabel>Bitácora narrativa</CardLabel>
       <div className="mt-4 space-y-3">
         {entries.map((entry) => (
           <article key={entry.id} className="border-l-2 border-zinc-200 pl-3">
@@ -447,10 +450,10 @@ function Narrative({ entries }: { entries: RunViewModel["narrative"] }) {
 function ConnectionPanel({ runId }: { runId: string }) {
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4">
-      <h2 className="text-sm font-semibold">Conexión</h2>
+      <CardLabel>Conexión</CardLabel>
       <div className="mt-3 flex items-center gap-2 text-sm text-zinc-600">
         <Radio className="h-4 w-4 text-emerald-600" />
-        {runId ? "SSE activo para el run seleccionado" : "Sin run seleccionado"}
+        {runId ? "SSE activo" : "Sin run seleccionado"}
       </div>
     </section>
   );
@@ -459,7 +462,7 @@ function ConnectionPanel({ runId }: { runId: string }) {
 function ReleasePlanPanel() {
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4">
-      <h2 className="text-sm font-semibold">Release Plan</h2>
+      <CardLabel>Release Plan</CardLabel>
       <p className="mt-2 text-sm text-zinc-600">
         Disponible cuando el release activo tenga un plan generado por Planning. Funcionalidad en diseño.
       </p>
@@ -484,9 +487,9 @@ function ReleasePlanItem({ status, label }: { status: "done" | "pending"; label:
 
 function MetadataPanel({ run }: { run: RunViewModel }) {
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4 md:col-span-3 xl:col-span-3">
-      <h2 className="text-sm font-semibold">Metadata</h2>
-      <dl className="mt-3 space-y-3 text-sm">
+    <section className="col-span-2 rounded-lg border border-zinc-200 bg-white p-4 md:col-span-4 xl:col-span-4">
+      <CardLabel>Datos de la Ejecución</CardLabel>
+      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
         <CopyableMetadataItem label="Run ID" value={run.run.id} />
         <CopyableMetadataItem label="Branch" value={run.run.branch_name ?? "sin branch"} />
         <MetadataItem label="Creado" value={new Date(run.run.created_at).toLocaleString()} />
