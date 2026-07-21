@@ -171,11 +171,11 @@ function RunDashboard(props: {
             <>
               <RunOverview run={run} runId={props.runId} />
               {run.escalation.isEscalated ? <EscalationBanner run={run} /> : null}
-              <Timeline nodes={run.timeline} />
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-                <Narrative entries={run.narrative} />
+                <Timeline nodes={run.timeline} />
                 <ReleasePlanPanel />
               </div>
+              <Narrative entries={run.narrative} />
             </>
           ) : null}
         </section>
@@ -356,7 +356,7 @@ function Metric({ label, value }: { label: string; value: string }) {
 }
 
 function CardLabel({ children }: { children: React.ReactNode }) {
-  return <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">{children}</p>;
+  return <h2 className="text-sm font-semibold">{children}</h2>;
 }
 
 function EscalationBanner({ run }: { run: RunViewModel }) {
@@ -379,7 +379,7 @@ function EscalationBanner({ run }: { run: RunViewModel }) {
 function Timeline({ nodes }: { nodes: RunViewModel["timeline"] }) {
   return (
     <section data-testid="timeline" className="rounded-lg border border-zinc-200 bg-white p-4">
-      <CardLabel>Timeline</CardLabel>
+      <CardLabel>Pipeline</CardLabel>
       <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
         {nodes.map((node) => (
           <div key={node.id} className="min-h-32 rounded-md border border-zinc-200 p-3">
