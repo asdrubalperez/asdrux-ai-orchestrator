@@ -181,9 +181,9 @@ function narrativeText(event: RunEventRow): string {
     case "escalation_retry_context_prepared":
       return "Se preparó el contexto acumulado para reintentar el circuito.";
     case "escalation_human_response":
-      return "El humano respondió el escalamiento.";
+      return "El usuario respondió el escalamiento.";
     case "escalation_aborted":
-      return "El humano abortó el escalamiento.";
+      return "El usuario abortó el escalamiento.";
     case "run_error":
       return runErrorMessage(payload);
     case "test_executed":

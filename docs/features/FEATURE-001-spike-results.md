@@ -259,6 +259,12 @@ según el propio `--help` del CLI fuerza que la autenticación sea estrictamente
   entorno del servicio, secret manager, etc. — no se decidió en este spike, es un detalle de
   despliegue).
 
+**Seguimiento 2026-07-21 — FEATURE-015.** H4 no validó si una sesión OAuth ya autenticada puede
+reusarse sin intervención humana a través de múltiples invocaciones headless separadas en el
+tiempo, ni qué implica montar esa sesión dentro del contenedor de Developer. FEATURE-015 retoma
+esa pregunta como investigación empírica antes de diseñar cualquier `authMode` real para los
+Executors.
+
 ---
 
 ## 5. Evidencia adjunta
