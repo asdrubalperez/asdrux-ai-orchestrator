@@ -1,9 +1,33 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Circle, Clock3, Loader2, LogOut, Radio, Search } from "lucide-react";
+import {
+  AlertTriangle,
+  Calendar,
+  CheckCircle2,
+  Circle,
+  Clock3,
+  Code,
+  Compass,
+  Copy,
+  Loader2,
+  LogOut,
+  Radio,
+  Search,
+  Settings,
+  ShieldCheck,
+  User,
+} from "lucide-react";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./components/ui/dialog";
 import { Input } from "./components/ui/input";
 import "./styles.css";
 
@@ -17,6 +41,8 @@ type TimelineStatus =
   | "esperando_respuesta"
   | "respondido";
 
+type TimelineNodeId = "user" | "architect" | "functional" | "planning" | "developer" | "qa";
+
 interface RunViewModel {
   run: {
     id: string;
@@ -27,7 +53,7 @@ interface RunViewModel {
     updated_at: string;
   };
   timeline: Array<{
-    id: string;
+    id: TimelineNodeId;
     label: string;
     status: TimelineStatus;
     summary: string | null;
@@ -42,6 +68,8 @@ interface RunViewModel {
     isEscalated: boolean;
     agentRole: string | null;
     reason: string | null;
+    outputArtifact: unknown;
+    motive: "repeated" | "exhausted" | null;
   };
 }
 
@@ -100,6 +128,17 @@ function RunDashboard(props: {
   useRunStream(props.runId, query.refresh);
 
   const run = query.data;
+  const openRun = React.useCallback(
+    (value: string) => {
+      props.onDraftChange(value);
+      props.onOpenRun(value);
+      const url = new URL(window.location.href);
+      url.searchParams.set("run", value);
+      window.history.replaceState(null, "", url);
+    },
+    [props.onDraftChange, props.onOpenRun]
+  );
+
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
       <header className="border-b border-zinc-200 bg-white">
@@ -113,10 +152,7 @@ function RunDashboard(props: {
               className="flex w-full gap-2 lg:w-[34rem]"
               onSubmit={(event) => {
                 event.preventDefault();
-                props.onOpenRun(props.draftRunId.trim());
-                const url = new URL(window.location.href);
-                url.searchParams.set("run", props.draftRunId.trim());
-                window.history.replaceState(null, "", url);
+                openRun(props.draftRunId.trim());
               }}
             >
               <Input
@@ -131,7 +167,10 @@ function RunDashboard(props: {
               </Button>
             </form>
             <Button
+              data-testid="logout-button"
               variant="outline"
+              aria-label="Salir"
+              title={`Salir (${props.user.handle})`}
               onClick={() => void props.onLogout()}
             >
               <LogOut className="h-4 w-4" />
@@ -141,25 +180,27 @@ function RunDashboard(props: {
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-7xl gap-4 px-4 py-5 sm:px-6 lg:grid-cols-[1fr_22rem] lg:px-8">
+      <div className="mx-auto max-w-7xl space-y-4 px-4 py-5 sm:px-6 lg:px-8">
         <section className="space-y-4">
           {!props.runId ? <EmptyState /> : null}
           {query.isLoading ? <LoadingState /> : null}
           {query.isError ? <ErrorState /> : null}
           {run ? (
             <>
-              <RunSummary run={run} />
-              {run.escalation.isEscalated ? <EscalationBanner run={run} /> : null}
-              <Timeline nodes={run.timeline} />
-              <Narrative entries={run.narrative} />
+              <RunOverview run={run} runId={props.runId} />
+              {run.escalation.isEscalated ? (
+                <EscalationActionBanner run={run} onRefresh={query.refresh} onOpenRun={openRun} />
+              ) : null}
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+                <div className="space-y-4">
+                  <Timeline nodes={run.timeline} />
+                  <Narrative entries={run.narrative} />
+                </div>
+                <ReleasePlanPanel />
+              </div>
             </>
           ) : null}
         </section>
-
-        <aside className="space-y-4">
-          <ConnectionPanel runId={props.runId} />
-          {run ? <MetadataPanel run={run} /> : null}
-        </aside>
       </div>
     </main>
   );
@@ -226,7 +267,8 @@ function useCurrentUser() {
         method: "POST",
         credentials: "include",
       });
-      queryClient.clear();
+      queryClient.setQueryData(["auth", "me"], null);
+      queryClient.removeQueries({ queryKey: ["run"] });
     },
   };
 }
@@ -314,12 +356,14 @@ function ErrorState() {
   );
 }
 
-function RunSummary({ run }: { run: RunViewModel }) {
+function RunOverview({ run, runId }: { run: RunViewModel; runId: string }) {
   return (
-    <section className="grid gap-3 sm:grid-cols-3">
+    <section className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
       <Metric label="Estado" value={run.run.status} />
       <Metric label="Fase actual" value={run.run.current_phase ?? "sin fase"} />
       <Metric label="Eventos" value={String(run.narrative.length)} />
+      <ConnectionPanel runId={runId} />
+      <MetadataPanel run={run} />
     </section>
   );
 }
@@ -327,42 +371,198 @@ function RunSummary({ run }: { run: RunViewModel }) {
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</p>
-      <p className="mt-2 break-words text-lg font-semibold">{value}</p>
+      <CardLabel>{label}</CardLabel>
+      <p className="mt-3 text-sm text-zinc-600">{value}</p>
     </div>
   );
 }
 
-function EscalationBanner({ run }: { run: RunViewModel }) {
+function CardLabel({ children }: { children: React.ReactNode }) {
+  return <h2 className="text-sm font-semibold">{children}</h2>;
+}
+
+function EscalationActionBanner({
+  run,
+  onRefresh,
+  onOpenRun,
+}: {
+  run: RunViewModel;
+  onRefresh: () => void;
+  onOpenRun: (runId: string) => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+
   return (
     <section className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-950">
-      <div className="flex items-start gap-3">
-        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-        <div>
-          <h2 className="text-sm font-semibold">Escalamiento abierto</h2>
-          <p className="mt-1 text-sm">
-            {run.escalation.agentRole ?? "Un agente"} requiere intervención humana.
-            {run.escalation.reason ? ` ${run.escalation.reason}` : ""}
-          </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <div>
+            <h2 className="text-sm font-semibold">Escalamiento abierto</h2>
+            <p className="mt-1 text-sm">
+              {escalationMotiveText(run.escalation.motive, run.escalation.agentRole)}
+              {run.escalation.reason ? ` ${run.escalation.reason}` : ""}
+            </p>
+          </div>
         </div>
+        <Button size="sm" onClick={() => setOpen(true)}>
+          Validar Ahora
+        </Button>
       </div>
+      <EscalationResponseDialog
+        run={run}
+        open={open}
+        onOpenChange={setOpen}
+        onRefresh={onRefresh}
+        onOpenRun={onOpenRun}
+      />
     </section>
   );
 }
 
+function EscalationResponseDialog({
+  run,
+  open,
+  onOpenChange,
+  onRefresh,
+  onOpenRun,
+}: {
+  run: RunViewModel;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onRefresh: () => void;
+  onOpenRun: (runId: string) => void;
+}) {
+  const [mode, setMode] = React.useState<"choice" | "solution">("choice");
+  const [solution, setSolution] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!open) {
+      setMode("choice");
+      setSolution("");
+      setError(null);
+      setLoading(false);
+    }
+  }, [open]);
+
+  const submit = async (body: { abort: true } | { solution: string }) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(apiUrl(`/runs/${encodeURIComponent(run.run.id)}/respond`), {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (response.status === 409) throw new Error("Este escalamiento ya fue respondido.");
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = (await response.json()) as { status?: string; childRunId?: string };
+
+      onOpenChange(false);
+      if (payload.childRunId) {
+        onOpenRun(payload.childRunId);
+        return;
+      }
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo responder el escalamiento.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const canSubmitSolution = solution.trim().length > 0 && !loading;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Validar Ahora</DialogTitle>
+          <DialogDescription>
+            {escalationMotiveText(run.escalation.motive, run.escalation.agentRole)}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 text-sm">
+          {run.escalation.reason ? (
+            <div>
+              <p className="font-medium">Motivo del agente</p>
+              <p className="mt-1 text-zinc-600">{run.escalation.reason}</p>
+            </div>
+          ) : null}
+          <div>
+            <p className="font-medium">Artifact rechazado</p>
+            <pre className="mt-1 max-h-56 overflow-auto rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
+              {formatArtifact(run.escalation.outputArtifact)}
+            </pre>
+          </div>
+          <p className="font-medium">¿Deseas que el agente continúe con indicaciones tuyas?</p>
+          {mode === "solution" ? (
+            <textarea
+              className="min-h-28 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-950 outline-none transition-colors placeholder:text-zinc-500 focus:border-zinc-900"
+              placeholder="Indicación para continuar..."
+              value={solution}
+              onChange={(event) => setSolution(event.target.value)}
+            />
+          ) : null}
+          {error ? <p className="text-sm text-rose-700">{error}</p> : null}
+        </div>
+
+        <DialogFooter>
+          {mode === "choice" ? (
+            <>
+              <Button variant="outline" disabled={loading} onClick={() => void submit({ abort: true })}>
+                No
+              </Button>
+              <Button disabled={loading} onClick={() => setMode("solution")}>
+                Sí
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="outline" disabled={loading} onClick={() => setMode("choice")}>
+                Volver
+              </Button>
+              <Button disabled={!canSubmitSolution} onClick={() => void submit({ solution })}>
+                Continuar
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function escalationMotiveText(motive: RunViewModel["escalation"]["motive"], agentRole: string | null) {
+  if (motive === "repeated") return "Se repitió el mismo resultado — se necesita tu validación.";
+  if (motive === "exhausted") return "Se agotaron los 3 reintentos internos — se necesita tu validación.";
+  return `${agentRole ?? "Un agente"} requiere intervención humana.`;
+}
+
+function formatArtifact(value: unknown) {
+  if (value === null || value === undefined) return "Sin artifact rechazado disponible.";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value, null, 2);
+}
+
 function Timeline({ nodes }: { nodes: RunViewModel["timeline"] }) {
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4">
-      <h2 className="text-sm font-semibold">Timeline</h2>
+    <section data-testid="timeline" className="rounded-lg border border-zinc-200 bg-white p-4">
+      <CardLabel>Pipeline</CardLabel>
       <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
         {nodes.map((node) => (
           <div key={node.id} className="min-h-32 rounded-md border border-zinc-200 p-3">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-col items-center gap-2 text-center">
+              <RoleAvatar nodeId={node.id} status={node.status} />
               <p className="text-sm font-medium">{node.label}</p>
-              <StatusIcon status={node.status} />
+              <Badge variant={statusVariant(node.status)}>{statusLabel(node.status)}</Badge>
             </div>
-            <Badge className="mt-3" variant={statusVariant(node.status)}>{statusLabel(node.status)}</Badge>
-            {node.summary ? <p className="mt-2 line-clamp-3 text-sm text-zinc-600">{node.summary}</p> : null}
+            {node.summary ? <p className="mt-3 line-clamp-3 text-sm text-zinc-600">{node.summary}</p> : null}
           </div>
         ))}
       </div>
@@ -370,12 +570,46 @@ function Timeline({ nodes }: { nodes: RunViewModel["timeline"] }) {
   );
 }
 
+function RoleAvatar({ nodeId, status }: { nodeId: TimelineNodeId; status: TimelineStatus }) {
+  const Icon = roleIcon(nodeId);
+  return (
+    <div
+      data-role-avatar={nodeId}
+      className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-zinc-50 text-zinc-700"
+    >
+      <Icon className="h-6 w-6" />
+      <div className="absolute -right-1 -bottom-1 flex h-6 w-6 items-center justify-center rounded-full border border-white bg-white shadow-sm [&_svg]:h-4 [&_svg]:w-4">
+        <StatusIcon status={status} />
+      </div>
+    </div>
+  );
+}
+
+function roleIcon(nodeId: TimelineNodeId) {
+  switch (nodeId) {
+    case "user":
+      return User;
+    case "architect":
+      return Compass;
+    case "functional":
+      return Settings;
+    case "planning":
+      return Calendar;
+    case "developer":
+      return Code;
+    case "qa":
+      return ShieldCheck;
+  }
+}
+
 function Narrative({ entries }: { entries: RunViewModel["narrative"] }) {
+  const orderedEntries = [...entries].reverse();
+
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4">
-      <h2 className="text-sm font-semibold">Bitácora narrativa</h2>
+      <CardLabel>Bitácora narrativa</CardLabel>
       <div className="mt-4 space-y-3">
-        {entries.map((entry) => (
+        {orderedEntries.map((entry) => (
           <article key={entry.id} className="border-l-2 border-zinc-200 pl-3">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <p className="text-sm font-medium">{entry.text}</p>
@@ -392,27 +626,88 @@ function Narrative({ entries }: { entries: RunViewModel["narrative"] }) {
 function ConnectionPanel({ runId }: { runId: string }) {
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4">
-      <h2 className="text-sm font-semibold">Conexión</h2>
+      <CardLabel>Conexión</CardLabel>
       <div className="mt-3 flex items-center gap-2 text-sm text-zinc-600">
         <Radio className="h-4 w-4 text-emerald-600" />
-        {runId ? "SSE activo para el run seleccionado" : "Sin run seleccionado"}
+        {runId ? "SSE activo" : "Sin run seleccionado"}
       </div>
     </section>
   );
 }
 
+function ReleasePlanPanel() {
+  return (
+    <section className="h-full rounded-lg border border-zinc-200 bg-white p-4">
+      <CardLabel>Release Plan</CardLabel>
+      <p className="mt-2 text-sm text-zinc-600">
+        Disponible cuando el release activo tenga un plan generado por Planning. Funcionalidad en diseño.
+      </p>
+      <div className="mt-4 space-y-3 text-sm">
+        <ReleasePlanItem status="done" label="Roadmap validado" />
+        <ReleasePlanItem status="pending" label="Release activo pendiente" />
+        <ReleasePlanItem status="pending" label="Features del release" />
+      </div>
+    </section>
+  );
+}
+
+function ReleasePlanItem({ status, label }: { status: "done" | "pending"; label: string }) {
+  const Icon = status === "done" ? CheckCircle2 : Circle;
+  return (
+    <div className="flex items-center gap-2 text-zinc-700">
+      <Icon className={`h-4 w-4 ${status === "done" ? "text-emerald-600" : "text-zinc-400"}`} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
 function MetadataPanel({ run }: { run: RunViewModel }) {
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4">
-      <h2 className="text-sm font-semibold">Metadata</h2>
-      <dl className="mt-3 space-y-3 text-sm">
-        <MetadataItem label="Run ID" value={run.run.id} />
-        <MetadataItem label="Branch" value={run.run.branch_name ?? "sin branch"} />
+    <section className="col-span-2 rounded-lg border border-zinc-200 bg-white p-4 md:col-span-4 xl:col-span-4">
+      <CardLabel>Datos de la Ejecución</CardLabel>
+      <dl className="mt-3 grid grid-cols-4 gap-x-4 gap-y-3 text-sm">
+        <CopyableMetadataItem label="Run ID" value={run.run.id} />
+        <CopyableMetadataItem label="Branch" value={run.run.branch_name ?? "sin branch"} />
         <MetadataItem label="Creado" value={new Date(run.run.created_at).toLocaleString()} />
         <MetadataItem label="Actualizado" value={new Date(run.run.updated_at).toLocaleString()} />
       </dl>
     </section>
   );
+}
+
+function CopyableMetadataItem({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = React.useState(false);
+  const displayValue = truncateIdentifier(value);
+
+  return (
+    <div>
+      <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</dt>
+      <dd className="mt-1 flex items-center gap-2">
+        <span className="min-w-0 font-mono text-sm text-zinc-800" title={value}>{displayValue}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 shrink-0 text-zinc-500 hover:text-zinc-950"
+          aria-label={`Copiar ${label}`}
+          title={`Copiar ${value}`}
+          onClick={() => {
+            void navigator.clipboard.writeText(value).then(() => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1200);
+            });
+          }}
+        >
+          {copied ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+        </Button>
+      </dd>
+    </div>
+  );
+}
+
+function truncateIdentifier(value: string) {
+  if (value.length <= 12) return value;
+  return `${value.slice(0, 8)}...`;
 }
 
 function MetadataItem({ label, value }: { label: string; value: string }) {

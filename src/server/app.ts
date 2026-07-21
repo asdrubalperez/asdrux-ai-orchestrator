@@ -16,6 +16,11 @@ import {
   type AuthenticatedRequest,
 } from "../auth/webSession.js";
 import { getRunDetailForUser } from "../db/repository.js";
+import {
+  EscalationRunNotFoundError,
+  respondToEscalation,
+  type EscalationResponseAction,
+} from "../cli/respondService.js";
 import { buildRunViewModel } from "./runView.js";
 import { openRunEventsStream } from "./sse.js";
 
@@ -114,6 +119,51 @@ export function createApp(config: ServerConfig): express.Express {
     }
   });
 
+  app.post("/runs/:id/respond", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+
+      const runId = stringParam(req.params.id);
+      if (!runId) {
+        res.status(400).json({ error: "invalid_run_id" });
+        return;
+      }
+
+      const action = respondBody(req.body);
+      if (!action) {
+        res.status(400).json({ error: "invalid_response_body" });
+        return;
+      }
+
+      const result = await respondToEscalation({
+        parentRunId: runId,
+        userId: req.user?.id ?? "",
+        action,
+      });
+
+      if (result.kind === "conflict") {
+        res.status(409).json({ error: "run_not_escalated" });
+        return;
+      }
+
+      if (result.kind === "aborted") {
+        res.status(202).json({ status: "aborted" });
+        return;
+      }
+
+      res.status(202).json({ childRunId: result.childRunId });
+      void result.execute().catch((err) => {
+        console.error(`[server] background escalation response failed for child run ${result.childRunId}`, err);
+      });
+    } catch (err) {
+      if (err instanceof EscalationRunNotFoundError) {
+        res.status(404).json({ error: "run_not_found" });
+        return;
+      }
+      next(err);
+    }
+  });
+
   app.get("/runs/:id/stream", requireSession, async (req: AuthenticatedRequest, res, next) => {
     try {
       const runId = stringParam(req.params.id);
@@ -203,6 +253,16 @@ function loginBody(body: unknown): { handle: string | null; password: string | n
     handle: typeof record.handle === "string" ? record.handle : null,
     password: typeof record.password === "string" ? record.password : null,
   };
+}
+
+function respondBody(body: unknown): EscalationResponseAction | null {
+  if (body === null || typeof body !== "object") return null;
+  const record = body as Record<string, unknown>;
+  const abort = record.abort === true;
+  const solution = typeof record.solution === "string" ? record.solution : null;
+  if (abort && solution === null) return { abort: true };
+  if (!abort && solution !== null && solution.trim().length > 0) return { solution };
+  return null;
 }
 
 function publicUser(user: AuthenticatedRequest["user"]) {

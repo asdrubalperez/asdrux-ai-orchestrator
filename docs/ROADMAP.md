@@ -23,10 +23,14 @@
   `project_config_versions` (FEATURE-011), pasada de consistencia cruzada completa
 - Evolución del Playbook: declaración de rama/checkout de origen movida de Stage 6 a Stage 3 en
   `06-DELIVERY-WORKFLOW.md` (v1.2), Lessons Learned de Feature 10
+- FEATURE-013 — Capa de UI "Run en curso": 013A backend read-only + UI/SSE, 013B sesiones web,
+  013C respuesta a escalamiento desde modal, con validación real en navegador/VPS y documentos de
+  diseño/resultados en `docs/features/`
 
 **🟡 Confirmado**
-- FEATURE-013 — Capa de UI — "Run en curso" (solo lectura, sin Disparo ni Historial/admin todavía)
 - FEATURE-014 — Milestone 2 — Validación end-to-end con caso de negocio real
+- FEATURE-015 - Modo de autenticacion por cuenta personal (OAuth) para Executors, alternativo a
+  API Key
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
@@ -41,6 +45,11 @@
 - Capa de UI (Disparo, Historial/admin — "Run en curso" ya pasó a Confirmado, ver arriba)
 - Notificación Slack/webhook complementaria a la UI de monitoreo (post FEATURE-013, si hace falta
   alertas fuera de cuando se está mirando activamente)
+- Wiring real del ciclo Roadmap de Releases (Architect) + Release Plan (Planning) — hoy
+  documentado en el Runbook (`docs/runbook/02-ARCHITECTURE-TEMPLATE.md`, sección 0, y
+  `docs/runbook/09-RELEASE-PLAN-TEMPLATE.md`) pero no implementado en los roles reales del
+  Orquestador (`src/executor/roles/architect.txt`, `planning.txt`) ni en la UI. La UI ya reservó
+  el espacio (placeholder `ReleasePlanPanel`, sin datos reales) en FEATURE-013.
 
 - Bajar expiracion de sesion del CLI de 30 dias a 48 horas al pasar a produccion - condicionado a
   que no se haya implementado otro mecanismo de autenticacion antes de esa fecha.
@@ -84,6 +93,25 @@ funciones en `src/db/repository.ts` (`getCurrentProjectConfig`, `getCurrentProje
 ### 🟡 FEATURE-014 — Milestone 2 — Validación end-to-end con caso de negocio real
 Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
 Confirmado y no Tentativo.
+
+### 🟡 FEATURE-015 - Modo de autenticacion por cuenta personal (OAuth) para Executors
+Arranca con una investigacion empirica (estilo docs/research/H14-command-confinement.md, "sin
+implementacion"), no con diseno de Feature completo: validar si una sesion ya autenticada via
+`claude auth login` (o el login oficial equivalente de Codex CLI) se reusa sin intervencion
+humana a traves de multiples invocaciones headless separadas en el tiempo - extension directa de
+H4 (docs/features/FEATURE-001-spike-results.md), que confirmo paridad de permisos entre OAuth y
+API key pero no valido reuso headless repetido. Ver analisis completo en
+`docs/research/investigacion-auth-cuenta-personal-executors.md`.
+
+Forma arquitectonica ya resuelta en el analisis (no reabrir sin motivo): NO crear Executors
+nuevos por proveedor - agregar un parametro authMode ("api_key" | "cli_session") a las opciones
+ya existentes de ClaudeCodeExecutor/CodexExecutor, default "api_key" sin cambiar nada del
+comportamiento actual. El contrato Executor (src/contracts/executor.ts) no cambia.
+
+Riesgo especifico a validar ademas de la persistencia de sesion: exposicion de una sesion de
+cuenta personal si se filtra desde un contenedor de Developer (Bash real, FEATURE-006) - mayor
+radio de exposicion que una API key rotable. No avanzar a diseno de Feature completo (implementar
+authMode real) sin resolver primero ambos puntos empiricamente.
 
 ### ✅ Feature 09 — Runbook para el Orquestador AI automático
 Diseño completo y cerrado: 12 archivos en `docs/runbook/` (equivalente al `docs/playbook/` actual
@@ -186,13 +214,23 @@ Stage 6, Modo A / Modo Auto) — este ítem es la implementación real, todavía
 ### ⚪ Deployment Strategy y separación dev/staging/prod
 Sin diseñar.
 
-### 🟡 FEATURE-013 — Capa de UI — "Run en curso"
-Confirmado como FEATURE-013, decidido en la sesión de diseño del Runbook (Feature 09): UI mínima de
-solo lectura que muestra el estado de un run en curso, apoyada en la persistencia ya existente
-(`getRunDetail` / tabla `artifacts`, ver `docs/playbook/02-ARCHITECTURE.md`, sección 5) — no
-requiere construir nada nuevo en esa capa, solo un endpoint fino más una página que lo consulte.
+### ✅ FEATURE-013 — Capa de UI — "Run en curso"
+Cerrada en tres incrementos:
+- 013A: backend read-only, UI básica y SSE.
+- 013B: sesiones web reales.
+- 013C: respuesta a escalamiento desde modal, con navegación al run hijo por SSE.
+
+Documentos de diseño:
+- `docs/features/Feature-013-interfaz-ui-parte-013a-backend-read-only-ui-sse-basico.md`
+- `docs/features/Feature-013-interfaz-ui-parte-013b-sesiones-web.md`
+- `docs/features/Feature-013-interfaz-ui-parte-013c-respuesta-escalamiento.md`
+
+Documentos de resultados:
+- `docs/features/Feature-013-interfaz-ui-parte-013a-implementation-results.md`
+- `docs/features/Feature-013-interfaz-ui-parte-013b-implementation-results.md`
+- `docs/features/Feature-013-interfaz-ui-parte-013c-implementation-results.md`
+
 Disparo e Historial/admin quedan fuera de esta Feature, ver ítem Tentativo "Capa de UI" abajo.
-Feature 10 (investigación de base de datos, ver arriba) ya no compite por este número.
 
 ### ⚪ Capa de UI (Disparo, Historial/admin)
 Dos pantallas — Disparo (crear un run nuevo desde la UI) e Historial/admin (listado de runs
