@@ -66,3 +66,15 @@
 - Confirmar login/logout end-to-end contra backend real con TLS.
 - Confirmar cookie `SameSite=None; Secure` desde frontend real en Vercel contra backend real.
 - Confirmar SSE autenticado con `withCredentials` desde navegador real.
+
+## Correctivo visual post-merge
+
+- Se corrigió `web/src/styles.css` para Tailwind v4 reemplazando las directivas v3 por
+  `@import "tailwindcss";`.
+- Se incorporó el set mínimo de componentes estilo shadcn/ui para la UI actual y el modal de
+  013C: `button`, `input`, `badge`, `dialog` y `alert-dialog`.
+- Se migraron visualmente login/logout, búsqueda de Run ID, estados del timeline y eventos de
+  bitácora sin cambiar la lógica funcional.
+- Lección aprendida: además de validar endpoints y datos, las validaciones reales de UI deben
+  incluir una inspección visual del CSS generado, porque el typecheck y los tests de backend no
+  detectan una integración rota de Tailwind/Vite.

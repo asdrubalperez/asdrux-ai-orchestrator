@@ -2,6 +2,9 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Circle, Clock3, Loader2, LogOut, Radio, Search } from "lucide-react";
+import { Badge } from "./components/ui/badge";
+import { Button } from "./components/ui/button";
+import { Input } from "./components/ui/input";
 import "./styles.css";
 
 type TimelineStatus =
@@ -116,24 +119,24 @@ function RunDashboard(props: {
                 window.history.replaceState(null, "", url);
               }}
             >
-              <input
-                className="h-10 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none focus:border-zinc-900"
+              <Input
+                className="min-w-0 flex-1"
                 placeholder="Run ID"
                 value={props.draftRunId}
                 onChange={(event) => props.onDraftChange(event.target.value)}
               />
-              <button className="inline-flex h-10 items-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-medium text-white hover:bg-zinc-800">
+              <Button>
                 <Search className="h-4 w-4" />
                 Abrir
-              </button>
+              </Button>
             </form>
-            <button
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-800 hover:bg-zinc-100"
+            <Button
+              variant="outline"
               onClick={() => void props.onLogout()}
             >
               <LogOut className="h-4 w-4" />
               {props.user.handle}
-            </button>
+            </Button>
           </div>
         </div>
       </header>
@@ -260,27 +263,25 @@ function LoginView({ onLogin }: { onLogin: () => Promise<void> }) {
             }
           }}
         >
-          <input
-            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-zinc-900"
+          <Input
             placeholder="Handle"
             value={handle}
             onChange={(event) => setHandle(event.target.value)}
           />
-          <input
-            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-zinc-900"
+          <Input
             placeholder="Password"
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />
           {error ? <p className="text-sm text-rose-700">{error}</p> : null}
-          <button
-            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-60"
+          <Button
+            className="w-full"
             disabled={loading}
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Entrar
-          </button>
+          </Button>
         </form>
       </section>
     </main>
@@ -360,7 +361,7 @@ function Timeline({ nodes }: { nodes: RunViewModel["timeline"] }) {
               <p className="text-sm font-medium">{node.label}</p>
               <StatusIcon status={node.status} />
             </div>
-            <p className="mt-3 text-xs font-medium uppercase tracking-wide text-zinc-500">{statusLabel(node.status)}</p>
+            <Badge className="mt-3" variant={statusVariant(node.status)}>{statusLabel(node.status)}</Badge>
             {node.summary ? <p className="mt-2 line-clamp-3 text-sm text-zinc-600">{node.summary}</p> : null}
           </div>
         ))}
@@ -378,7 +379,7 @@ function Narrative({ entries }: { entries: RunViewModel["narrative"] }) {
           <article key={entry.id} className="border-l-2 border-zinc-200 pl-3">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <p className="text-sm font-medium">{entry.text}</p>
-              <span className="text-xs text-zinc-500">{entry.eventType}</span>
+              <Badge variant="outline">{entry.eventType}</Badge>
             </div>
             <time className="text-xs text-zinc-500">{new Date(entry.createdAt).toLocaleString()}</time>
           </article>
@@ -439,6 +440,14 @@ function statusColor(status: TimelineStatus) {
   if (status === "escalado" || status === "esperando_respuesta") return "text-amber-600";
   if (status === "fallido") return "text-rose-600";
   return "text-zinc-400";
+}
+
+function statusVariant(status: TimelineStatus): React.ComponentProps<typeof Badge>["variant"] {
+  if (status === "completado" || status === "iniciado" || status === "respondido") return "success";
+  if (status === "en_curso") return "secondary";
+  if (status === "escalado" || status === "esperando_respuesta") return "warning";
+  if (status === "fallido") return "destructive";
+  return "outline";
 }
 
 function statusLabel(status: TimelineStatus) {
