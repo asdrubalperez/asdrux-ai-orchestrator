@@ -172,10 +172,12 @@ function RunDashboard(props: {
               <RunOverview run={run} runId={props.runId} />
               {run.escalation.isEscalated ? <EscalationBanner run={run} /> : null}
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-                <Timeline nodes={run.timeline} />
+                <div className="space-y-4">
+                  <Timeline nodes={run.timeline} />
+                  <Narrative entries={run.narrative} />
+                </div>
                 <ReleasePlanPanel />
               </div>
-              <Narrative entries={run.narrative} />
             </>
           ) : null}
         </section>
@@ -461,7 +463,7 @@ function ConnectionPanel({ runId }: { runId: string }) {
 
 function ReleasePlanPanel() {
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4">
+    <section className="h-full rounded-lg border border-zinc-200 bg-white p-4">
       <CardLabel>Release Plan</CardLabel>
       <p className="mt-2 text-sm text-zinc-600">
         Disponible cuando el release activo tenga un plan generado por Planning. Funcionalidad en diseño.
