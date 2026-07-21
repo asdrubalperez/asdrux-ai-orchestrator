@@ -431,11 +431,13 @@ function roleIcon(nodeId: TimelineNodeId) {
 }
 
 function Narrative({ entries }: { entries: RunViewModel["narrative"] }) {
+  const orderedEntries = [...entries].reverse();
+
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4">
       <CardLabel>Bitácora narrativa</CardLabel>
       <div className="mt-4 space-y-3">
-        {entries.map((entry) => (
+        {orderedEntries.map((entry) => (
           <article key={entry.id} className="border-l-2 border-zinc-200 pl-3">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <p className="text-sm font-medium">{entry.text}</p>
