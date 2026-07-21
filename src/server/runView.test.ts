@@ -85,23 +85,29 @@ test("usa summary de phase_finished como bitacora narrativa y muestra escalamien
           escalationReason: "Requisito ambiguo.",
         },
       }),
+      event(4, "escalation_exhausted", { agentRole: "planning", attempts: 3 }),
     ],
     artifacts: [
       {
         id: "55555555-5555-5555-5555-555555555555",
         phase: "planning",
         kind: "escalation",
-        content: { escalationReason: "Requisito ambiguo." },
+        content: { escalationReason: "Requisito ambiguo.", outputArtifact: { finding: "ambiguedad" } },
         created_at: "2026-07-20T10:00:03.000Z",
       },
     ],
   });
 
-  assert.equal(view.narrative.at(-1)?.text, "Planning necesita una decisión humana.");
+  assert.equal(
+    view.narrative.find((entry) => entry.eventType === "phase_finished")?.text,
+    "Planning necesita una decisión humana."
+  );
   assert.deepEqual(view.escalation, {
     isEscalated: true,
     agentRole: "planning",
     reason: "Requisito ambiguo.",
+    outputArtifact: { finding: "ambiguedad" },
+    motive: "exhausted",
   });
   assert.equal(view.timeline.find((node) => node.id === "planning")?.status, "escalado");
 });

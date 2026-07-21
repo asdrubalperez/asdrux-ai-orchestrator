@@ -54,6 +54,8 @@ export interface RunViewModel {
     isEscalated: boolean;
     agentRole: string | null;
     reason: string | null;
+    outputArtifact: unknown;
+    motive: "repeated" | "exhausted" | null;
   };
 }
 
@@ -140,7 +142,7 @@ export function buildNarrative(events: RunEventRow[]): NarrativeEntry[] {
 
 function buildEscalationBanner(run: RunRow, events: RunEventRow[], artifacts: ArtifactViewRow[]) {
   if (run.status !== "escalated") {
-    return { isEscalated: false, agentRole: null, reason: null };
+    return { isEscalated: false, agentRole: null, reason: null, outputArtifact: null, motive: null };
   }
 
   const agentRole = latestEscalatedAgentRole(events);
@@ -149,6 +151,8 @@ function buildEscalationBanner(run: RunRow, events: RunEventRow[], artifacts: Ar
     isEscalated: true,
     agentRole,
     reason: escalationReasonFromArtifact(artifact?.content) ?? latestEscalationReasonFromEvents(events),
+    outputArtifact: outputArtifactFromEscalationArtifact(artifact?.content),
+    motive: latestTerminalEscalationMotive(events),
   };
 }
 
@@ -232,6 +236,18 @@ function latestEscalatedAgentRole(events: RunEventRow[]): string | null {
 
 function escalationReasonFromArtifact(content: unknown): string | null {
   return isRecord(content) && typeof content.escalationReason === "string" ? content.escalationReason : null;
+}
+
+function outputArtifactFromEscalationArtifact(content: unknown): unknown {
+  return isRecord(content) && "outputArtifact" in content ? content.outputArtifact : null;
+}
+
+function latestTerminalEscalationMotive(events: RunEventRow[]): "repeated" | "exhausted" | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].event_type === "escalation_repeated_detected") return "repeated";
+    if (events[i].event_type === "escalation_exhausted") return "exhausted";
+  }
+  return null;
 }
 
 function latestEscalationReasonFromEvents(events: RunEventRow[]): string | null {

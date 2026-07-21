@@ -88,8 +88,9 @@ export async function ensurePipelineDefinition(spec: PipelineSpec): Promise<Pipe
   return inserted.rows[0];
 }
 
-export async function getPipelineDefinitionById(id: string): Promise<PipelineDefinitionRow | null> {
-  const result = await pool.query<PipelineDefinitionRow>(
+export async function getPipelineDefinitionById(id: string, client?: PoolClient): Promise<PipelineDefinitionRow | null> {
+  const db = client ?? pool;
+  const result = await db.query<PipelineDefinitionRow>(
     "select id, name, version, definition from pipeline_definitions where id = $1",
     [id]
   );
@@ -268,6 +269,18 @@ export async function updateRunCurrentPhase(runId: string, phase: string): Promi
 
 export async function updateRunStatus(runId: string, status: "running" | "retrying"): Promise<void> {
   await pool.query("update runs set status = $1, updated_at = now() where id = $2", [status, runId]);
+}
+
+export async function resolveEscalatedRunStatus(
+  runId: string,
+  status: "aborted" | "resolved",
+  client: PoolClient
+): Promise<RunRow | null> {
+  const result = await client.query<RunRow>(
+    "update runs set status = $1, updated_at = now() where id = $2 and status = 'escalated' returning *",
+    [status, runId]
+  );
+  return result.rows[0] ?? null;
 }
 
 export async function recordRunEvent(

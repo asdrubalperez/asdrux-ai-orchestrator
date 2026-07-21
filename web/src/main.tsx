@@ -20,6 +20,14 @@ import {
 } from "lucide-react";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./components/ui/dialog";
 import { Input } from "./components/ui/input";
 import "./styles.css";
 
@@ -60,6 +68,8 @@ interface RunViewModel {
     isEscalated: boolean;
     agentRole: string | null;
     reason: string | null;
+    outputArtifact: unknown;
+    motive: "repeated" | "exhausted" | null;
   };
 }
 
@@ -118,6 +128,17 @@ function RunDashboard(props: {
   useRunStream(props.runId, query.refresh);
 
   const run = query.data;
+  const openRun = React.useCallback(
+    (value: string) => {
+      props.onDraftChange(value);
+      props.onOpenRun(value);
+      const url = new URL(window.location.href);
+      url.searchParams.set("run", value);
+      window.history.replaceState(null, "", url);
+    },
+    [props.onDraftChange, props.onOpenRun]
+  );
+
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
       <header className="border-b border-zinc-200 bg-white">
@@ -131,10 +152,7 @@ function RunDashboard(props: {
               className="flex w-full gap-2 lg:w-[34rem]"
               onSubmit={(event) => {
                 event.preventDefault();
-                props.onOpenRun(props.draftRunId.trim());
-                const url = new URL(window.location.href);
-                url.searchParams.set("run", props.draftRunId.trim());
-                window.history.replaceState(null, "", url);
+                openRun(props.draftRunId.trim());
               }}
             >
               <Input
@@ -170,7 +188,9 @@ function RunDashboard(props: {
           {run ? (
             <>
               <RunOverview run={run} runId={props.runId} />
-              {run.escalation.isEscalated ? <EscalationBanner run={run} /> : null}
+              {run.escalation.isEscalated ? (
+                <EscalationActionBanner run={run} onRefresh={query.refresh} onOpenRun={openRun} />
+              ) : null}
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
                 <div className="space-y-4">
                   <Timeline nodes={run.timeline} />
@@ -361,21 +381,173 @@ function CardLabel({ children }: { children: React.ReactNode }) {
   return <h2 className="text-sm font-semibold">{children}</h2>;
 }
 
-function EscalationBanner({ run }: { run: RunViewModel }) {
+function EscalationActionBanner({
+  run,
+  onRefresh,
+  onOpenRun,
+}: {
+  run: RunViewModel;
+  onRefresh: () => void;
+  onOpenRun: (runId: string) => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+
   return (
     <section className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-950">
-      <div className="flex items-start gap-3">
-        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-        <div>
-          <h2 className="text-sm font-semibold">Escalamiento abierto</h2>
-          <p className="mt-1 text-sm">
-            {run.escalation.agentRole ?? "Un agente"} requiere intervención humana.
-            {run.escalation.reason ? ` ${run.escalation.reason}` : ""}
-          </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <div>
+            <h2 className="text-sm font-semibold">Escalamiento abierto</h2>
+            <p className="mt-1 text-sm">
+              {escalationMotiveText(run.escalation.motive, run.escalation.agentRole)}
+              {run.escalation.reason ? ` ${run.escalation.reason}` : ""}
+            </p>
+          </div>
         </div>
+        <Button size="sm" onClick={() => setOpen(true)}>
+          Validar Ahora
+        </Button>
       </div>
+      <EscalationResponseDialog
+        run={run}
+        open={open}
+        onOpenChange={setOpen}
+        onRefresh={onRefresh}
+        onOpenRun={onOpenRun}
+      />
     </section>
   );
+}
+
+function EscalationResponseDialog({
+  run,
+  open,
+  onOpenChange,
+  onRefresh,
+  onOpenRun,
+}: {
+  run: RunViewModel;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onRefresh: () => void;
+  onOpenRun: (runId: string) => void;
+}) {
+  const [mode, setMode] = React.useState<"choice" | "solution">("choice");
+  const [solution, setSolution] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!open) {
+      setMode("choice");
+      setSolution("");
+      setError(null);
+      setLoading(false);
+    }
+  }, [open]);
+
+  const submit = async (body: { abort: true } | { solution: string }) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(apiUrl(`/runs/${encodeURIComponent(run.run.id)}/respond`), {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (response.status === 409) throw new Error("Este escalamiento ya fue respondido.");
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = (await response.json()) as { status?: string; childRunId?: string };
+
+      onOpenChange(false);
+      if (payload.childRunId) {
+        onOpenRun(payload.childRunId);
+        return;
+      }
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo responder el escalamiento.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const canSubmitSolution = solution.trim().length > 0 && !loading;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Validar Ahora</DialogTitle>
+          <DialogDescription>
+            {escalationMotiveText(run.escalation.motive, run.escalation.agentRole)}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 text-sm">
+          {run.escalation.reason ? (
+            <div>
+              <p className="font-medium">Motivo del agente</p>
+              <p className="mt-1 text-zinc-600">{run.escalation.reason}</p>
+            </div>
+          ) : null}
+          <div>
+            <p className="font-medium">Artifact rechazado</p>
+            <pre className="mt-1 max-h-56 overflow-auto rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
+              {formatArtifact(run.escalation.outputArtifact)}
+            </pre>
+          </div>
+          <p className="font-medium">¿Deseas que el agente continúe con indicaciones tuyas?</p>
+          {mode === "solution" ? (
+            <textarea
+              className="min-h-28 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-950 outline-none transition-colors placeholder:text-zinc-500 focus:border-zinc-900"
+              placeholder="Indicación para continuar..."
+              value={solution}
+              onChange={(event) => setSolution(event.target.value)}
+            />
+          ) : null}
+          {error ? <p className="text-sm text-rose-700">{error}</p> : null}
+        </div>
+
+        <DialogFooter>
+          {mode === "choice" ? (
+            <>
+              <Button variant="outline" disabled={loading} onClick={() => void submit({ abort: true })}>
+                No
+              </Button>
+              <Button disabled={loading} onClick={() => setMode("solution")}>
+                Sí
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="outline" disabled={loading} onClick={() => setMode("choice")}>
+                Volver
+              </Button>
+              <Button disabled={!canSubmitSolution} onClick={() => void submit({ solution })}>
+                Continuar
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function escalationMotiveText(motive: RunViewModel["escalation"]["motive"], agentRole: string | null) {
+  if (motive === "repeated") return "Se repitió el mismo resultado — se necesita tu validación.";
+  if (motive === "exhausted") return "Se agotaron los 3 reintentos internos — se necesita tu validación.";
+  return `${agentRole ?? "Un agente"} requiere intervención humana.`;
+}
+
+function formatArtifact(value: unknown) {
+  if (value === null || value === undefined) return "Sin artifact rechazado disponible.";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value, null, 2);
 }
 
 function Timeline({ nodes }: { nodes: RunViewModel["timeline"] }) {
