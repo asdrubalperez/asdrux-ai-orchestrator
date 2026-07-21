@@ -1,7 +1,22 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Circle, Clock3, Loader2, LogOut, Radio, Search } from "lucide-react";
+import {
+  AlertTriangle,
+  Bug,
+  Calendar,
+  CheckCircle2,
+  Circle,
+  Clock3,
+  Code,
+  Compass,
+  Loader2,
+  LogOut,
+  Radio,
+  Search,
+  Settings,
+  User,
+} from "lucide-react";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
@@ -17,6 +32,8 @@ type TimelineStatus =
   | "esperando_respuesta"
   | "respondido";
 
+type TimelineNodeId = "user" | "architect" | "functional" | "planning" | "developer" | "qa";
+
 interface RunViewModel {
   run: {
     id: string;
@@ -27,7 +44,7 @@ interface RunViewModel {
     updated_at: string;
   };
   timeline: Array<{
-    id: string;
+    id: TimelineNodeId;
     label: string;
     status: TimelineStatus;
     summary: string | null;
@@ -131,7 +148,10 @@ function RunDashboard(props: {
               </Button>
             </form>
             <Button
+              data-testid="logout-button"
               variant="outline"
+              aria-label="Salir"
+              title={`Salir (${props.user.handle})`}
               onClick={() => void props.onLogout()}
             >
               <LogOut className="h-4 w-4" />
@@ -226,7 +246,8 @@ function useCurrentUser() {
         method: "POST",
         credentials: "include",
       });
-      queryClient.clear();
+      queryClient.setQueryData(["auth", "me"], null);
+      queryClient.removeQueries({ queryKey: ["run"] });
     },
   };
 }
@@ -352,14 +373,16 @@ function EscalationBanner({ run }: { run: RunViewModel }) {
 
 function Timeline({ nodes }: { nodes: RunViewModel["timeline"] }) {
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4">
+    <section data-testid="timeline" className="rounded-lg border border-zinc-200 bg-white p-4">
       <h2 className="text-sm font-semibold">Timeline</h2>
       <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
         {nodes.map((node) => (
           <div key={node.id} className="min-h-32 rounded-md border border-zinc-200 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-medium">{node.label}</p>
-              <StatusIcon status={node.status} />
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-3">
+                <RoleAvatar nodeId={node.id} status={node.status} />
+                <p className="text-sm font-medium">{node.label}</p>
+              </div>
             </div>
             <Badge className="mt-3" variant={statusVariant(node.status)}>{statusLabel(node.status)}</Badge>
             {node.summary ? <p className="mt-2 line-clamp-3 text-sm text-zinc-600">{node.summary}</p> : null}
@@ -368,6 +391,38 @@ function Timeline({ nodes }: { nodes: RunViewModel["timeline"] }) {
       </div>
     </section>
   );
+}
+
+function RoleAvatar({ nodeId, status }: { nodeId: TimelineNodeId; status: TimelineStatus }) {
+  const Icon = roleIcon(nodeId);
+  return (
+    <div
+      data-role-avatar={nodeId}
+      className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-zinc-50 text-zinc-700"
+    >
+      <Icon className="h-6 w-6" />
+      <div className="absolute -right-1 -bottom-1 flex h-6 w-6 items-center justify-center rounded-full border border-white bg-white shadow-sm [&_svg]:h-4 [&_svg]:w-4">
+        <StatusIcon status={status} />
+      </div>
+    </div>
+  );
+}
+
+function roleIcon(nodeId: TimelineNodeId) {
+  switch (nodeId) {
+    case "user":
+      return User;
+    case "architect":
+      return Compass;
+    case "functional":
+      return Settings;
+    case "planning":
+      return Calendar;
+    case "developer":
+      return Code;
+    case "qa":
+      return Bug;
+  }
 }
 
 function Narrative({ entries }: { entries: RunViewModel["narrative"] }) {
