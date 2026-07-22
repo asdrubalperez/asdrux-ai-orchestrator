@@ -98,3 +98,20 @@ aislamiento de entorno confirmado tanto por evidencia real (agente) como por ver
 (`docker run` sin intermediarios). Queda una limitación conocida y documentada (egress de red no
 restringido a un allowlist fino para Developer) que no bloquea el cierre de esta Feature pero sí
 queda como candidato de una Feature futura si se decide necesario.
+
+---
+
+## 6. Nota de seguimiento (agregada al evaluar FEATURE-016, sin reabrir esta Feature)
+
+El hallazgo de la sección 3 ("Egress de Developer no está restringido a un allowlist fino") se
+toleró como no bloqueante razonando que "ya no hay secretos del Orquestador disponibles para
+exfiltrar" tras el fix de `process.env` de esta misma Feature. Esa razón asumía que el único
+secreto presente en el contenedor de Developer era `ANTHROPIC_API_KEY`.
+
+FEATURE-016 (autenticación por cuenta personal/OAuth para Executors) introduce, si se aprueba
+para el rol Developer, un secreto de naturaleza distinta (credenciales OAuth, confirmadas como
+portables por validación empírica) dentro de ese mismo contenedor. La mitigación parcial que esta
+sección dio por válida **deja de sostenerse** en ese escenario — no se está reabriendo esta
+Feature ni su Approval Gate (sigue Closed), pero cualquier decisión sobre habilitar
+`authMode=cli_session` para Developer debe tratar el egress sin allowlist fino como un
+prerequisito bloqueante, no como el riesgo residual tolerado acá.
