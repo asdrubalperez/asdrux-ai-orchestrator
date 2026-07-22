@@ -26,6 +26,9 @@
 - FEATURE-013 — Capa de UI "Run en curso": 013A backend read-only + UI/SSE, 013B sesiones web,
   013C respuesta a escalamiento desde modal, con validación real en navegador/VPS y documentos de
   diseño/resultados en `docs/features/`
+- FEATURE-014 — Autenticación unificada CLI + Web: tabla `sessions`, hash SHA-256 y revocación
+  server-side compartidos, TTL único de 48 horas y validación real en VPS; resultados en
+  `docs/features/FEATURE-014-implementation-results.md`
 
 **🟡 Confirmado**
 - FEATURE-015 — Wiring real del ciclo Roadmap de Releases (Architect) + Release Plan (Planning):
@@ -52,12 +55,8 @@
 - Capa de UI (Disparo, Historial/admin — "Run en curso" ya pasó a Confirmado, ver arriba)
 - Notificación Slack/webhook complementaria a la UI de monitoreo (post FEATURE-013, si hace falta
   alertas fuera de cuando se está mirando activamente)
-- Bajar expiracion de sesion del CLI de 30 dias a 48 horas al pasar a produccion - condicionado a
-  que no se haya implementado otro mecanismo de autenticacion antes de esa fecha.
 - Limpieza de persistencia de codigo versionado: `artifacts.commit_ref` existe en schema pero no se
   puebla nunca; los commits reales quedan hoy solo en `run_events`.
-- Revaluar sesion local del CLI: el token no tiene validacion server-side ni tabla `sessions`;
-  actualmente es confianza local unicamente.
 
 ---
 
@@ -90,6 +89,13 @@ vigentes al iniciar cada run. Implementada con la migración `0004_project_confi
 funciones en `src/db/repository.ts` (`getCurrentProjectConfig`, `getCurrentProjectConfigs`,
 `setProjectConfig`, `getProjectConfigHistory`) e integración del snapshot vigente en
 `src/cli/commands/runStart.ts`. Ver `docs/features/FEATURE-011-project-config-versions.md`.
+
+### ✅ FEATURE-014 — Autenticación unificada CLI + Web (48h, mecanismo server-side compartido)
+CLI y web usan la misma tabla `sessions`, generación/hash de token, validación server-side y TTL
+de 48 horas. El CLI conserva el secreto en `~/.orquestador/session.json`, pero la identidad y
+vigencia se determinan desde DB. Validado con 24/24 tests, build completo y flujo real en VPS:
+login, `run:status`, logout y rechazo de una copia restaurada del archivo después de revocar la
+fila. Ver `docs/features/FEATURE-014-implementation-results.md`.
 
 ### 🟡 FEATURE-015 — Wiring real del ciclo Roadmap de Releases + Release Plan
 Promovido de ⚪ Tentativo a 🟡 Confirmado. El diseño ya existe en el Runbook
@@ -132,7 +138,7 @@ creadas; `runs.owner_id`/`project_id` migrados a FK real, 19/19 filas backfillea
 `login`/`logout`/`seed:user`, sesión local de 30 días en `~/.orquestador/session.json`.
 
 - **Sesiones/usuarios**: resuelto — `users` con `password_hash` real, validado por invocación.
-  Sin tabla `sessions` ni validación server-side del token (ver ítem Tentativo correspondiente).
+  Validación server-side del token CLI y unificación con sesión web: ver FEATURE-014.
 - **Proyectos**: resuelto — tabla `projects` con `repo_path`, `owner_id` FK a `users`. El marcador
   `[PENDIENTE-DB-PROJECTS]` de `docs/runbook/` quedó reemplazado por la referencia real a
   `project_config_versions` en FEATURE-011.
