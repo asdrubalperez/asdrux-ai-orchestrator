@@ -26,9 +26,12 @@
 - FEATURE-013 — Capa de UI "Run en curso": 013A backend read-only + UI/SSE, 013B sesiones web,
   013C respuesta a escalamiento desde modal, con validación real en navegador/VPS y documentos de
   diseño/resultados en `docs/features/`
+- FEATURE-014 — Autenticación unificada CLI + Web: tabla `sessions`, hash SHA-256 y revocación
+  server-side compartidos, TTL único de 48 horas y validación real en VPS; resultados en
+  `docs/features/FEATURE-014-implementation-results.md`
 
 **🟡 Confirmado**
-- FEATURE-014 — Milestone 2 — Validación end-to-end con caso de negocio real
+- FEATURE-017 (antes FEATURE-014) — Milestone 2 — Validación end-to-end con caso de negocio real
 - FEATURE-015 - Modo de autenticacion por cuenta personal (OAuth) para Executors, alternativo a
   API Key
 
@@ -51,12 +54,8 @@
   Orquestador (`src/executor/roles/architect.txt`, `planning.txt`) ni en la UI. La UI ya reservó
   el espacio (placeholder `ReleasePlanPanel`, sin datos reales) en FEATURE-013.
 
-- Bajar expiracion de sesion del CLI de 30 dias a 48 horas al pasar a produccion - condicionado a
-  que no se haya implementado otro mecanismo de autenticacion antes de esa fecha.
 - Limpieza de persistencia de codigo versionado: `artifacts.commit_ref` existe en schema pero no se
   puebla nunca; los commits reales quedan hoy solo en `run_events`.
-- Revaluar sesion local del CLI: el token no tiene validacion server-side ni tabla `sessions`;
-  actualmente es confianza local unicamente.
 
 ---
 
@@ -90,7 +89,14 @@ funciones en `src/db/repository.ts` (`getCurrentProjectConfig`, `getCurrentProje
 `setProjectConfig`, `getProjectConfigHistory`) e integración del snapshot vigente en
 `src/cli/commands/runStart.ts`. Ver `docs/features/FEATURE-011-project-config-versions.md`.
 
-### 🟡 FEATURE-014 — Milestone 2 — Validación end-to-end con caso de negocio real
+### ✅ FEATURE-014 — Autenticación unificada CLI + Web (48h, mecanismo server-side compartido)
+CLI y web usan la misma tabla `sessions`, generación/hash de token, validación server-side y TTL
+de 48 horas. El CLI conserva el secreto en `~/.orquestador/session.json`, pero la identidad y
+vigencia se determinan desde DB. Validado con 24/24 tests, build completo y flujo real en VPS:
+login, `run:status`, logout y rechazo de una copia restaurada del archivo después de revocar la
+fila. Ver `docs/features/FEATURE-014-implementation-results.md`.
+
+### 🟡 FEATURE-017 (antes FEATURE-014) — Milestone 2 — Validación end-to-end con caso de negocio real
 Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
 Confirmado y no Tentativo.
 
@@ -130,7 +136,7 @@ creadas; `runs.owner_id`/`project_id` migrados a FK real, 19/19 filas backfillea
 `login`/`logout`/`seed:user`, sesión local de 30 días en `~/.orquestador/session.json`.
 
 - **Sesiones/usuarios**: resuelto — `users` con `password_hash` real, validado por invocación.
-  Sin tabla `sessions` ni validación server-side del token (ver ítem Tentativo correspondiente).
+  Validación server-side del token CLI y unificación con sesión web: ver FEATURE-014.
 - **Proyectos**: resuelto — tabla `projects` con `repo_path`, `owner_id` FK a `users`. El marcador
   `[PENDIENTE-DB-PROJECTS]` de `docs/runbook/` quedó reemplazado por la referencia real a
   `project_config_versions` en FEATURE-011.
