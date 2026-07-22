@@ -1,17 +1,18 @@
-import { createHash, randomBytes } from "node:crypto";
 import type { Request, Response } from "express";
 import { verifyPassword } from "./password.js";
+import { generateRawSessionToken, hashSessionToken, SESSION_TTL_MS } from "./sessionCore.js";
 import {
-  createWebSession,
+  createSessionRow,
   findUserByHandle,
   findUserById,
-  getWebSessionById,
-  revokeWebSession,
+  getSessionById,
+  revokeSession,
   type UserRow,
 } from "../db/repository.js";
 
 export const WEB_SESSION_COOKIE = "orchestrator_session";
-export const WEB_SESSION_TTL_MS = 48 * 60 * 60 * 1000;
+export const WEB_SESSION_TTL_MS = SESSION_TTL_MS;
+export { generateRawSessionToken, hashSessionToken } from "./sessionCore.js";
 
 export interface AuthenticatedRequest extends Request {
   user?: UserRow;
@@ -31,14 +32,6 @@ interface LoginRateLimitEntry {
 const loginRateLimits = new Map<string, LoginRateLimitEntry>();
 const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_RATE_LIMIT_MAX_FAILURES = 5;
-
-export function generateRawSessionToken(): string {
-  return randomBytes(32).toString("base64url");
-}
-
-export function hashSessionToken(rawToken: string): string {
-  return createHash("sha256").update(rawToken).digest("hex");
-}
 
 export function buildSessionCookieValue(sessionId: string, rawToken: string): string {
   return `${sessionId}.${rawToken}`;
@@ -142,7 +135,7 @@ export async function createWebLoginSession(handle: string, password: string) {
 
   const rawToken = generateRawSessionToken();
   const expiresAt = new Date(Date.now() + WEB_SESSION_TTL_MS);
-  const session = await createWebSession({
+  const session = await createSessionRow({
     userId: user.id,
     tokenHash: hashSessionToken(rawToken),
     expiresAt,
@@ -160,7 +153,7 @@ export async function authenticateWebRequest(req: Request): Promise<{ user: User
   const parsedCookie = parseSessionCookieValue(cookie);
   if (!parsedCookie) return null;
 
-  const session = await getWebSessionById(parsedCookie.sessionId);
+  const session = await getSessionById(parsedCookie.sessionId);
   if (!session || session.revoked_at !== null || Date.parse(session.expires_at) <= Date.now()) return null;
   if (hashSessionToken(parsedCookie.rawToken) !== session.token_hash) return null;
 
@@ -173,7 +166,7 @@ export async function authenticateWebRequest(req: Request): Promise<{ user: User
 export async function revokeSessionFromRequest(req: Request): Promise<void> {
   const cookie = parseCookieHeader(req.header("Cookie")).get(WEB_SESSION_COOKIE);
   const parsedCookie = parseSessionCookieValue(cookie);
-  if (parsedCookie) await revokeWebSession(parsedCookie.sessionId);
+  if (parsedCookie) await revokeSession(parsedCookie.sessionId);
 }
 
 export function requireAllowedOrigin(req: Request, res: Response, allowedOrigin: string): boolean {

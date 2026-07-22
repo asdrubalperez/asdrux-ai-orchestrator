@@ -1,6 +1,6 @@
-import { clearSession } from "../../auth/session.js";
+import { closeSession } from "../../auth/session.js";
 
 export async function logout(): Promise<void> {
-  const removed = await clearSession();
-  console.log(removed ? "Sesión cerrada." : "No había sesión local para cerrar.");
+  const result = await closeSession();
+  console.log(result === "closed" ? "Sesión cerrada." : "No había sesión local para cerrar.");
 }

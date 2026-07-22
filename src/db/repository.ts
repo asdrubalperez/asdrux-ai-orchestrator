@@ -348,7 +348,7 @@ export async function getRunEventsAfterForUser(runId: string, userId: string, af
   return events.rows;
 }
 
-export async function createWebSession(params: {
+export async function createSessionRow(params: {
   userId: string;
   tokenHash: string;
   expiresAt: Date;
@@ -362,7 +362,7 @@ export async function createWebSession(params: {
   return result.rows[0];
 }
 
-export async function getWebSessionById(sessionId: string): Promise<SessionRow | null> {
+export async function getSessionById(sessionId: string): Promise<SessionRow | null> {
   const result = await pool.query<SessionRow>(
     "select id, user_id, token_hash, created_at, expires_at, revoked_at from sessions where id = $1",
     [sessionId]
@@ -370,6 +370,6 @@ export async function getWebSessionById(sessionId: string): Promise<SessionRow |
   return result.rows[0] ?? null;
 }
 
-export async function revokeWebSession(sessionId: string): Promise<void> {
+export async function revokeSession(sessionId: string): Promise<void> {
   await pool.query("update sessions set revoked_at = now() where id = $1 and revoked_at is null", [sessionId]);
 }
