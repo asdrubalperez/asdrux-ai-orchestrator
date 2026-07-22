@@ -1,6 +1,6 @@
 # Análisis de arquitectura — Modo de autenticación por cuenta personal (CLI) para Executors
 
-Versión: v1.0
+Versión: v1.1
 Fecha: 2026-07-22
 Tipo: Análisis e investigación — **sin implementación**. Este documento es un insumo para
 decidir, no una Feature. Sigue la misma convención que `docs/research/H14-command-confinement.md`.
@@ -177,3 +177,93 @@ headless (punto 2 del resumen ejecutivo) antes de que esto pueda promoverse a `�
 forma arquitectónica recomendada (parámetro `authMode` sobre los Executors existentes, sin
 Executors nuevos ni cambios al contrato) sí puede darse por resuelta desde ya, para cuando se
 retome.
+
+---
+
+## 8. Seguimiento empírico — reuso headless y portabilidad del cache (2026-07-22)
+
+### 8.1 Entorno y protocolo
+
+Se extendió H4 con una prueba real en la VPS, usando Claude Code `2.1.212` y exclusivamente el
+login oficial `claude auth login`. Antes del login, `claude auth status` devolvió `loggedIn:
+false`. El owner completó una sola autorización interactiva. Todas las pruebas posteriores
+eliminaron explícitamente `ANTHROPIC_API_KEY` y `CLAUDE_CODE_OAUTH_TOKEN` del entorno, deshabilitaron
+tools y solicitaron una respuesta textual determinística. No se leyó ni registró ningún token.
+
+La validación se ejecutó desde una sesión SSH distinta de aquella donde se hizo el login y cada
+invocación headless fue un proceso nuevo. Esto prueba persistencia entre procesos y conexiones
+SSH; no pretende demostrar todavía comportamiento después de varias horas ni después del
+vencimiento y refresh del access token.
+
+### 8.2 Resultado: reuso headless
+
+`claude auth status`, sin credenciales de API en el entorno, devolvió `loggedIn: true`,
+`authMethod: "claude.ai"` y `apiProvider: "firstParty"`.
+
+Se ejecutaron dos invocaciones headless independientes y consecutivas:
+
+| Prueba | Proceso nuevo | Interacción posterior | Exit code | Resultado |
+|---|---:|---:|---:|---|
+| `invocation_1` | Sí | Ninguna | 0 | `FEATURE016_OAUTH_OK` |
+| `invocation_2` | Sí | Ninguna | 0 | `FEATURE016_OAUTH_OK` |
+
+Ambas produjeron exactamente 20 bytes de stdout y el mismo SHA-256
+`4011f5a9312088a6c1bfe035a1f93cc1ac5de45c4e0630434bd6677fcb2d294f`. Por lo tanto, queda
+confirmado el reuso no interactivo entre invocaciones headless y procesos separados. La prueba
+pendiente de larga duración se reduce al refresh/expiración, no al reuso básico de la sesión.
+
+### 8.3 Resultado: dependencia de `HOME` y portabilidad
+
+Con un `HOME` nuevo y vacío, la misma invocación terminó con exit code 1. La sesión no se obtiene
+globalmente del usuario Unix ni de la instalación del CLI: depende del cache presente bajo el
+home/configuración efectiva.
+
+Luego se creó un segundo `HOME` temporal y se copió únicamente el archivo de credenciales, con
+permisos `0600`. En ese entorno:
+
+- `claude auth status` volvió a devolver `loggedIn: true` y `authMethod: "claude.ai"`;
+- una invocación headless nueva terminó con exit code 0 y `FEATURE016_ALT_HOME_OK`;
+- no fue necesario copiar `~/.claude.json`, backups, settings ni ningún otro estado;
+- la copia temporal sensible se eliminó al finalizar la prueba.
+
+Conclusión: cambiar `HOME` por sí solo rompe el reuso, pero el cache es portable. Un contenedor
+puede autenticarse si se le entrega o monta ese archivo en el home efectivo del usuario interno.
+
+### 8.4 Ubicación física y exposición
+
+En esta versión y entorno, la credencial activa se almacena en:
+
+```text
+/home/asdru/.claude/.credentials.json
+```
+
+Metadatos observados: archivo regular, owner `asdru:asdru`, permisos `0600`, tamaño 501 bytes.
+Sin exponer valores, se verificó que contiene `accessToken`, `refreshToken`, sus respectivos datos
+de expiración, scopes, tier y tipo de suscripción. No es solo configuración inocua: es material de
+autenticación bearer portable.
+
+Los permisos `0600` protegen el archivo frente a otros usuarios del host, pero dejan de ser una
+barrera si el archivo se monta dentro de Developer y el proceso del contenedor puede leerlo. La
+prueba con el `HOME` alternativo demuestra que una copia exfiltrada basta para reutilizar la
+sesión. Montar todo `~/.claude` sería innecesario y ampliaría todavía más la superficie.
+
+### 8.5 Recomendación preliminar para FEATURE-016
+
+El resultado es **positivo para promover la propuesta a Feature formal**, manteniendo la forma
+arquitectónica ya resuelta (`authMode?: "api_key" | "cli_session"` en los Executors existentes).
+El Template completo debe incluir como reglas y criterios de validación:
+
+1. `api_key` sigue siendo el default y no cambia el comportamiento actual.
+2. `cli_session` nunca inyecta `ANTHROPIC_API_KEY` ni copia implícitamente todo el entorno.
+3. En host, el CLI usa el home/config dir explícitamente configurado para la sesión dedicada.
+4. En contenedor, no se monta el home personal completo. Se define un cache OAuth dedicado al
+   Orquestador, con alcance mínimo y permisos restrictivos. Debe decidirse en diseño cómo permitir
+   refresh sin entregar un mount escribible innecesariamente amplio.
+5. El proceso debe fallar de forma explícita y accionable cuando el cache falta, está vencido o
+   requiere reautenticación; nunca debe caer silenciosamente a una API key distinta.
+6. La validación de la Feature debe repetir el caso headless en host y contenedor, e incluir una
+   prueba diferida que atraviese al menos un refresh real del access token.
+
+El refresh de larga duración y el mount concreto de contenedor quedan como criterios obligatorios
+de la Feature formal, pero ya no bloquean escribirla: son decisiones y pruebas de seguridad de su
+diseño/implementación, no incertidumbre sobre la viabilidad básica del mecanismo.
