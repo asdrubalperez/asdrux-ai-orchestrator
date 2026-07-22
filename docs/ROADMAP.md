@@ -28,9 +28,16 @@
   diseño/resultados en `docs/features/`
 
 **🟡 Confirmado**
-- FEATURE-014 — Milestone 2 — Validación end-to-end con caso de negocio real
-- FEATURE-015 - Modo de autenticacion por cuenta personal (OAuth) para Executors, alternativo a
-  API Key
+- FEATURE-015 — Wiring real del ciclo Roadmap de Releases (Architect) + Release Plan (Planning):
+  conectar el diseño ya escrito en el Runbook (`docs/runbook/02-ARCHITECTURE-TEMPLATE.md` sección
+  0, y `docs/runbook/09-RELEASE-PLAN-TEMPLATE.md`) con los roles reales del Orquestador
+  (`architect.txt`, `planning.txt`) y con la UI (placeholder `ReleasePlanPanel` ya reservado en
+  FEATURE-013). Promovido de Tentativo a Confirmado.
+- FEATURE-016 (antes FEATURE-015) — Modo de autenticación por cuenta personal (OAuth) para
+  Executors, alternativo a API Key. Arranca con investigación empírica (ya realizada, ver
+  `docs/research/investigacion-auth-cuenta-personal-executors.md` v1.1). Diseño formal en
+  `docs/features/FEATURE-016-auth-oauth-executors.md`.
+- FEATURE-017 (antes FEATURE-014) — Milestone 2 — Validación end-to-end con caso de negocio real
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
@@ -45,12 +52,6 @@
 - Capa de UI (Disparo, Historial/admin — "Run en curso" ya pasó a Confirmado, ver arriba)
 - Notificación Slack/webhook complementaria a la UI de monitoreo (post FEATURE-013, si hace falta
   alertas fuera de cuando se está mirando activamente)
-- Wiring real del ciclo Roadmap de Releases (Architect) + Release Plan (Planning) — hoy
-  documentado en el Runbook (`docs/runbook/02-ARCHITECTURE-TEMPLATE.md`, sección 0, y
-  `docs/runbook/09-RELEASE-PLAN-TEMPLATE.md`) pero no implementado en los roles reales del
-  Orquestador (`src/executor/roles/architect.txt`, `planning.txt`) ni en la UI. La UI ya reservó
-  el espacio (placeholder `ReleasePlanPanel`, sin datos reales) en FEATURE-013.
-
 - Bajar expiracion de sesion del CLI de 30 dias a 48 horas al pasar a produccion - condicionado a
   que no se haya implementado otro mecanismo de autenticacion antes de esa fecha.
 - Limpieza de persistencia de codigo versionado: `artifacts.commit_ref` existe en schema pero no se
@@ -90,28 +91,29 @@ funciones en `src/db/repository.ts` (`getCurrentProjectConfig`, `getCurrentProje
 `setProjectConfig`, `getProjectConfigHistory`) e integración del snapshot vigente en
 `src/cli/commands/runStart.ts`. Ver `docs/features/FEATURE-011-project-config-versions.md`.
 
-### 🟡 FEATURE-014 — Milestone 2 — Validación end-to-end con caso de negocio real
-Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
-Confirmado y no Tentativo.
+### 🟡 FEATURE-015 — Wiring real del ciclo Roadmap de Releases + Release Plan
+Promovido de ⚪ Tentativo a 🟡 Confirmado. El diseño ya existe en el Runbook
+(`docs/runbook/02-ARCHITECTURE-TEMPLATE.md` sección 0, y `docs/runbook/09-RELEASE-PLAN-TEMPLATE.md`)
+pero no está implementado en los roles reales del Orquestador (`src/executor/roles/architect.txt`,
+`planning.txt`) ni conectado a la UI. La UI ya reservó el espacio visual (placeholder
+`ReleasePlanPanel`, sin datos reales) en FEATURE-013. Distinto de "Approval Model por Release"
+(ese es sobre quién aprueba el avance de etapas; este es sobre qué contenido de planificación de
+releases se genera y muestra).
 
-### 🟡 FEATURE-015 - Modo de autenticacion por cuenta personal (OAuth) para Executors
-Arranca con una investigacion empirica (estilo docs/research/H14-command-confinement.md, "sin
-implementacion"), no con diseno de Feature completo: validar si una sesion ya autenticada via
-`claude auth login` (o el login oficial equivalente de Codex CLI) se reusa sin intervencion
-humana a traves de multiples invocaciones headless separadas en el tiempo - extension directa de
-H4 (docs/features/FEATURE-001-spike-results.md), que confirmo paridad de permisos entre OAuth y
-API key pero no valido reuso headless repetido. Ver analisis completo en
-`docs/research/investigacion-auth-cuenta-personal-executors.md`.
+### 🟡 FEATURE-016 (antes FEATURE-015) — Modo de autenticación por cuenta personal (OAuth) para Executors
+La investigación empírica ya confirmó reuso headless entre procesos y portabilidad del archivo de
+credenciales desde un `HOME` alternativo. Ver
+`docs/research/investigacion-auth-cuenta-personal-executors.md` v1.1.
 
-Forma arquitectonica ya resuelta en el analisis (no reabrir sin motivo): NO crear Executors
-nuevos por proveedor - agregar un parametro authMode ("api_key" | "cli_session") a las opciones
-ya existentes de ClaudeCodeExecutor/CodexExecutor, default "api_key" sin cambiar nada del
-comportamiento actual. El contrato Executor (src/contracts/executor.ts) no cambia.
+Forma arquitectónica ya resuelta en el análisis (no reabrir sin motivo): NO crear Executors
+nuevos por proveedor — agregar un parámetro `authMode` (`"api_key"` | `"cli_session"`) a las
+opciones ya existentes de `ClaudeCodeExecutor`/`CodexExecutor`, default `"api_key"` sin cambiar
+nada del comportamiento actual. El contrato `Executor` (`src/contracts/executor.ts`) no cambia.
 
-Riesgo especifico a validar ademas de la persistencia de sesion: exposicion de una sesion de
-cuenta personal si se filtra desde un contenedor de Developer (Bash real, FEATURE-006) - mayor
-radio de exposicion que una API key rotable. No avanzar a diseno de Feature completo (implementar
-authMode real) sin resolver primero ambos puntos empiricamente.
+El diseño formal queda en `docs/features/FEATURE-016-auth-oauth-executors.md`. Para Developer,
+`cli_session` queda condicionado por un gate duro: no puede habilitarse hasta que exista egress
+con allowlist fino. La Feature mantiene Approval Gate pendiente; no implementa `authMode`
+todavía.
 
 ### ✅ Feature 09 — Runbook para el Orquestador AI automático
 Diseño completo y cerrado: 12 archivos en `docs/runbook/` (equivalente al `docs/playbook/` actual
@@ -242,3 +244,7 @@ Evaluada en la misma sesión que "Run en curso" como alternativa de monitoreo �
 primera opción porque, a esfuerzo comparable, una UI mínima de solo lectura daba más valor y era
 reusable hacia la Capa de UI completa. Queda como complemento futuro si hace falta alertas push
 (fase completada/fallida) fuera de cuando alguien está mirando la UI activamente.
+
+### 🟡 FEATURE-017 (antes FEATURE-014) — Milestone 2 — Validación end-to-end con caso de negocio real
+Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
+Confirmado y no Tentativo.
