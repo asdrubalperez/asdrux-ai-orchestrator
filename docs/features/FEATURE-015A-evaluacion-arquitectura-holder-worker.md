@@ -770,10 +770,10 @@ reproducibles están en
 `docs/features/FEATURE-015A-stage1-results.md` y
 `docs/features/evidence/FEATURE-015A/`.
 
-Estado final: **8 de 9 ítems cerrados**. Schema, Claude, Codex, superficies auxiliares, topología,
-copia/promoción sintética, lock/concurrencia y fail-closed quedaron ☑ con evidencia. El ítem 8
-permanece deliberadamente ☐: existe una tupla candidata completa para Codex 0.145.0, pero
-`docker/codex-pin.json` no se crea hasta recibir la aprobación explícita del owner.
+Estado final: **9 de 9 ítems cerrados**. Schema, Claude, Codex, superficies auxiliares, topología,
+copia/promoción sintética, lock/concurrencia y fail-closed quedaron ☑ con evidencia. El owner
+aprobó explícitamente la tupla Codex 0.145.0 el 2026-07-23; el ítem 8 quedó ☑ y
+`docker/codex-pin.json` es el manifest autoritativo.
 
 Los spikes detectaron y corrigieron dos supuestos de v1.4:
 
@@ -785,8 +785,7 @@ Los spikes detectaron y corrigieron dos supuestos de v1.4:
 Después de incorporar esas correcciones, la suite de protocolo/schema pasó 11/11 tanto localmente
 como en la VPS. Los smokes reales de `app-server` pasaron en 0.144.6 y en la candidata 0.145.0.
 No apareció otro bloqueo de arquitectura ni fue necesario contradecir el diseño para completar
-los ocho ítems cerrados.
+los nueve ítems cerrados.
 
-**Dictamen:** v1.5 y la evidencia de Etapa 1 son consistentes. La Etapa 1 queda formalmente abierta
-únicamente por la decisión del owner sobre la tupla del ítem 8; esto no autoriza Etapa 2,
-producción ni uso de credenciales reales.
+**Dictamen:** v1.5 y la evidencia de Etapa 1 son consistentes. La Etapa 1 queda formalmente
+cerrada en 9/9 ítems. Esto no autoriza Etapa 2, producción ni uso de credenciales reales.

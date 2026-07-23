@@ -269,7 +269,8 @@ migra todavía; ese wiring pertenece a FEATURE-015B. El mecanismo debe:
      cerrado inmediatamente, sin esperar los 90 s. No promueve caché ni permite fallback.
 
 7. **Pinning reproducible de Codex**:
-   - Antes del spike se crea `docker/codex-pin.json` como única fuente autoritativa, con:
+   - Tras la aprobación explícita del owner se crea `docker/codex-pin.json` como única fuente
+     autoritativa, con:
 
      ```json
      {
@@ -379,8 +380,8 @@ migra todavía; ese wiring pertenece a FEATURE-015B. El mecanismo debe:
 # 6. Estrategia Algorítmica
 
 La lógica normativa está definida en Scope puntos 1, 4, 5, 6 y 7. No existen alternativas de
-lock, proxy o transporte pendientes de selección en v1.5. El valor concreto del pin es la única
-decisión abierta y permanece en el ítem 8 del Approval Gate.
+lock, proxy, transporte o pinning pendientes de selección en v1.5. La tupla Codex 0.145.0
+aprobada está materializada en `docker/codex-pin.json`.
 
 ---
 
@@ -520,13 +521,18 @@ Implementación de producción prohibida hasta aprobación explícita del owner.
    controlado, zombie y caída de Postgres. Evidencia:
    `docs/features/evidence/FEATURE-015A/lock_cache_db_raw.txt` y
    `docs/features/evidence/FEATURE-015A/db_shutdown_raw.txt`.
-8. ☐ Obtener aprobación del owner para `docker/codex-pin.json`; validar por separado base,
-   paquete, binario, tree hash de schemas y digest final. Propuesta y evidencia:
-   `docs/features/FEATURE-015A-stage1-results.md`, sección 4.
+8. ☑ Obtener aprobación del owner para `docker/codex-pin.json`; validar por separado base,
+   paquete, binario, tree hash de schemas y digest OCI del build candidato. El digest de registry
+   definitivo permanece como output obligatorio del pipeline de deployment. Propuesta y evidencia:
+   `docs/features/FEATURE-015A-stage1-results.md`, sección 4. Aprobación explícita recibida el
+   2026-07-23; manifest autoritativo: `docker/codex-pin.json`.
 9. ☑ Ejecutar pruebas fail-closed y de cleanup para holder, worker, canal, supervisor y DB.
    Evidencia: `docs/features/evidence/FEATURE-015A/schema_protocol_raw.txt`,
    `docs/features/evidence/FEATURE-015A/supervisor_shutdown_raw.txt` y
    `docs/features/evidence/FEATURE-015A/db_shutdown_raw.txt`.
+
+**Etapa 1 cerrada: 9/9 ítems ☑.** Este cierre no autoriza Etapa 2 ni el uso de credenciales
+reales.
 
 ## Etapa 2 — Validación con credenciales reales
 

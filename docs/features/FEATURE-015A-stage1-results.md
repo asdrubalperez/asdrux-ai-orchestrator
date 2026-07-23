@@ -22,11 +22,10 @@ fueron sintéticos.
 | 5 — Topología Docker | ☑ | Red interna exclusiva; worker sin egress, caché ni control-plane |
 | 6 — Copia RW/promoción | ☑ | Copia sintética RW; promoción válida aplicada y zombie rechazado |
 | 7 — Lock/concurrencia | ☑ | 12 contenders, 1 winner; heartbeat/release/fencing y caída DB |
-| 8 — Pinning | ☐ | Tupla completa propuesta abajo; requiere aprobación explícita del owner |
+| 8 — Pinning | ☑ | Tupla aprobada explícitamente y materializada en `docker/codex-pin.json` |
 | 9 — Fail-closed | ☑ | Holder, worker, canal, supervisor y Postgres fallaron sin fallback |
 
-Resultado: **8 de 9 ítems cerrados. El único pendiente es la aprobación del owner sobre la tupla
-del ítem 8.**
+Resultado: **9 de 9 ítems cerrados.**
 
 ## 2. Evidencia por ítem
 
@@ -219,9 +218,9 @@ El warning de bubblewrap no invalida el aislamiento de este spike: app-server es
 contenedor read-only, sin worktree escribible, y reportó que usaría su bubblewrap bundled. Sí debe
 permanecer visible; no se silenció.
 
-## 4. Ítem 8 — propuesta de tupla pendiente de aprobación
+## 4. Ítem 8 — tupla aprobada
 
-Propuesta:
+Tupla aprobada y materializada en `docker/codex-pin.json`:
 
 ```json
 {
@@ -264,8 +263,9 @@ El image ID local del build candidato fue
 No se propone usarlo como digest de deployment: el pipeline definitivo debe publicar la imagen y
 registrar su digest de registry como output.
 
-**Decisión requerida del owner:** “Apruebo la tupla Codex 0.145.0 anterior” o indicar el valor a
-ajustar. Hasta esa respuesta no se crea `docker/codex-pin.json` y el ítem 8 permanece ☐.
+**Aprobación registrada:** el owner respondió “Apruebo la tupla Codex 0.145.0 anterior” el
+2026-07-23. El ítem 8 queda ☑. El digest final de registry continúa siendo una salida obligatoria
+del pipeline de build/deployment, no un valor inventado dentro del manifest.
 
 ## 5. Clasificación del código
 
@@ -278,8 +278,7 @@ ajustar. Hasta esa respuesta no se crea `docker/codex-pin.json` y el ítem 8 per
 
 ## 6. Dictamen
 
-**Etapa 1 queda técnicamente validada en 8/9 ítems.** No apareció un bloqueo de arquitectura. Los
-dos desajustes de app-server se corrigieron como v1.5 y se volvieron a probar.
+**Etapa 1 queda técnicamente validada y cerrada en 9/9 ítems.** No apareció un bloqueo de
+arquitectura. Los dos desajustes de app-server se corrigieron como v1.5 y se volvieron a probar.
 
-La única acción pendiente para cerrar formalmente Etapa 1 es la aprobación explícita de la tupla
-del ítem 8; no requiere repetir los otros ocho spikes.
+Este cierre no autoriza Etapa 2, producción ni el uso de credenciales reales.
