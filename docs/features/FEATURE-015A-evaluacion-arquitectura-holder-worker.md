@@ -463,3 +463,174 @@ No se encontraron razones para descartar la arquitectura holder/worker: el proxy
 contenedores separados y la tabla de locks son implementables. Los bloqueantes restantes son
 concretos y resolubles sin credenciales reales, salvo el inventario runtime, el refresh nativo y la
 conectividad real con proveedores, que deben permanecer explícitamente en Etapa 2.
+
+## Confirmación v1.3 — auditoría de consistencia
+
+Fecha: 2026-07-23
+
+### Alcance de la auditoría
+
+Se releyó la v1.3 completa, se cruzaron referencias a reglas e ítems, se verificó la existencia de
+los archivos citados y se compararon las descripciones repetidas de protocolo, proxy Codex,
+superficies auxiliares, lock, pinning y egress entre Scope, Functional Rules, Technical
+Considerations, Validation y Approval Gate.
+
+No se implementó código, no se ejecutaron spikes y no se usaron credenciales OAuth.
+
+### Confirmación de las cinco correcciones declaradas
+
+1. **Header/versionado: aplicado, con una inconsistencia residual en el historial.**
+   El header ahora dice v1.3 y enumera v1.0/v1.1/v1.2/v1.3. Sin embargo, describe v1.3 como
+   “4 contradicciones internas + 4 referencias cruzadas”, mientras el handoff de esta ronda
+   identifica cinco problemas adicionales: dos inconsistencias documentales y tres referencias
+   numéricas. El conteo/historial no permite reconstruir inequívocamente qué ocho correcciones
+   pretende resumir.
+2. **Pinning en Scope: aplicado correctamente.** Scope punto 8, Functional Rule 9 y Approval Gate
+   punto 9 coinciden en versión exacta del paquete, imagen por digest, versión efectiva verificada
+   dentro de la imagen y schemas/contract tests generados allí.
+3. **Referencia desde Scope al `read(path)`: corregida.** Scope punto 1 referencia Regla 5, que es
+   efectivamente la regla sobre resolución de paths dentro del namespace del worker.
+4. **Referencia de concurrencia en Validation Criteria: corregida.** La segunda invocación para la
+   misma identidad referencia Regla 8, que define el rechazo por holder activo.
+5. **Referencia de concurrencia en Risks: corregida.** El riesgo multi-tenant referencia Regla 8,
+   no la Regla 6 del caché RW.
+
+Las cuatro últimas correcciones están aplicadas de forma consistente. La primera necesita ajustar
+el resumen histórico, aunque el número de versión actual sí es correcto.
+
+### Inconsistencias adicionales encontradas
+
+#### 1. El “schema wire concreto” sigue siendo un ejemplo, no un schema verificable
+
+El bloque está etiquetado como `json`, pero contiene comentarios `//`, cuatro documentos
+consecutivos y placeholders como `"uuid-v4"` y `{ "...": "..." }`; no es JSON válido ni JSON
+Schema. No define `required`, tipos cerrados, `additionalProperties`, longitudes, pattern de
+base64url/UUID, exclusión mutua `result`/`error` ni límites por campo. Por tanto no permite generar
+contract tests sin reinterpretar la prosa.
+
+Además:
+
+- se afirma que cada request incluye `protocolVersion` y `channelToken`, pero la cancelación solo
+  contiene `callId` y `type`;
+- la cancelación reutiliza el `callId` ya visto, mientras replay dice que todo duplicado se rechaza;
+- no existe response/ack de cancelación ni error tipado `CANCELLED`;
+- `protocolVersion` se llama “semver” pero usa `"1.0"` — SemVer requiere tres componentes — y el
+  Gate alterna las expresiones “v1” y coincidencia exacta;
+- faltan errores normativos para token inválido, versión no soportada, JSON malformado y límite de
+  500 calls;
+- “payload máximo 10MB” no aclara si aplica a request, response, frame o cada uno, ni si MB es
+  decimal o MiB.
+
+También hay una contradicción de actores: el bloque dice que el mismo shape es
+`holder → worker` para ambos adaptadores, mientras Technical Considerations establece que en Codex
+es el controlador confiable del Orquestador — no el holder — quien delega `item/tool/call` al
+worker.
+
+#### 2. Scope conserva la definición vieja y unidireccional del proxy Codex
+
+Scope punto 3 todavía:
+
+- habla de validar “cada método JSON-RPC saliente”;
+- omite `turn/start`;
+- trata la response a `item/tool/call` como si fuera un método;
+- termina con “y poco más”.
+
+Approval Gate punto 3 sí define dos direcciones, responses correlacionadas, params sensibles y
+terminación ante mensajes inesperados. Son dos contratos distintos del mismo proxy.
+
+La nota de egress agrava el cruce: atribuye a la Regla 2 un “proxy bidireccional que rechaza
+cualquier mensaje no esperado en cualquier dirección”, pero la Regla 2 solo menciona métodos no
+autorizados y no define direcciones, responses ni notifications.
+
+#### 3. La justificación de egress no es uniforme
+
+Technical Considerations usa la premisa correcta: ninguna superficie controlable por el modelo
+puede elegir un destino arbitrario y acceder al secreto. Future ideas, en cambio, vuelve a describir
+el allowlist como defensa únicamente ante supply-chain. La nota técnica reconoce también bugs del
+CLI y telemetría; ambas secciones no expresan el mismo alcance residual.
+
+Functional Rule 4 tampoco sostiene por sí sola todo lo que la nota le atribuye:
+
+- enumera controles mayormente de Claude Code, no las superficies equivalentes de Codex
+  (apps/connectors, MCP adicionales, web/browser/realtime, analytics/OTLP y overrides de base URL);
+- `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` se presenta como si desactivara por sí solo
+  telemetry, updater y error reporting; la documentación oficial expone controles específicos
+  adicionales como `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING` y
+  `ENABLE_CLAUDEAI_MCP_SERVERS=false`;
+- prohibir un MCP externo no impide que el worker interno emita elicitation, OAuth discovery u
+  otro mensaje server→client inesperado. Ese rechazo debe estar en el contrato del cliente/proxy,
+  no inferirse de la URL configurada.
+
+#### 4. El lock mejoró, pero fencing/release aún admiten implementaciones incompatibles
+
+El acquire condicionado y los tiempos 30s/90s están documentados. Persisten ambigüedades:
+
+- `fencing_token` puede ser “autoincremental o secuencia”, dos diseños con semántica distinta;
+- no se define el valor inicial en INSERT;
+- heartbeat y release no tienen predicado normativo por
+  `(credential_slot_id, run_id, fencing_token)`;
+- “se libera explícitamente” no aclara si se borra la fila o se vence el lease. Si se borra y el
+  token vuelve a empezar, se pierde la monotonía necesaria para fencing;
+- no se define qué componente rechaza los efectos de un holder zombie usando el fencing token;
+- no se fija conducta fail-closed durante una caída de Postgres antes del vencimiento.
+
+Scope, Gate y Risks ya apuntan al mismo mecanismo general, pero todavía no a un algoritmo único.
+
+#### 5. El pinning es consistente entre secciones, pero no completamente reproducible
+
+Las tres secciones ya coinciden. Aun así, el mecanismo usa valores ilustrativos:
+
+- `@openai/codex@0.144.6` aparece como ejemplo, no como versión aprobada;
+- no se fija el string esperado del binario;
+- no se fija digest de imagen ni digest de imagen base;
+- no se define un manifest/archivo autoritativo del que CI lea los valores;
+- no se registra hash de los schemas generados.
+
+Además, el desfase observado paquete `0.144.5` / binario `0.144.6` demuestra que “coincidir” no debe
+significar necesariamente igualdad entre ambos strings. CI debe comparar cada valor con la tupla
+aprobada, no comparar package version contra binary version.
+
+#### 6. Una referencia de archivo está rota
+
+El header cita:
+
+`docs/research/investigacion-egress-proteccion-exfiltracion.md`
+
+Ese archivo no existe en el árbol actual. `docs/research/` solo contiene
+`H14-command-confinement.md` e `investigacion-auth-cuenta-personal-executors.md`. Los demás archivos
+citados y comprobados sí existen:
+
+- `docs/playbook/07-FEATURE-TEMPLATE.md` y su versión v2.1;
+- `docs/ROADMAP.md`;
+- `docs/features/FEATURE-012-implementation-results.md`;
+- `docs/features/FEATURE-014-implementation-results.md`.
+
+Debe agregarse el insumo faltante o corregirse la referencia a su ubicación real.
+
+#### 7. El Approval Gate aún no está satisfecho
+
+Los nueve ítems de Etapa 1 permanecen sin marcar y esta ronda no ejecutó sus spikes/tests. Aunque
+se corrigieran todas las inconsistencias documentales, “documento consistente, listo para
+continuar con Etapa 1” no equivale a “Etapa 1 aprobada”. La aprobación requiere ejecutar y
+conservar la evidencia que el propio Gate exige.
+
+### Referencias cruzadas verificadas sin error
+
+- Scope punto 2 → Regla 6: caché RW del holder.
+- Scope punto 1 → Regla 5: resolución de `read(path)` en el namespace worker.
+- Scope Excluido punto 6 → Scope Incluido punto 6: concurrencia por identidad.
+- Validation Criteria → Regla 8: segunda invocación.
+- Risks → Regla 8: lock por `credential_slot_id`.
+- Approval Gate punto 4 → Regla 4: superficies auxiliares.
+- Dependencias 015A → 015B → FEATURE-016: coinciden con `docs/ROADMAP.md`.
+- Template v2.1 y documentos de evidencia FEATURE-012/014: nombres y paths válidos.
+
+### Dictamen
+
+**v1.3 tiene inconsistencias adicionales, listadas arriba. No está todavía en condiciones de ser
+declarada consistente ni de comenzar la ejecución formal de Etapa 1 sobre un contrato congelado.**
+
+Las cinco correcciones de esta ronda mejoran el documento y cuatro están plenamente aplicadas; la
+auditoría independiente encontró contradicciones restantes en protocolo, proxy, egress,
+fencing/pinning y una referencia de archivo rota. Debe publicarse una siguiente revisión
+documental que unifique esas definiciones antes de ejecutar los spikes de Etapa 1.

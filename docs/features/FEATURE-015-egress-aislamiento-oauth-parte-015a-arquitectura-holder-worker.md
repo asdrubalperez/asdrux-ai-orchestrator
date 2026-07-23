@@ -1,6 +1,9 @@
 # FEATURE-015A — Egress y aislamiento de credenciales OAuth — Parte 015A: Arquitectura holder/worker genérica
 
-Versión: v1.0 (borrador para revisión — no aprobado)
+Versión: v1.3 (borrador para revisión — no aprobado; historial: v1.0 diseño inicial, v1.1
+resolución de los 8 bloqueantes de la primera evaluación, v1.2 ajustes tras la re-evaluación,
+v1.3 corrección de 4 contradicciones internas + 4 referencias cruzadas rotas encontradas en
+auditoría completa)
 Basado en template: `docs/playbook/07-FEATURE-TEMPLATE.md` v2.1
 Parte de: FEATURE-015 (desdoblada en 015A/015B, secuencial — ver `docs/ROADMAP.md`)
 Insumos: `docs/research/investigacion-egress-proteccion-exfiltracion.md` (v1.0 + Anexo de
@@ -102,13 +105,42 @@ todavía** — eso es responsabilidad de FEATURE-015B. El mecanismo debe:
      red Docker y ambos contenedores — nunca se reutiliza una red o un holder entre invocaciones
      distintas.
    - Sin una operación genérica de "leer cualquier ruta" del holder expuesta al worker (ver Regla
-     4 de Functional Rules).
+     5 de Functional Rules).
+   - **Schema wire concreto** (mismo shape para los dos transportes, adaptando el envelope):
+     ```json
+     // Request (holder -> worker)
+     {
+       "protocolVersion": "1.0",
+       "callId": "uuid-v4",
+       "channelToken": "base64url-32-bytes",
+       "toolName": "string",
+       "args": { "...": "..." }
+     }
+     // Response de éxito (worker -> holder)
+     { "callId": "uuid-v4", "result": { "...": "..." } }
+     // Response de error (worker -> holder)
+     {
+       "callId": "uuid-v4",
+       "error": {
+         "code": "TIMEOUT | TOOL_NOT_FOUND | INVALID_ARGS | WORKER_UNAVAILABLE | PAYLOAD_TOO_LARGE | DUPLICATE_ID",
+         "message": "string"
+       }
+     }
+     // Cancelación (holder -> worker)
+     { "callId": "uuid-v4", "type": "cancel" }
+     ```
+     Límites concretos (default, ajustable por tipo de operación si hace falta): payload máximo
+     10MB; timeout por tool call 120s; máximo 500 tool calls por invocación. Replay: el worker
+     mantiene en memoria el set de `callId` vistos durante la vida de la invocación, rechaza
+     duplicados con `DUPLICATE_ID`. Carrera de cancelación: una respuesta que llega después de
+     que el holder ya envió `cancel` para ese `callId` se descarta silenciosamente (no se
+     procesa, no se re-envía error).
 2. **Adaptador Claude Code**: holder ejecutado con `--tools ""` (deshabilita herramientas
    integradas) + `--mcp-config`/`--strict-mcp-config` apuntando a un servidor MCP remoto expuesto
    por el worker. `--bare` descartado (deshabilita OAuth/keychain). Dado que sin `--bare` Claude
    Code puede buscar configuración local (`~/.claude/settings.json`, hooks, plugins, skills,
    descubrimiento de `CLAUDE.md`), el `HOME` del holder se crea **desde cero por invocación**,
-   conteniendo únicamente el caché de credenciales (Regla 5 de Functional Rules) — sin
+   conteniendo únicamente el caché de credenciales (Regla 6 de Functional Rules) — sin
    `settings.json`, sin directorio de skills, sin ningún worktree/proyecto montado (por lo tanto
    sin `CLAUDE.md` real que descubrir), reusando `--no-session-persistence` (ya presente en el
    código actual del Orquestador) para no dejar estado de sesión entre invocaciones. El `cwd` del
@@ -135,23 +167,35 @@ todavía** — eso es responsabilidad de FEATURE-015B. El mecanismo debe:
 6. **Política de concurrencia**: identidad = `credentialSlotId` = `(user_id, proveedor)` — no solo
    `user_id`, porque un mismo usuario puede tener sesiones OAuth independientes de Claude y de
    Codex simultáneamente. Lock implementado en una tabla nueva `oauth_credential_locks`
-   (`credential_slot_id` único, `run_id`, `acquired_at`, `lease_expires_at`), siguiendo el mismo
-   patrón de Postgres ya usado por `sessions` (FEATURE-014). Adquisición atómica
-   (`INSERT ... ON CONFLICT DO NOTHING`); si falla por lease vigente, el run se rechaza
-   explícitamente. El holder renueva el lease periódicamente mientras vive (heartbeat); si el
-   proceso muere sin liberar, el lease vence solo — sin proceso de limpieza aparte. Se libera
-   explícitamente al terminar el run (éxito, falla o cancelación). **El lock es por
-   `credential_slot_id`, nunca global** — un cliente/tenant nunca bloquea a otro (ver Risks, nota
-   de multi-tenant futuro).
+   (`credential_slot_id` único, `run_id`, `fencing_token` (entero autoincremental o secuencia),
+   `acquired_at`, `lease_expires_at`), siguiendo el mismo patrón de Postgres ya usado por
+   `sessions` (FEATURE-014). **Adquisición**: `INSERT ... ON CONFLICT (credential_slot_id) DO
+   UPDATE SET run_id = EXCLUDED.run_id, fencing_token = oauth_credential_locks.fencing_token + 1,
+   acquired_at = now(), lease_expires_at = now() + interval '90 seconds' WHERE
+   oauth_credential_locks.lease_expires_at <= now()` — un upsert condicionado por el vencimiento
+   del lease, no un `INSERT` simple que se trabaría para siempre con una fila vencida. Si la
+   condición `WHERE` no matchea (lease todavía vigente de otro run), la fila no se actualiza y el
+   sistema detecta 0 filas afectadas → rechaza el nuevo run explícitamente. El `fencing_token`
+   devuelto se usa para que, si un holder viejo (que perdió su lease sin saberlo) intenta escribir
+   de vuelta, su fencing token desactualizado sea rechazado — evita que un holder zombie
+   reactivado pise el trabajo del holder que legítimamente tomó el slot después. El holder
+   renueva el lease periódicamente (heartbeat, cada ~30s, lease de 90s — 3x margen) mientras vive,
+   verificando su propio `fencing_token`; si pierde el lease o no puede renovarlo, aborta la
+   invocación en curso. Se libera explícitamente al terminar el run (éxito, falla o cancelación).
+   **El lock es por `credential_slot_id`, nunca global** — un cliente/tenant nunca bloquea a otro
+   (ver Risks, nota de multi-tenant futuro).
 7. Fronteras obligatorias: el holder no monta el Docker socket; el worker no puede abrir una
    sesión administrativa contra `app-server`; el holder no escucha puertos accesibles desde el
    worker salvo autenticación y necesidad explícita; configuración, logs, errores y system prompt
    del holder nunca incluyen contenido del caché.
-8. Para Codex: version pin de `codex app-server` + contract tests contra el schema de
-   `dynamicTools` antes de cualquier upgrade. El pin debe verificarse contra el **binario
-   efectivo** que corre (`codex-cli --version` o equivalente), no solo contra la versión declarada
-   en el lockfile del paquete — la evaluación encontró un desfase real entre ambos (paquete
-   `0.144.5` vs binario efectivo `0.144.6`) que debe corregirse como paso de build/CI.
+8. **Pinning de Codex — artefacto único autoritativo**, no solo "fijar una versión": el Dockerfile
+   instala una versión exacta y verificable (ej. `npm install -g @openai/codex@0.144.6`, nunca sin
+   versión), la imagen final se referencia por **digest** (`sha256:...`, no por tag mutable), y el
+   build/CI ejecuta `codex-cli --version` (o equivalente) dentro de la imagen construida,
+   **fallando el build** si no coincide con el valor esperado — el desfase real que encontró la
+   evaluación anterior (paquete `0.144.5` declarado vs binario efectivo `0.144.6`) es precisamente
+   el caso que este check debe capturar. Los contract tests contra el schema de `dynamicTools` se
+   generan dentro de esa misma imagen fijada por digest, nunca contra una instalación distinta.
 9. Topología de referencia (contenedores Docker separados, administrados por el daemon rootful —
    no namespaces sin privilegios, dado el límite de kernel ya conocido en FEATURE-008).
 10. Un spike funcional por adaptador con al menos una tool genérica de prueba (no las tools reales
@@ -177,6 +221,12 @@ todavía** — eso es responsabilidad de FEATURE-015B. El mecanismo debe:
 
 ## Future ideas (opcional)
 
+- **Egress allowlisted del holder (proxy con lista fija de hosts permitidos)**: defensa en
+  profundidad de baja prioridad contra un escenario de supply chain (binario del CLI
+  comprometido), no contra el modelo de amenaza principal de esta Feature. Retirado del Approval
+  Gate tras discusión explícita con el owner — no es una garantía de esta Feature, se anota como
+  mejora futura opcional si en algún momento se decide invertir en ese escenario específico.
+
 - Extender el protocolo holder/worker a otros casos de uso del Orquestador que en el futuro
   necesiten aislar un secreto de un proceso con tools de lectura/ejecución.
 - Logging/auditoría (Enfoque 3) como capa complementaria de evidencia sobre el mecanismo ya
@@ -195,30 +245,45 @@ todavía** — eso es responsabilidad de FEATURE-015B. El mecanismo debe:
    "nunca los invoca" no es, por sí sola, una frontera (Scope → Incluido punto 3).
 3. Toda operación de shell/filesystem que el modelo solicite se ejecuta en el worker — nunca en
    el holder.
-4. El canal holder↔worker no necesita rechazar por schema una tool `read(path)` genérica: si el
+4. **Superficies auxiliares del holder desactivadas explícitamente** (hallazgo de la
+   re-evaluación de Codex sobre el retiro del egress allowlisted — no son parte del canal
+   principal, pero deben cerrarse para sostener la premisa de que el holder no puede seleccionar
+   destinos arbitrarios): `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (telemetría/updater/error
+   reporting no esenciales); sin exporters OTLP configurados (ni env ni managed settings); config
+   MCP generada exclusivamente por el Orquestador, apuntando solo al worker interno — nunca un
+   servidor MCP externo que pudiera iniciar "URL elicitation" (abrir URL en navegador) o "MCP
+   OAuth discovery" hacia un host de terceros; connectors de claude.ai deshabilitados
+   explícitamente en la config del holder.
+5. El canal holder↔worker no necesita rechazar por schema una tool `read(path)` genérica: si el
    worker la resuelve dentro de su propio namespace, una ruta que apunte al filesystem del holder
    simplemente no existe ahí. La propiedad garantizada es que ninguna ruta cruza hacia el
    filesystem del holder.
-5. **El holder posee su caché de credenciales en un directorio/volumen propio con acceso de
+6. **El holder posee su caché de credenciales en un directorio/volumen propio con acceso de
    lectura y escritura directo — nunca un bind mount read-only sobre el que se espera escritura de
    refresh.** Refresh nativo/reactivo dentro del ciclo de invocación permitido y esperado; si ese
    refresh falla, la fase falla explícitamente. Esta regla resuelve de raíz la contradicción que
    encontró la evaluación del diseño descartado de FEATURE-016A.
-6. Ante falla del holder o del canal, la invocación falla explícitamente (fail-closed), evaluado
+7. Ante falla del holder o del canal, la invocación falla explícitamente (fail-closed), evaluado
    por separado para cada componente (holder caído, worker caído, canal caído).
-7. El sistema rechaza iniciar una nueva invocación con `cli_session` si ya existe un holder activo
+8. El sistema rechaza iniciar una nueva invocación con `cli_session` si ya existe un holder activo
    para la misma identidad OAuth.
-8. Para Codex: fijar versión de `codex app-server` y correr contract tests contra el schema de
-   `dynamicTools` antes de cualquier upgrade. Los contract tests validan el schema, no qué tools
-   recibió el modelo en runtime — eso requiere verificación aparte (inventario efectivo).
-9. Fronteras obligatorias: el holder no monta el Docker socket; el worker no abre sesión
+9. Para Codex: **artefacto único autoritativo**, no solo "fijar una versión". El Dockerfile debe
+   instalar una versión exacta y verificable (ej. `npm install -g @openai/codex@0.144.6`, nunca
+   sin versión), y la imagen final se referencia por **digest** (`sha256:...`), no por tag mutable.
+   El build/CI corre un check que ejecuta `codex-cli --version` (o equivalente) dentro de la
+   imagen construida y **falla el build** si el valor reportado no coincide exactamente con el
+   valor esperado — el desfase real encontrado en la evaluación anterior (paquete `0.144.5`
+   declarado vs binario efectivo `0.144.6`) es precisamente el caso que este check debe capturar
+   antes de que llegue a producción. Los contract tests contra el schema de `dynamicTools` se
+   generan dentro de esa misma imagen fijada por digest, nunca contra una instalación distinta.
+10. Fronteras obligatorias: el holder no monta el Docker socket; el worker no abre sesión
    administrativa contra `app-server`; el holder no escucha puertos accesibles desde el worker
    salvo autenticación y necesidad explícita; configuración, logs, errores y system prompt del
    holder nunca incluyen contenido del caché de credenciales.
-10. Esta Feature protege específicamente la credencial OAuth — no todos los secretos posibles del
+11. Esta Feature protege específicamente la credencial OAuth — no todos los secretos posibles del
     worktree. El worker conserva la capacidad de exfiltrar otros datos si el modelo así lo decide;
     eso queda fuera de esta garantía.
-11. El mecanismo debe ser neutral respecto a la política de red del worker (amplia o mínima) — esa
+12. El mecanismo debe ser neutral respecto a la política de red del worker (amplia o mínima) — esa
     decisión se configura por rol en FEATURE-015B, sin requerir cambios al protocolo de esta
     Feature.
 
@@ -256,10 +321,29 @@ Orquestador confiable
 | Segmento | Diseño |
 |---|---|
 | Red holder↔worker | Docker `--internal` exclusiva, creada y destruida por invocación |
-| Egress del holder | Solo hacia el proveedor de IA (Anthropic u OpenAI, según adaptador) — ninguna otra ruta de salida |
+| Egress del holder | Sin restricción de allowlist — no es parte de la garantía central de esta Feature (ver nota abajo y Future ideas) |
 | Egress del worker | Según política que defina FEATURE-015B por rol — 015A solo deja el mecanismo neutral a esa decisión |
 | Worker → control plane del holder | Sin ruta — el worker no alcanza la interfaz de administración de `app-server` ni ningún puerto de control del holder |
 | Otros contenedores de la VPS (otra invocación u otro tenant) | Sin ruta hacia la red interna de esa invocación, al ser exclusiva y `--internal` |
+
+**Nota — por qué el egress del holder no es un requisito de esta Feature**: la garantía central de
+esta arquitectura es que el worker nunca tiene el secreto — eso ya cierra tanto el canal de
+respuesta como el canal de red, sin importar qué tools o qué acceso a internet tenga el worker. La
+premisa correcta para el holder **no** es "el holder solo contacta al proveedor" (falso para los
+binarios stock — Claude Code documenta conexiones a telemetría, error reporting, updater,
+changelog y connectors MCP; Codex tiene exporters OTLP configurables) — la premisa correcta,
+confirmada tras un análisis crítico dedicado de Codex, es: **ninguna superficie controlable por el
+modelo dentro del holder puede seleccionar un destino de red arbitrario ni acceder al secreto**.
+Esa propiedad se sostiene por la combinación de controles ya cerrados en Functional Rules,
+no por un allowlist de red: entorno del holder por allowlist explícita, ausencia de
+`managed-settings.json`/plugins, telemetría/updater/connectors/MCP externo desactivados
+explícitamente (Regla 4), y el proxy bidireccional de Codex que rechaza cualquier mensaje no
+esperado en cualquier dirección (Regla 2). Un allowlist de egress agregaría valor solo contra un
+escenario distinto y de menor prioridad — un ataque de supply chain al binario oficial mismo, o un
+bug del CLI que filtrara datos por telemetría — categoría de riesgo ajena al modelo de amenaza
+principal de esta Feature (modelo/prompt injection activamente evasivo). Por eso se retira del
+Approval Gate como requisito bloqueante y se anota en Future ideas como defensa en profundidad de
+baja prioridad, no eliminada por descarte sino por análisis explícito y documentado.
 
 ## Otros puntos técnicos
 
@@ -288,7 +372,7 @@ Orquestador confiable
 | Holder caído (fail-closed) | Invocación de prueba con el holder no disponible | La invocación falla explícitamente; el worker no recibe fallback con acceso directo a credenciales |
 | Worker caído (fail-closed) | Invocación de prueba con el worker no disponible | La invocación falla explícitamente, sin degradar el aislamiento |
 | Canal holder↔worker caído (fail-closed) | Transporte interrumpido a mitad de una tool call de prueba | La invocación falla explícitamente |
-| Segunda invocación, misma identidad OAuth | Un holder ya activo para esa identidad, se intenta iniciar otro | Rechazado explícitamente (Regla 7) |
+| Segunda invocación, misma identidad OAuth | Un holder ya activo para esa identidad, se intenta iniciar otro | Rechazado explícitamente (Regla 8) |
 | Upgrade de `codex app-server` rompe `dynamicTools` | Contract tests corridos contra la nueva versión antes de actualizar en producción | El contract test detecta la ruptura antes del despliegue |
 | HOME del holder sin customizaciones (Claude Code) | Arrancar el holder con `HOME` limpio desde cero, en presencia de un `settings.json`/hook de prueba colocado deliberadamente fuera de ese `HOME` | El holder no carga ningún hook/plugin/skill — se verifica en runtime, no se asume por configuración |
 | Controlador Codex intenta un método no permitido | Simular (en el proxy) un intento de invocar `command/exec` desde el controlador | El proxy rechaza el método antes de que llegue a `app-server`, incluso simulando un bug del cliente |
@@ -332,7 +416,7 @@ Esta evidencia sigue el mismo patrón de validación real documentada usado en
 - **Multi-tenant futuro, ya contemplado en el diseño**: el owner confirmó que hoy el uso es
   interno (él/su equipo), pero a futuro habrá clientes externos sin confianza mutua entre sí (tipo
   SaaS). El aislamiento de red por invocación (exclusiva, `--internal`) y el lock de concurrencia
-  por `credential_slot_id` (Regla 6) ya son neutrales a esto — no requieren rediseño cuando
+  por `credential_slot_id` (Regla 8) ya son neutrales a esto — no requieren rediseño cuando
   aparezca el primer cliente externo. Riesgo residual a vigilar: si en el futuro se comparte
   infraestructura entre tenants de forma más agresiva (ej. mismo host físico sin aislamiento
   adicional), revisar si el aislamiento a nivel de red Docker sigue siendo suficiente o si hace
@@ -356,25 +440,51 @@ credenciales reales en el mismo gate que las prohíbe).
 
 ## Etapa 1 — Gate de diseño (sin credenciales reales)
 
-1. ☐ Protocolo/schema de comunicación holder↔worker definido y documentado para ambos adaptadores
-   (autenticación, versionado, ids, límites, cancelación, errores, idempotencia, encoding, cierre
-   — ver Scope → Incluido punto 1).
-2. ☐ Spike Claude Code: holder con `HOME` limpio desde cero (sin `settings.json`, hooks, plugins,
-   skills, sin `CLAUDE.md` descubrible) + worker MCP genérico con al menos una tool de prueba, sin
-   credenciales reales.
-3. ☐ Spike Codex: `app-server` + al menos una dynamic tool de prueba + holder sin acceso al
-   worktree, cliente mínimo + proxy allowlist delante del controlador, sin credenciales reales.
-4. ☐ Inventario efectivo de tools sin autenticación (lo que se pueda verificar sin login) para
-   ambos adaptadores — el inventario completo con turn autenticado queda en la Etapa 2.
-5. ☐ Topología Docker (contenedores separados, daemon rootful, red `--internal` exclusiva con
-   egress del holder acotado al proveedor) validada en la VPS.
-6. ☐ Refresh validado con el holder escribiendo en su propio caché (no mount RO) — prueba
-   específica de que no se repite la contradicción encontrada en la evaluación de FEATURE-016A.
+1. ☐ Contrato wire completo del protocolo holder↔worker: schemas exactos de request/response/
+   error/cancelación, formato y manejo del token de canal (32 bytes `randomBytes`, base64url,
+   comparación `timingSafeEqual`, nunca logueado completo), límites concretos (10MB payload, 120s
+   timeout por tool call configurable, 500 tool calls por invocación), semántica de
+   `protocolVersion` (v1: coincidencia exacta, rechazo si no coincide), y protección contra replay
+   (registro en memoria de `callId` vistos durante la invocación, rechazo de duplicados).
+2. ☐ Spike Claude Code, dividido en lo verificable sin login: (a) test unitario que confirma el
+   comando construido (`--tools ""`, `--mcp-config`, `--strict-mcp-config`,
+   `--no-session-persistence`, `CLAUDE_CONFIG_DIR` fijado al directorio controlado); (b)
+   inspección de la imagen del holder confirmando ausencia de `managed-settings.json`, directorios
+   de plugins y cualquier `CLAUDE.md`; (c) instrumentación del arranque (pre-auth) confirmando que
+   no se tocan rutas fuera de `CLAUDE_CONFIG_DIR` antes del fallo esperado por `Not logged in`. El
+   handshake MCP completo y la tool call de punta a punta quedan en Etapa 2 (no son alcanzables
+   sin login).
+3. ☐ Spike Codex: proxy bidireccional delante de `app-server` con las dos allowlists direccionales
+   (cliente→servidor: `initialize`/`initialized`/`thread/start`/`turn/start`/respuestas
+   correlacionadas a `item/tool/call`; servidor→cliente: solo lo esperado, terminación del proceso
+   ante cualquier otro tipo), validación de params sensibles de `thread/start`/`turn/start` contra
+   schema fijo (`cwd`, `sandbox`, `tools`/`dynamicTools`), y correlación de ids pendientes en
+   ambas direcciones — validado sin credenciales reales.
+4. ☐ Verificación en runtime de fuentes de configuración de Claude Code cerradas:
+   `CLAUDE_CONFIG_DIR` fijado explícitamente, entorno del holder construido por allowlist (sin
+   variables de plugin cache/seed), ausencia verificada de `managed-settings.json` en la imagen, y
+   chequeo de `claude /status` (o equivalente) al arrancar el holder — fail-closed si reporta
+   cualquier fuente administrada o setting inesperado. **Incluye además** (Regla 4 de Functional
+   Rules): `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` seteado, sin exporters OTLP configurados,
+   config MCP apuntando exclusivamente al worker interno (sin servidor MCP externo que pueda
+   iniciar "URL elicitation" u "OAuth discovery"), y connectors de claude.ai deshabilitados
+   explícitamente — verificado en la imagen/config, no asumido.
+5. ☐ Topología Docker (contenedores separados, daemon rootful, red `--internal` exclusiva por
+   invocación, aislamiento entre invocaciones/tenants) validada en la VPS. El egress del holder no
+   requiere allowlist como parte de este gate (ver Technical Considerations, nota de alcance —
+   retirado como Future idea de baja prioridad).
+6. ☐ Refresh validado con el holder escribiendo en su propio caché (no mount RO) mediante canary
+   de mutabilidad y aislamiento — no un refresh OAuth nativo real, que requiere credenciales y
+   queda en Etapa 2.
 7. ☐ Fronteras obligatorias (Docker socket, sesión administrativa, puertos, redacción de logs)
-   implementadas y verificadas en los spikes.
-8. ☐ Política de concurrencia (`credential_slot_id`, tabla `oauth_credential_locks`) confirmada
-   como implementable con el modelo de datos actual del proyecto.
-9. ☐ Pin de `codex app-server` corregido para que paquete declarado y binario efectivo coincidan.
+   implementadas y verificadas en los spikes, como checks binarios concretos.
+8. ☐ Política de concurrencia: algoritmo de lock corregido (upsert atómico condicionado por
+   `lease_expires_at <= now()`, fencing token, heartbeat con abort si se pierde el lease,
+   protección contra reactivación de holder zombie) validado con tests de concurrencia Postgres y
+   reloj controlado — sin necesidad de credenciales.
+9. ☐ Pin de `codex app-server` corregido: artefacto único autoritativo (versión exacta de
+   paquete, digest de imagen, versión reportada por el binario), build/CI que falla ante
+   discrepancia, schemas/contract tests generados dentro de esa misma imagen.
 
 ## Etapa 2 — Validación con credenciales reales
 
@@ -385,8 +495,10 @@ que Claude Code requiere plan Pro/Max — una cuenta free no permite el login.
 
 1. ☐ Login real (`claude auth login`) con la cuenta Pro desechable, en un entorno de prueba
    aislado — nunca en la sesión activa de la VPS.
-2. ☐ Inventario efectivo de tools con un turn autenticado real, confirmando que el holder no
-   expone ninguna tool de lectura/ejecución local en ninguno de los dos adaptadores.
+2. ☐ Handshake MCP completo de Claude Code (imposible de validar en Etapa 1 sin login) + tool
+   call de punta a punta contra el worker genérico de prueba. Inventario efectivo de tools con un
+   turn autenticado real, confirmando que el holder no expone ninguna tool de lectura/ejecución
+   local en ninguno de los dos adaptadores.
 3. ☐ Al menos un ciclo de refresh real documentado.
 4. ☐ Verificación específica, no asumida: uso del access token copiado (si se genera alguna copia
    de prueba controlada), renovación mediante el refresh token copiado, comportamiento después de
