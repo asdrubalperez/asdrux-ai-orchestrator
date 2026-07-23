@@ -45,12 +45,15 @@
   sesión de Discovery antes de poder escribirse como diseño formal. Prerequisito explícito de la
   Regla 6 de FEATURE-016 (gate duro para `authMode=cli_session` + Developer) — mientras este ítem
   no esté resuelto, esa combinación queda rechazada en runtime.
-- FEATURE-016 — Modo de autenticación por cuenta personal (OAuth) para
-  Executors, alternativo a API Key. Arranca con investigación empírica (ya realizada, ver
-  `docs/research/investigacion-auth-cuenta-personal-executors.md` v1.1). Diseño formal en
-  `docs/features/FEATURE-016-auth-oauth-executors.md`. Su Regla 6 depende ahora de FEATURE-015
-  (arriba) — el resto de la Feature (Architect/Functional/Planning/QA, Regla 7) no depende de
-  esto.
+- FEATURE-016 — Modo de autenticación por cuenta personal (OAuth) para Executors, alternativo a
+  API Key. Desdoblada en dos partes bajo el mismo número, mismo patrón que FEATURE-013
+  (013A/013B/013C): **016A** — infraestructura `authMode` + OAuth para roles sin Bash
+  (Architect/Functional/Planning/QA, Regla 7, sin gate) — puede implementarse de forma
+  independiente. **016B** — habilitación pública de `cli_session` para Developer (Regla 6) —
+  bloqueada hasta que FEATURE-015 (arriba) esté implementada y validada. Investigación empírica ya
+  realizada, ver `docs/research/investigacion-auth-cuenta-personal-executors.md` v1.1. Diseño
+  formal en `docs/features/FEATURE-016-auth-oauth-executors.md` (pendiente de desdoblarse en
+  documentos separados 016A/016B en una sesión de diseño futura).
 - FEATURE-017 (antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases (Architect) +
   Release Plan (Planning): conectar el diseño ya escrito en el Runbook
   (`docs/runbook/02-ARCHITECTURE-TEMPLATE.md` sección 0, y
@@ -135,6 +138,15 @@ Developer) — mientras este ítem no esté resuelto, esa combinación queda rec
 aunque el resto de FEATURE-016 (Architect/Functional/Planning/QA, Regla 7) no depende de esto.
 
 ### 🟡 FEATURE-016 — Modo de autenticación por cuenta personal (OAuth) para Executors
+Desdoblada en dos partes bajo el mismo número, siguiendo el patrón ya usado en FEATURE-013
+(013A/013B/013C):
+- **016A** — Infraestructura `authMode` + OAuth para roles sin Bash
+  (Architect/Functional/Planning/QA). Regla 7: sin gate, no depende de FEATURE-015. Puede
+  implementarse de forma independiente.
+- **016B** — Habilitación pública de `cli_session` para el rol Developer. Regla 6: gate duro,
+  bloqueada hasta que FEATURE-015 (Egress con protección de exfiltración de credenciales, sin
+  bloquear investigación) esté implementada y validada.
+
 La investigación empírica ya confirmó reuso headless entre procesos y portabilidad del archivo de
 credenciales desde un `HOME` alternativo. Ver
 `docs/research/investigacion-auth-cuenta-personal-executors.md` v1.1.
@@ -144,10 +156,12 @@ nuevos por proveedor — agregar un parámetro `authMode` (`"api_key"` | `"cli_s
 opciones ya existentes de `ClaudeCodeExecutor`/`CodexExecutor`, default `"api_key"` sin cambiar
 nada del comportamiento actual. El contrato `Executor` (`src/contracts/executor.ts`) no cambia.
 
-El diseño formal queda en `docs/features/FEATURE-016-auth-oauth-executors.md`. Para Developer,
-`cli_session` queda condicionado por un gate duro: no puede habilitarse hasta que se resuelva
-FEATURE-015 (egress con protección de exfiltración de credenciales, sin bloquear investigación).
-La Feature mantiene Approval Gate pendiente; no implementa `authMode` todavía.
+El diseño formal queda por ahora en un único documento,
+`docs/features/FEATURE-016-auth-oauth-executors.md`, pendiente de desdoblarse en dos documentos
+separados (016A/016B) en una sesión de diseño futura. Para Developer (016B), `cli_session` queda
+condicionado por el gate duro de la Regla 6: no puede habilitarse hasta que FEATURE-015 esté
+implementada y validada. Tanto 016A como 016B mantienen Approval Gate pendiente; ninguna de las dos
+partes implementa `authMode` todavía.
 
 ### 🟡 FEATURE-017 (antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases + Release Plan
 Promovido de ⚪ Tentativo a 🟡 Confirmado. El diseño ya existe en el Runbook
