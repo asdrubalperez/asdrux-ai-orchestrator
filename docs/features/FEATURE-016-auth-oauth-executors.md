@@ -41,8 +41,9 @@ subproceso solo lo estrictamente necesario (un caché de credenciales dedicado, 
 personal completo), fallar explícitamente si la sesión falta o venció (sin fallback silencioso), y
 soportar refresh real sin ampliar el mount escribible más allá de ese caché dedicado.
 
-Para el rol Developer específicamente, `cli_session` solo puede habilitarse cuando el egress con
-allowlist fino esté activo — no antes.
+Para el rol Developer específicamente, `cli_session` solo puede habilitarse cuando FEATURE-015
+(egress con protección de exfiltración de credenciales, sin bloquear investigación) esté resuelta
+— no antes.
 
 ## 4. Scope
 
@@ -62,15 +63,16 @@ allowlist fino esté activo — no antes.
 5. Política de refresh: el proceso puede escribir de vuelta únicamente en ese caché dedicado
    (nunca en ninguna otra ruta del contenedor/host).
 6. **Gate de configuración para Developer**: si se configura `authMode=cli_session` para el rol
-   Developer, el sistema debe verificar que el egress con allowlist fino (ítem del Roadmap, ver
-   Risks) esté activo — si no lo está, rechazar la configuración con un error explícito al iniciar
-   el run, no permitirlo con una advertencia.
+   Developer, el sistema debe verificar que FEATURE-015 (egress con protección de exfiltración de
+   credenciales, ver Risks) esté resuelta e implementada — si no lo está, rechazar la
+   configuración con un error explícito al iniciar el run, no permitirlo con una advertencia.
 7. Documentar en `docs/playbook/02-ARCHITECTURE.md` la sub-sección de modo de autenticación, con
    referencia al análisis v1.1 y a esta Feature.
 
 ### Excluido
-1. Implementar el egress allowlist en sí — es una Feature separada (ítem ⚪ Tentativo ya
-   existente en el Roadmap), esta Feature solo depende de que exista, no la implementa.
+1. Implementar la protección de egress en sí — es FEATURE-015, una Feature separada y ya
+   promovida a 🟡 Confirmado en el Roadmap; esta Feature solo depende de que exista, no la
+   implementa.
 2. UI para que el usuario final elija `authMode` por rol — se apoya en el ítem Tentativo
    "Selección de proveedor/modelo/credenciales por rol" cuando exista esa UI; por ahora se
    configura igual que `executorProvider`/`model` hoy (config de proyecto/`.env`).
@@ -104,10 +106,11 @@ allowlist fino esté activo — no antes.
 5. **Refresh acotado al caché dedicado**: si el CLI necesita escribir un token refrescado, solo
    puede hacerlo dentro de ese caché dedicado — ninguna otra ruta del contenedor/host queda
    escribible por este motivo.
-6. **Gate duro para Developer**: `authMode=cli_session` + rol Developer requiere que el egress con
-   allowlist fino esté implementado y activo. Si no lo está, el sistema rechaza la configuración al
-   iniciar el run con un error explícito — no se permite con una advertencia ignorable. Esta regla
-   es la mitigación real al hallazgo de exfiltración confirmado en la validación empírica.
+6. **Gate duro para Developer**: `authMode=cli_session` + rol Developer requiere que FEATURE-015
+   (egress con protección de exfiltración de credenciales) esté implementada y activa. Si no lo
+   está, el sistema rechaza la configuración al iniciar el run con un error explícito — no se
+   permite con una advertencia ignorable. Esta regla es la mitigación real al hallazgo de
+   exfiltración confirmado en la validación empírica.
 7. **Sin gate especial para Architect/Functional/Planning/QA**: estos roles no tienen Bash
    habilitado (QA tiene un único comando confinado, H1) — el riesgo de exfiltración por red no
    aplica igual que a Developer; pueden usar `cli_session` sin la dependencia de la Regla 6.
@@ -124,11 +127,11 @@ No aplica.
 
 - El contrato `Executor.runPhase()` (`src/contracts/executor.ts`) no cambia — confirmado en el
   análisis v1.0 y no revisado por la validación empírica.
-- Dependencia dura y explícita con el ítem Tentativo "Egress de red con allowlist fino
-  (Developer)" — recomiendo que el owner decida si promoverlo a 🟡 Confirmado como prerequisito de
-  esta Feature para Developer, o si esta Feature se entrega primero solo para
-  Architect/Functional/Planning/QA (Regla 7), dejando Developer explícitamente bloqueado hasta que
-  el allowlist exista.
+- Dependencia dura y explícita con FEATURE-015 ("Egress con protección de exfiltración de
+  credenciales, sin bloquear investigación (Developer)") — el owner ya decidió promoverla a 🟡
+  Confirmado como prerequisito explícito de la Regla 6 de esta Feature para Developer. Esta
+  Feature puede entregarse primero solo para Architect/Functional/Planning/QA (Regla 7), dejando
+  Developer explícitamente bloqueado hasta que FEATURE-015 esté resuelta e implementada.
 - Esta Feature invalida parcialmente una premisa de cierre de FEATURE-006 (ver Risks) — se dejó
   una nota de seguimiento en `FEATURE-006-implementation-results.md` señalando esto explícitamente,
   sin reabrir esa Feature (que sigue Closed).
