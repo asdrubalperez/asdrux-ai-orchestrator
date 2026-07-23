@@ -31,16 +31,34 @@
   `docs/features/FEATURE-014-implementation-results.md`
 
 **🟡 Confirmado**
-- FEATURE-015 — Wiring real del ciclo Roadmap de Releases (Architect) + Release Plan (Planning):
-  conectar el diseño ya escrito en el Runbook (`docs/runbook/02-ARCHITECTURE-TEMPLATE.md` sección
-  0, y `docs/runbook/09-RELEASE-PLAN-TEMPLATE.md`) con los roles reales del Orquestador
-  (`architect.txt`, `planning.txt`) y con la UI (placeholder `ReleasePlanPanel` ya reservado en
-  FEATURE-013). Promovido de Tentativo a Confirmado.
-- FEATURE-016 (antes FEATURE-015) — Modo de autenticación por cuenta personal (OAuth) para
+- FEATURE-015 — Egress con protección de exfiltración de credenciales, sin bloquear investigación
+  (Developer). Reemplaza al ítem ⚪ Tentativo anterior "Egress de red con allowlist fino
+  (Developer)". Verificado contra el código real (`src/executor/codexExecutor.ts`,
+  `spawnCodexInContainer`): hoy no existe ninguna restricción de red en el contenedor de
+  Developer — corre con la red default de Docker (`bridge`), egress sin restricción a cualquier
+  destino. La intención original de FEATURE-006 ("solo egress al proveedor de IA") nunca se
+  implementó así. Un allowlist de dominios simple resolvería la exfiltración pero rompería la
+  capacidad real y en uso de Developer de investigar libremente en internet (documentación,
+  foros, mejores prácticas) — el problema de diseño real es distinguir "acceso amplio de lectura
+  para investigación" de "impedir que un archivo específico y sensible (credenciales OAuth, ver
+  FEATURE-016) salga hacia cualquier destino", sin solución obvia todavía. Requiere su propia
+  sesión de Discovery antes de poder escribirse como diseño formal. Prerequisito explícito de la
+  Regla 6 de FEATURE-016 (gate duro para `authMode=cli_session` + Developer) — mientras este ítem
+  no esté resuelto, esa combinación queda rechazada en runtime.
+- FEATURE-016 — Modo de autenticación por cuenta personal (OAuth) para
   Executors, alternativo a API Key. Arranca con investigación empírica (ya realizada, ver
   `docs/research/investigacion-auth-cuenta-personal-executors.md` v1.1). Diseño formal en
-  `docs/features/FEATURE-016-auth-oauth-executors.md`.
-- FEATURE-017 (antes FEATURE-014) — Milestone 2 — Validación end-to-end con caso de negocio real
+  `docs/features/FEATURE-016-auth-oauth-executors.md`. Su Regla 6 depende ahora de FEATURE-015
+  (arriba) — el resto de la Feature (Architect/Functional/Planning/QA, Regla 7) no depende de
+  esto.
+- FEATURE-017 (antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases (Architect) +
+  Release Plan (Planning): conectar el diseño ya escrito en el Runbook
+  (`docs/runbook/02-ARCHITECTURE-TEMPLATE.md` sección 0, y
+  `docs/runbook/09-RELEASE-PLAN-TEMPLATE.md`) con los roles reales del Orquestador
+  (`architect.txt`, `planning.txt`) y con la UI (placeholder `ReleasePlanPanel` ya reservado en
+  FEATURE-013).
+- FEATURE-018 (antes FEATURE-017, antes FEATURE-014) — Milestone 2 — Validación end-to-end con
+  caso de negocio real
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
@@ -48,7 +66,6 @@
 - Approval Model por Release
 - Concurrencia de runs simultáneos
 - Limpieza automática de worktrees/branches vencidos
-- Egress de red con allowlist fino (Developer)
 - `PreToolUse` hooks como defensa en profundidad (QA)
 - Creación real de PR vía API de GitHub / merge automático
 - Deployment Strategy y separación dev/staging/prod
@@ -97,16 +114,27 @@ vigencia se determinan desde DB. Validado con 24/24 tests, build completo y fluj
 login, `run:status`, logout y rechazo de una copia restaurada del archivo después de revocar la
 fila. Ver `docs/features/FEATURE-014-implementation-results.md`.
 
-### 🟡 FEATURE-015 — Wiring real del ciclo Roadmap de Releases + Release Plan
-Promovido de ⚪ Tentativo a 🟡 Confirmado. El diseño ya existe en el Runbook
-(`docs/runbook/02-ARCHITECTURE-TEMPLATE.md` sección 0, y `docs/runbook/09-RELEASE-PLAN-TEMPLATE.md`)
-pero no está implementado en los roles reales del Orquestador (`src/executor/roles/architect.txt`,
-`planning.txt`) ni conectado a la UI. La UI ya reservó el espacio visual (placeholder
-`ReleasePlanPanel`, sin datos reales) en FEATURE-013. Distinto de "Approval Model por Release"
-(ese es sobre quién aprueba el avance de etapas; este es sobre qué contenido de planificación de
-releases se genera y muestra).
+### 🟡 FEATURE-015 — Egress con protección de exfiltración de credenciales, sin bloquear
+investigación (Developer)
+Reemplaza al ítem Tentativo anterior "Egress de red con allowlist fino (Developer)". Verificado
+contra el código real (`src/executor/codexExecutor.ts`, `spawnCodexInContainer`): hoy no existe
+ninguna restricción de red en el contenedor de Developer — corre con la red default de Docker
+(`bridge`), egress sin restricción a cualquier destino. La intención original de FEATURE-006
+("solo egress al proveedor de IA") nunca se implementó así.
 
-### 🟡 FEATURE-016 (antes FEATURE-015) — Modo de autenticación por cuenta personal (OAuth) para Executors
+Un allowlist de dominios simple resolvería la exfiltración pero rompería la capacidad real y
+actualmente en uso de Developer de investigar libremente en internet (documentación, foros,
+mejores prácticas) — el owner explícitamente no quiere sacrificar eso. El problema de diseño real
+es distinguir "acceso amplio de lectura para investigación" de "impedir que un archivo específico
+y sensible (credenciales OAuth, ver FEATURE-016) salga hacia cualquier destino" — sin solución
+obvia todavía, requiere su propia sesión de Discovery antes de poder escribirse como Feature
+formal.
+
+Prerequisito explícito de la Regla 6 de FEATURE-016 (gate duro para `authMode=cli_session` +
+Developer) — mientras este ítem no esté resuelto, esa combinación queda rechazada en runtime,
+aunque el resto de FEATURE-016 (Architect/Functional/Planning/QA, Regla 7) no depende de esto.
+
+### 🟡 FEATURE-016 — Modo de autenticación por cuenta personal (OAuth) para Executors
 La investigación empírica ya confirmó reuso headless entre procesos y portabilidad del archivo de
 credenciales desde un `HOME` alternativo. Ver
 `docs/research/investigacion-auth-cuenta-personal-executors.md` v1.1.
@@ -117,9 +145,18 @@ opciones ya existentes de `ClaudeCodeExecutor`/`CodexExecutor`, default `"api_ke
 nada del comportamiento actual. El contrato `Executor` (`src/contracts/executor.ts`) no cambia.
 
 El diseño formal queda en `docs/features/FEATURE-016-auth-oauth-executors.md`. Para Developer,
-`cli_session` queda condicionado por un gate duro: no puede habilitarse hasta que exista egress
-con allowlist fino. La Feature mantiene Approval Gate pendiente; no implementa `authMode`
-todavía.
+`cli_session` queda condicionado por un gate duro: no puede habilitarse hasta que se resuelva
+FEATURE-015 (egress con protección de exfiltración de credenciales, sin bloquear investigación).
+La Feature mantiene Approval Gate pendiente; no implementa `authMode` todavía.
+
+### 🟡 FEATURE-017 (antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases + Release Plan
+Promovido de ⚪ Tentativo a 🟡 Confirmado. El diseño ya existe en el Runbook
+(`docs/runbook/02-ARCHITECTURE-TEMPLATE.md` sección 0, y `docs/runbook/09-RELEASE-PLAN-TEMPLATE.md`)
+pero no está implementado en los roles reales del Orquestador (`src/executor/roles/architect.txt`,
+`planning.txt`) ni conectado a la UI. La UI ya reservó el espacio visual (placeholder
+`ReleasePlanPanel`, sin datos reales) en FEATURE-013. Distinto de "Approval Model por Release"
+(ese es sobre quién aprueba el avance de etapas; este es sobre qué contenido de planificación de
+releases se genera y muestra).
 
 ### ✅ Feature 09 — Runbook para el Orquestador AI automático
 Diseño completo y cerrado: 12 archivos en `docs/runbook/` (equivalente al `docs/playbook/` actual
@@ -207,9 +244,6 @@ concurrentes desde un proceso Node persistente no está validado.
 ### ⚪ Limpieza automática de worktrees/branches vencidos
 Política de retención a 21 días para runs escalados y no retomados — sin diseñar todavía.
 
-### ⚪ Egress de red con allowlist fino (Developer)
-Hoy el contenedor de Developer usa la red bridge default de Docker, sin allowlist fino de salida.
-
 ### ⚪ `PreToolUse` hooks como defensa en profundidad (QA)
 Prioridad muy baja, no descartado del todo. Dependen de una API específica de Claude Code — no
 portan a Codex.
@@ -251,6 +285,7 @@ primera opción porque, a esfuerzo comparable, una UI mínima de solo lectura da
 reusable hacia la Capa de UI completa. Queda como complemento futuro si hace falta alertas push
 (fase completada/fallida) fuera de cuando alguien está mirando la UI activamente.
 
-### 🟡 FEATURE-017 (antes FEATURE-014) — Milestone 2 — Validación end-to-end con caso de negocio real
+### 🟡 FEATURE-018 (antes FEATURE-017, antes FEATURE-014) — Milestone 2 — Validación end-to-end con
+caso de negocio real
 Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
 Confirmado y no Tentativo.
