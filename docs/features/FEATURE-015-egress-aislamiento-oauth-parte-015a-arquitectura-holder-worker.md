@@ -1,9 +1,10 @@
 # FEATURE-015A — Egress y aislamiento de credenciales OAuth — Parte 015A: Arquitectura holder/worker genérica
 
-Versión: v1.4 (borrador para revisión — no aprobado; historial: v1.0 diseño inicial; v1.1
+Versión: v1.5 (borrador para revisión — no aprobado; historial: v1.0 diseño inicial; v1.1
 resolución de los 8 bloqueantes de la primera evaluación; v1.2 ajustes posteriores; v1.3
 corrección de 5 inconsistencias documentales; v1.4 resolución técnica de los 6 bloqueantes
-encontrados en la auditoría integral de v1.3)
+encontrados en la auditoría integral de v1.3; v1.5 corrección de dos supuestos de `app-server`
+detectados por los spikes de Etapa 1)
 
 Basado en template: `docs/playbook/07-FEATURE-TEMPLATE.md` v2.1
 
@@ -148,8 +149,11 @@ migra todavía; ese wiring pertenece a FEATURE-015B. El mecanismo debe:
      el filesystem del holder.
 
 4. **Adaptador Codex y proxy bidireccional único**:
-   - El Orquestador inicia un hijo `codex app-server --listen stdio://
-     --analytics-default-enabled=false --strict-config`. No hay listener TCP/Unix.
+   - El Orquestador inicia un hijo
+     `codex app-server --listen stdio:// --strict-config`. No hay listener TCP/Unix. El flag
+     `--analytics-default-enabled` **se omite**: en las versiones 0.144.6/0.145.0 verificadas es
+     un switch que habilita el default, no acepta `=false`; analytics se fuerza a off mediante
+     `[analytics].enabled=false`.
    - Un único guard/proxy posee ambos pipes y el proceso hijo. No existe otra conexión a
      `app-server`.
    - **Cliente → servidor**: sólo requests `initialize`, `thread/start`, `turn/start`,
@@ -157,7 +161,9 @@ migra todavía; ese wiring pertenece a FEATURE-015B. El mecanismo debe:
      request `item/tool/call` pendiente originado por el servidor.
    - **Servidor → cliente**: sólo responses a IDs de requests pendientes del cliente; request
      `item/tool/call`; y notifications `thread/started`, `turn/started`, `item/started`,
-     `item/completed`, `item/agentMessage/delta`, `turn/completed`, `warning` y `error`.
+     `item/completed`, `item/agentMessage/delta`, `turn/completed`, `configWarning`, `warning` y
+     `error`. `configWarning` se agregó tras observarlo en el handshake real 0.144.6/0.145.0; sus
+     params se validan contra el schema de la tupla fijada y se redactan antes de loguear.
    - No se permite wildcard, prefijo ni “métodos equivalentes”. Cada nombre anterior se fija en
      el código y en contract tests contra el schema de la tupla Codex aprobada.
    - El proxy valida envelope, dirección, clase JSON-RPC, unicidad/correlación de IDs, tamaño
@@ -268,8 +274,10 @@ migra todavía; ese wiring pertenece a FEATURE-015B. El mecanismo debe:
      ```json
      {
        "schemaVersion": 1,
+       "platform": "linux/amd64",
        "npmPackage": "@openai/codex",
        "npmVersion": "<exacta aprobada>",
+       "npmIntegrity": "sha512-<integrity exacta del paquete>",
        "baseImage": "node:22-alpine",
        "baseImageDigest": "sha256:<64-hex>",
        "expectedCliVersion": "<salida exacta de codex --version>",
@@ -278,11 +286,12 @@ migra todavía; ese wiring pertenece a FEATURE-015B. El mecanismo debe:
      ```
 
    - `0.144.6` es sólo evidencia histórica/ilustrativa hasta que el owner apruebe la tupla; no es
-     el pin de v1.4.
-   - Dockerfile/CI leen el manifest: `FROM` usa `baseImage@baseImageDigest`; npm instala
-     `npmPackage@npmVersion`; dentro de la imagen se compara `npm ls -g --json` con
-     `npmVersion` y, por separado, la salida literal de `codex --version` con
-     `expectedCliVersion`. Nunca se comparan esas dos versiones entre sí.
+     un pin aprobado.
+   - Dockerfile/CI leen el manifest: el build exige `platform`; `FROM` usa
+     `baseImage@baseImageDigest`; npm instala `npmPackage@npmVersion` y verifica
+     `npmIntegrity`; dentro de la imagen se compara `npm ls -g --json` con `npmVersion` y, por
+     separado, la salida literal de `codex --version` con `expectedCliVersion`. Nunca se comparan
+     esas dos versiones entre sí.
    - La imagen genera los schemas de `app-server`. El tree hash se calcula sobre paths ordenados
      y el SHA-256 de cada archivo (`path + NUL + fileSha256 + LF`) y se compara con
      `appServerSchemaTreeSha256`.
@@ -370,7 +379,8 @@ migra todavía; ese wiring pertenece a FEATURE-015B. El mecanismo debe:
 # 6. Estrategia Algorítmica
 
 La lógica normativa está definida en Scope puntos 1, 4, 5, 6 y 7. No existen alternativas de
-lock, proxy, transporte o pinning pendientes de selección en v1.4.
+lock, proxy o transporte pendientes de selección en v1.5. El valor concreto del pin es la única
+decisión abierta y permanece en el ítem 8 del Approval Gate.
 
 ---
 
@@ -485,21 +495,38 @@ Implementación de producción prohibida hasta aprobación explícita del owner.
 
 ## Etapa 1 — Diseño y spikes sin credenciales reales
 
-1. ☐ Validar el schema de Scope punto 1 con suite positiva/negativa, byte limits, replay,
-   cancelación y todos los errores tipados.
-2. ☐ Spike Claude: comando/config/HOME limpios y adaptador MCP mínimo; comprobar allowlist
-   bidireccional sin login.
-3. ☐ Spike Codex: implementar exactamente el proxy de Scope punto 4 y contract tests contra los
-   schemas de la tupla aprobada.
-4. ☐ Verificar en runtime todas las superficies de Regla 4 para ambos CLIs; cualquier fuente o
-   método extra falla cerrado.
-5. ☐ Validar topología Docker, red interna exclusiva, mounts y ausencia de rutas worker→holder.
-6. ☐ Validar copia privada RW y promoción sintética condicionada por fencing, sin token real.
-7. ☐ Validar acquire/heartbeat/release/promoción de Scope punto 6 con concurrencia, reloj
-   controlado, zombie y caída de Postgres.
+1. ☑ Validar el schema de Scope punto 1 con suite positiva/negativa, byte limits, replay,
+   cancelación y todos los errores tipados. Evidencia:
+   `docs/features/evidence/FEATURE-015A/schema_protocol_raw.txt`.
+2. ☑ Spike Claude: comando/config/HOME limpios y adaptador MCP mínimo; comprobar allowlist
+   bidireccional sin login. Evidencia:
+   `docs/features/evidence/FEATURE-015A/runtime_cli_topology_raw.txt` y suite contractual del
+   ítem 1.
+3. ☑ Spike Codex: implementar exactamente el proxy de Scope punto 4 y contract tests contra los
+   schemas de la versión instalada. Evidencia:
+   `docs/features/evidence/FEATURE-015A/schema_protocol_raw.txt` y
+   `docs/features/evidence/FEATURE-015A/codex_schema_contract_raw.txt` y
+   `docs/features/evidence/FEATURE-015A/codex_app_server_smoke_raw.txt`. El spike originó las
+   dos correcciones v1.5 documentadas en Scope punto 4.
+4. ☑ Verificar en runtime todas las superficies de Regla 4 para ambos CLIs; cualquier fuente o
+   método extra falla cerrado. Evidencia:
+   `docs/features/evidence/FEATURE-015A/runtime_cli_topology_raw.txt`.
+5. ☑ Validar topología Docker, red interna exclusiva, mounts y ausencia de rutas
+   worker→control-plane del holder. Evidencia:
+   `docs/features/evidence/FEATURE-015A/runtime_cli_topology_raw.txt`.
+6. ☑ Validar copia privada RW y promoción sintética condicionada por fencing, sin token real.
+   Evidencia: `docs/features/evidence/FEATURE-015A/lock_cache_db_raw.txt`.
+7. ☑ Validar acquire/heartbeat/release/promoción de Scope punto 6 con concurrencia, reloj
+   controlado, zombie y caída de Postgres. Evidencia:
+   `docs/features/evidence/FEATURE-015A/lock_cache_db_raw.txt` y
+   `docs/features/evidence/FEATURE-015A/db_shutdown_raw.txt`.
 8. ☐ Obtener aprobación del owner para `docker/codex-pin.json`; validar por separado base,
-   paquete, binario, tree hash de schemas y digest final.
-9. ☐ Ejecutar pruebas fail-closed y de cleanup para holder, worker, canal, supervisor y DB.
+   paquete, binario, tree hash de schemas y digest final. Propuesta y evidencia:
+   `docs/features/FEATURE-015A-stage1-results.md`, sección 4.
+9. ☑ Ejecutar pruebas fail-closed y de cleanup para holder, worker, canal, supervisor y DB.
+   Evidencia: `docs/features/evidence/FEATURE-015A/schema_protocol_raw.txt`,
+   `docs/features/evidence/FEATURE-015A/supervisor_shutdown_raw.txt` y
+   `docs/features/evidence/FEATURE-015A/db_shutdown_raw.txt`.
 
 ## Etapa 2 — Validación con credenciales reales
 

@@ -762,3 +762,31 @@ la semántica de falla alrededor del rename. Permanece trabajo deliberadamente a
 Este dictamen no aprueba producción, Etapa 2 ni el uso de credenciales reales. Congela una base de
 diseño suficientemente concreta para que los spikes fallen o demuestren cada propiedad sin tener
 que elegir nuevamente protocolo, proxy, lock, fencing, egress o pinning durante la implementación.
+
+## Ejecución Etapa 1 — confirmación v1.5
+
+La Etapa 1 se ejecutó completa sin credenciales reales. El resultado detallado y los logs
+reproducibles están en
+`docs/features/FEATURE-015A-stage1-results.md` y
+`docs/features/evidence/FEATURE-015A/`.
+
+Estado final: **8 de 9 ítems cerrados**. Schema, Claude, Codex, superficies auxiliares, topología,
+copia/promoción sintética, lock/concurrencia y fail-closed quedaron ☑ con evidencia. El ítem 8
+permanece deliberadamente ☐: existe una tupla candidata completa para Codex 0.145.0, pero
+`docker/codex-pin.json` no se crea hasta recibir la aprobación explícita del owner.
+
+Los spikes detectaron y corrigieron dos supuestos de v1.4:
+
+1. `--analytics-default-enabled=false` no es sintaxis válida en Codex 0.144.6/0.145.0; v1.5 omite
+   el switch de activación y conserva `[analytics].enabled=false`.
+2. `app-server` emite `configWarning`; v1.5 lo agrega a la allowlist exacta. El spike valida sus
+   parámetros cerrados y rechaza campos adicionales.
+
+Después de incorporar esas correcciones, la suite de protocolo/schema pasó 11/11 tanto localmente
+como en la VPS. Los smokes reales de `app-server` pasaron en 0.144.6 y en la candidata 0.145.0.
+No apareció otro bloqueo de arquitectura ni fue necesario contradecir el diseño para completar
+los ocho ítems cerrados.
+
+**Dictamen:** v1.5 y la evidencia de Etapa 1 son consistentes. La Etapa 1 queda formalmente abierta
+únicamente por la decisión del owner sobre la tupla del ítem 8; esto no autoriza Etapa 2,
+producción ni uso de credenciales reales.

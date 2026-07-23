@@ -1,0 +1,22 @@
+=== CLI versions ===
+2.1.212 (Claude Code)
+codex-cli 0.144.6
+=== Claude holder inspect (no OAuth mount/env) ===
+ReadonlyRootfs=true NetworkMode=none Mounts=[{"Type":"bind","Source":"/tmp/feature015a-stage1","Destination":"/stage1","Mode":"ro","RW":false,"Propagation":"rprivate"}] Env=["ENABLE_CLAUDEAI_MCP_SERVERS=false","CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1","HOME=/tmp/holder-home","CLAUDE_CONFIG_DIR=/tmp/claude-config","CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1","DISABLE_TELEMETRY=1","DISABLE_ERROR_REPORTING=1","DISABLE_UPDATES=1","PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","NODE_VERSION=22.23.1","YARN_VERSION=1.22.22"]
+=== Claude pre-auth command ===
+Not logged in · Please run /login
+claude_pre_auth_exit=1
+=== Codex strict config startup and initialize ===
+ReadonlyRootfs=true NetworkMode=none Mounts=[{"Type":"bind","Source":"/tmp/feature015a-stage1/codex-home","Destination":"/codex-home","Mode":"","RW":true,"Propagation":"rprivate"},{"Type":"bind","Source":"/tmp/feature015a-stage1","Destination":"/stage1","Mode":"ro","RW":false,"Propagation":"rprivate"}] Env=["HOME=/tmp/holder-home","CODEX_HOME=/codex-home","PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","NODE_VERSION=22.23.1","YARN_VERSION=1.22.22"]
+[2m2026-07-23T15:30:27.440596Z[0m [31mERROR[0m [2mcodex_app_server[0m[2m:[0m Codex could not find bubblewrap on PATH. Install bubblewrap with your OS package manager. See the sandbox prerequisites: https://developers.openai.com/codex/concepts/sandboxing#prerequisites. Codex will use the bundled bubblewrap in the meantime.
+codex_initialize_timeout_exit=124
+=== Docker topology ===
+Internal=true Containers=2
+holder Networks={"feature015a-egress":{"IPAMConfig":null,"Links":null,"Aliases":null,"DriverOpts":null,"GwPriority":0,"NetworkID":"53fd1a37330bfa96146e845ed0e6f6638d9122ef037faa70e2ce25a9e28df467","EndpointID":"18be6cba292073884e50d19e03dec86752b1a9600d10477db5cacd2e8e6a00f2","Gateway":"172.18.0.1","IPAddress":"172.18.0.2","MacAddress":"56:4b:82:ff:2c:98","IPPrefixLen":16,"IPv6Gateway":"","GlobalIPv6Address":"","GlobalIPv6PrefixLen":0,"DNSNames":["feature015a-topology-holder","89b9f0f17a25"]},"feature015a-internal":{"IPAMConfig":{},"Links":null,"Aliases":[],"DriverOpts":{},"GwPriority":0,"NetworkID":"05c4cce509db9a5f2b37ab42ed285b3b02734b1236b57bd6cdf1f2a6550ab3b5","EndpointID":"29f6c3e0ded7ea14596af2c5fb95a258a95b163ca224b07ed4ecdab12ffcb75a","Gateway":"","IPAddress":"172.19.0.2","MacAddress":"ee:06:d4:6f:89:ad","IPPrefixLen":16,"IPv6Gateway":"","GlobalIPv6Address":"","GlobalIPv6PrefixLen":0,"DNSNames":["feature015a-topology-holder","89b9f0f17a25"]}} Mounts=[{"Type":"volume","Name":"feature015a-private-cache","Source":"/var/lib/docker/volumes/feature015a-private-cache/_data","Destination":"/private-cache","Driver":"local","Mode":"z","RW":true,"Propagation":""}]
+worker Networks={"feature015a-internal":{"IPAMConfig":null,"Links":null,"Aliases":null,"DriverOpts":null,"GwPriority":0,"NetworkID":"05c4cce509db9a5f2b37ab42ed285b3b02734b1236b57bd6cdf1f2a6550ab3b5","EndpointID":"d55153525376bb1edf14a58f35714458c423a50aba3e216d1287882ca09af12b","Gateway":"","IPAddress":"172.19.0.3","MacAddress":"4a:f0:45:87:ba:5e","IPPrefixLen":16,"IPv6Gateway":"","GlobalIPv6Address":"","GlobalIPv6PrefixLen":0,"DNSNames":["feature015a-topology-worker","e5da98336e97"]}} Mounts=[]
+holder_egress_probe=
+200
+worker_egress_exit=23 (expected nonzero)
+worker_holder_control_exit=24 (expected nonzero)
+worker_secret_search_exit=2 (expected nonzero)
+runtime_vps_status=passed
