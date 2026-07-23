@@ -1,0 +1,248 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asdrux.local/schemas/feature-015a-holder-worker-protocol-v1.json",
+  "title": "FEATURE-015A holder/worker protocol v1",
+  "description": "Canonical messages exchanged between a trusted endpoint and an untrusted worker. Transport framing limits are normative in the FEATURE-015A design.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/toolCallRequest"
+    },
+    {
+      "$ref": "#/$defs/cancelRequest"
+    },
+    {
+      "$ref": "#/$defs/toolResult"
+    },
+    {
+      "$ref": "#/$defs/toolError"
+    },
+    {
+      "$ref": "#/$defs/cancelAck"
+    }
+  ],
+  "$defs": {
+    "protocolVersion": {
+      "type": "string",
+      "const": "1",
+      "description": "Exact protocol major. There is no version negotiation."
+    },
+    "callId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "Canonical lowercase UUID v4."
+    },
+    "channelToken": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+      "description": "Canonical unpadded base64url encoding of exactly 32 bytes."
+    },
+    "jsonValue": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        }
+      ]
+    },
+    "args": {
+      "type": "object",
+      "maxProperties": 256,
+      "additionalProperties": {
+        "$ref": "#/$defs/jsonValue"
+      }
+    },
+    "errorBody": {
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "TIMEOUT",
+            "TOOL_NOT_FOUND",
+            "INVALID_ARGS",
+            "WORKER_UNAVAILABLE",
+            "PAYLOAD_TOO_LARGE",
+            "DUPLICATE_ID",
+            "UNAUTHORIZED",
+            "UNSUPPORTED_VERSION",
+            "MALFORMED_MESSAGE",
+            "TOO_MANY_CALLS",
+            "CANCELLED",
+            "INTERNAL_ERROR"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "details": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "toolCallRequest": {
+      "type": "object",
+      "required": [
+        "protocolVersion",
+        "messageType",
+        "callId",
+        "channelToken",
+        "toolName",
+        "args"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "$ref": "#/$defs/protocolVersion"
+        },
+        "messageType": {
+          "const": "tool_call"
+        },
+        "callId": {
+          "$ref": "#/$defs/callId"
+        },
+        "channelToken": {
+          "$ref": "#/$defs/channelToken"
+        },
+        "toolName": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
+        },
+        "args": {
+          "$ref": "#/$defs/args"
+        }
+      },
+      "additionalProperties": false
+    },
+    "cancelRequest": {
+      "type": "object",
+      "required": [
+        "protocolVersion",
+        "messageType",
+        "callId",
+        "channelToken"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "$ref": "#/$defs/protocolVersion"
+        },
+        "messageType": {
+          "const": "cancel"
+        },
+        "callId": {
+          "$ref": "#/$defs/callId"
+        },
+        "channelToken": {
+          "$ref": "#/$defs/channelToken"
+        }
+      },
+      "additionalProperties": false
+    },
+    "toolResult": {
+      "type": "object",
+      "required": [
+        "protocolVersion",
+        "messageType",
+        "callId",
+        "result"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "$ref": "#/$defs/protocolVersion"
+        },
+        "messageType": {
+          "const": "tool_result"
+        },
+        "callId": {
+          "$ref": "#/$defs/callId"
+        },
+        "result": {
+          "$ref": "#/$defs/jsonValue"
+        }
+      },
+      "additionalProperties": false
+    },
+    "toolError": {
+      "type": "object",
+      "required": [
+        "protocolVersion",
+        "messageType",
+        "callId",
+        "error"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "$ref": "#/$defs/protocolVersion"
+        },
+        "messageType": {
+          "const": "tool_error"
+        },
+        "callId": {
+          "$ref": "#/$defs/callId"
+        },
+        "error": {
+          "$ref": "#/$defs/errorBody"
+        }
+      },
+      "additionalProperties": false
+    },
+    "cancelAck": {
+      "type": "object",
+      "required": [
+        "protocolVersion",
+        "messageType",
+        "callId",
+        "status"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "$ref": "#/$defs/protocolVersion"
+        },
+        "messageType": {
+          "const": "cancel_ack"
+        },
+        "callId": {
+          "$ref": "#/$defs/callId"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "already_terminal",
+            "unknown_call"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

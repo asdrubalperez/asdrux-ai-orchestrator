@@ -634,3 +634,131 @@ Las cinco correcciones de esta ronda mejoran el documento y cuatro están plenam
 auditoría independiente encontró contradicciones restantes en protocolo, proxy, egress,
 fencing/pinning y una referencia de archivo rota. Debe publicarse una siguiente revisión
 documental que unifique esas definiciones antes de ejecutar los spikes de Etapa 1.
+
+## Confirmación v1.4 — corrección técnica y auditoría cruzada final
+
+Fecha: 2026-07-23
+
+### Alcance
+
+Codex reescribió la definición técnica de los seis bloqueantes de v1.3 y luego auditó la v1.4
+completa contra el documento, el schema separado, los paths del repo y las fuentes oficiales de
+configuración de Claude Code y Codex.
+
+No se implementó código de producción, no se ejecutaron los spikes del Approval Gate y no se
+usaron credenciales OAuth. “Lista para iniciar Etapa 1” significa que el contrato de diseño ya es
+consistente para construir los spikes; no significa que Etapa 1 esté aprobada.
+
+### Resolución de los seis bloqueantes
+
+1. **Schema wire real: resuelto.**
+   Se agregó
+   `docs/features/schemas/FEATURE-015A-holder-worker-protocol.schema.json`, Draft 2020-12,
+   parseable y con cinco envelopes cerrados y mutuamente excluyentes. Define UUID v4 lowercase,
+   base64url canónico de 32 bytes, versión exacta `"1"`, cancel/ack, `CANCELLED` y el conjunto
+   normativo de errores. Scope fija 10 MiB binarios por frame en cada dirección, 120.000 ms, 500
+   calls, replay y carrera de cancelación.
+
+   Durante esta misma auditoría se detectó y corrigió un error en el primer pattern propuesto para
+   `channelToken`: para 32 bytes el carácter base64url final puede ser uno de 16 valores
+   canónicos (`[AEIMQUYcgkosw048]`), no uno de 4. Se verificó el pattern contra 10.000 tokens
+   generados con `randomBytes(32).toString("base64url")`.
+
+   La contradicción de actores se eliminó con el término **endpoint confiable**: adaptador MCP
+   mínimo en Claude y controlador del Orquestador en Codex. Se eligió que el worker no sea un
+   servidor MCP. El adaptador Claude traduce MCP `stdio` al protocolo canónico, lo que permite
+   aplicar la misma autenticación, límites y cancelación y evita mensajes MCP server→client
+   originados por el worker.
+
+2. **Proxy Codex único: resuelto.**
+   Scope punto 4 es la definición autoritativa y Regla 2, Validation y Gate sólo la referencian.
+   Enumera por separado requests, notifications y responses en ambas direcciones; incluye
+   `turn/start` y `turn/interrupt`; correlaciona IDs en ambos sentidos; valida params cerrados; y
+   termina `app-server` ante cualquier mensaje no enumerado. La response a `item/tool/call` ya no
+   se describe como método.
+
+3. **Egress y superficies auxiliares: resuelto.**
+   Technical Considerations y Future ideas expresan la misma conclusión: el allowlist puede dar
+   defensa en profundidad/detección ante superficies omitidas, bugs o supply chain, pero no es
+   bloqueante del modelo de amenaza de prompt injection y tampoco evita exfiltración hacia un
+   destino permitido.
+
+   Regla 4 cubre ambos CLIs. Para Claude enumera, entre otros,
+   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_TELEMETRY`,
+   `DISABLE_ERROR_REPORTING`, `DISABLE_UPDATES`,
+   `ENABLE_CLAUDEAI_MCP_SERVERS=false` y el bloqueo de marketplace. Para Codex define
+   `CODEX_HOME` mínimo, update/search/apps/MCP/browser desactivados, analytics y los tres
+   exporters OTel en `none`, ausencia de overrides/provider helpers y `--strict-config`.
+   El rechazo de MCP elicitation/OAuth y de mensajes Codex inesperados vive en los proxies, no se
+   infiere de una URL.
+
+4. **Lock/fencing único: resuelto.**
+   Se eligió una secuencia Postgres global `bigint`, inicialmente 1, y un acquire UPSERT único con
+   `nextval()`. Heartbeat y release tienen predicates exactos sobre
+   `(credential_slot_id, run_id, fencing_token)`; release vence la fila y no la borra.
+
+   La decisión crítica es que el holder trabaja sobre una copia RW privada y nunca monta el slot
+   canónico. El Orquestador es el único que puede promoverla: prepara y hace fsync del temporal,
+   bloquea la fila con `SELECT ... FOR UPDATE`, verifica tripleta + lease, hace rename atómico y
+   libera antes de commit. Así un zombie con token viejo sólo puede modificar su volumen
+   desechable. El documento reconoce explícitamente que no existe atomicidad distribuida
+   filesystem/Postgres y define la recuperación si la falla ocurre después del rename. Ante error
+   de heartbeat o DB se aborta de inmediato, sin período de gracia ni promoción.
+
+5. **Pinning reproducible: resuelto como mecanismo de Gate.**
+   Scope punto 7 define `docker/codex-pin.json` como futuro artefacto autoritativo de Etapa 1 con
+   paquete/versión npm, base+digest, salida exacta de `codex --version` y tree hash de schemas.
+   Cada observado se compara de forma independiente con el manifest; package y binary no se
+   comparan entre sí. También fija un tree hash determinista y el registro del digest final.
+   `0.144.6` queda marcado sólo como evidencia ilustrativa. El manifest no se creó con placeholders
+   para evitar que un artefacto incompleto pudiera confundirse con una tupla aprobada: su creación
+   y aprobación por el owner es el ítem 8 de Etapa 1.
+
+6. **Referencia de investigación: resuelta.**
+   Se eligió la opción (a): copiar
+   `docs/research/investigacion-egress-proteccion-exfiltracion.md` desde
+   `origin/feature/015-egress-investigacion` a esta rama. El header documenta el origen y el path
+   ahora existe en el mismo árbol.
+
+### Auditoría independiente de consistencia
+
+Se revisaron de punta a punta Problem, Goal, Scope, Rules, Technical Considerations, Validation,
+Risks y Approval Gate.
+
+- **Versionado e historial:** el header dice v1.4 y describe una corrección documental de cinco
+  problemas en v1.3 y seis bloqueantes técnicos en v1.4. Ya no conserva el conteo ambiguo
+  “4 + 4”.
+- **Referencias numéricas:** Regla 2 es el contrato de endpoints/proxies; Regla 4 son superficies
+  auxiliares; Scope puntos 5/6 son caché y lock; Scope punto 7 es pinning. Todas las menciones de
+  esos números apuntan al contenido correcto. Los nueve ítems de Etapa 1 corresponden a schema,
+  Claude, Codex, config, topología, caché, lock, pin y fail-closed.
+- **Definiciones repetidas:** protocolo, proxy, lock y pinning tienen una sola definición
+  normativa en Scope. Rules, Validation y Gate remiten a ella sin introducir algoritmos
+  alternativos. La justificación de egress es sustancialmente idéntica en Future ideas y
+  Technical Considerations.
+- **Actores y transportes:** el endpoint confiable cubre los dos proveedores sin afirmar que el
+  holder Codex habla directamente con el worker. Claude usa MCP sólo entre CLI y adaptador local;
+  el worker recibe únicamente el protocolo canónico.
+- **Fencing:** no queda una escritura directa del holder sobre el slot canónico, que habría hecho
+  imposible aplicar fencing al refresh nativo. Acquire, heartbeat, promoción y release forman un
+  lifecycle único.
+- **Schemas:** el archivo JSON parsea correctamente; los envelopes requieren sus campos, cierran
+  propiedades adicionales y se discriminan por `messageType`. El límite de bytes queda en el
+  transporte porque JSON Schema no puede expresar el tamaño de la serialización UTF-8.
+- **Paths existentes verificados:** template v2.1, ROADMAP, investigación, evaluación, schema,
+  `src/auth/sessionCore.ts` y resultados FEATURE-012/014 existen. `docker/codex-pin.json` está
+  identificado expresamente como output futuro del Gate, no como insumo presente.
+- **Archivos fuera de alcance:** no se modificaron ROADMAP, FEATURE-016 ni el archivo histórico
+  016A.
+
+No se encontraron inconsistencias adicionales después de corregir el pattern base64url y precisar
+la semántica de falla alrededor del rename. Permanece trabajo deliberadamente abierto de
+**validación**, no de diseño: aprobar la tupla Codex y ejecutar los nueve ítems de Etapa 1.
+
+### Dictamen
+
+**v1.4 consistente y lista para iniciar los spikes de Etapa 1.**
+
+Este dictamen no aprueba producción, Etapa 2 ni el uso de credenciales reales. Congela una base de
+diseño suficientemente concreta para que los spikes fallen o demuestren cada propiedad sin tener
+que elegir nuevamente protocolo, proxy, lock, fencing, egress o pinning durante la implementación.
