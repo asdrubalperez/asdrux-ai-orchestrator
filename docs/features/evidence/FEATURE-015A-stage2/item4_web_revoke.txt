@@ -1,0 +1,4 @@
+account=asdrubalperez@gmail.com
+token_before=Claude Code connected 2026-07-23 15:21
+web_revoke_confirmed=true
+token_after=No Claude Code instances connected

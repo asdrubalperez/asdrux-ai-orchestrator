@@ -1,0 +1,3 @@
+{"label":"canonical-after-promotion","fileSha256":"1f3bf09888df22227acab80ff1db6794e847b0761afd11cc38a699846c0c4d39","accessToken":{"length":108,"sha256Prefix":"fa90e49d29c5c6c6"},"refreshToken":{"length":108,"sha256Prefix":"65f750c879a13432"},"expiresAt":1784864743031}
+{"label":"private-after-promotion","fileSha256":"1f3bf09888df22227acab80ff1db6794e847b0761afd11cc38a699846c0c4d39","accessToken":{"length":108,"sha256Prefix":"fa90e49d29c5c6c6"},"refreshToken":{"length":108,"sha256Prefix":"65f750c879a13432"},"expiresAt":1784864743031}
+1|f

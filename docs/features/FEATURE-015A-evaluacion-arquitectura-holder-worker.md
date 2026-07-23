@@ -789,3 +789,41 @@ los nueve ítems cerrados.
 
 **Dictamen:** v1.5 y la evidencia de Etapa 1 son consistentes. La Etapa 1 queda formalmente
 cerrada en 9/9 ítems. Esto no autoriza Etapa 2, producción ni uso de credenciales reales.
+
+## Ejecución Etapa 2 — confirmación v1.6
+
+La Etapa 2 se ejecutó con la cuenta Pro desechable autorizada y quedó cerrada en **5/5 ítems**.
+La sesión Santex no se montó ni se utilizó. Resultados completos:
+`docs/features/FEATURE-015A-stage2-results.md`.
+
+### Evidencia principal
+
+- Claude Code 2.1.212 presentó exactamente una tool MCP al modelo.
+- El turn real emitió `tool_use`/`tool_result`; el worker aislado confirmó la invocación y el
+  holder recibió `TOOL_OK`.
+- El refresh real rotó access/refresh únicamente en la copia privada; el canónico no cambió antes
+  de la promoción.
+- La promoción con fencing token vigente dejó canónico y privado byte a byte idénticos.
+- Access y refresh copiados funcionaron antes del logout.
+- Tras `claude auth logout`, ambos probes fallaron aun con `expiresAt` futuro.
+- Settings conservaba el registro de autorización; se revocó y luego mostró que no quedaban
+  instancias de Claude Code conectadas.
+- Directorio canónico, copia privada, contenedores, redes, DB y logs temporales fueron destruidos.
+- La sesión web desechable también se cerró.
+
+### Hallazgo de diseño
+
+La v1.5 indicaba `--tools ""`. El E2E demostró que en Claude Code 2.1.212 eso produce inventario
+vacío y MCP `pending`. v1.6 fija la combinación que sí pasó:
+
+- `--tools` y `--allowedTools` con la única tool MCP exacta;
+- `--strict-mcp-config`;
+- `enabledMcpjsonServers` con el único server;
+- `alwaysLoad: true`.
+
+No apareció otro bloqueo de arquitectura. La ausencia de una credencial OpenAI desechable impidió
+un turn Codex autenticado; no se reutilizó una sesión real. Los smokes y contract tests Codex no
+autenticados de Etapa 1 siguen vigentes.
+
+**Dictamen:** v1.6 y la evidencia de Etapa 2 son consistentes. Etapa 2 queda cerrada en 5/5. Esto
+no autoriza producción, Etapa 3 ni wiring de FEATURE-015B.

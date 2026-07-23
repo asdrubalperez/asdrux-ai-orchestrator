@@ -1,0 +1,7 @@
+canonical_dir_absent=true
+stage2_logs_absent=true
+containers_remaining=0
+private_volumes_remaining=0
+stage2_networks_remaining=0
+filesystem_matches_feature015a_etapa2=0
+web_session_logged_out=true

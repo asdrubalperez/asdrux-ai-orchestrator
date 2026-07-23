@@ -1,10 +1,11 @@
 # FEATURE-015A — Egress y aislamiento de credenciales OAuth — Parte 015A: Arquitectura holder/worker genérica
 
-Versión: v1.5 (borrador para revisión — no aprobado; historial: v1.0 diseño inicial; v1.1
+Versión: v1.6 (borrador para revisión — no aprobado; historial: v1.0 diseño inicial; v1.1
 resolución de los 8 bloqueantes de la primera evaluación; v1.2 ajustes posteriores; v1.3
 corrección de 5 inconsistencias documentales; v1.4 resolución técnica de los 6 bloqueantes
 encontrados en la auditoría integral de v1.3; v1.5 corrección de dos supuestos de `app-server`
-detectados por los spikes de Etapa 1)
+detectados por los spikes de Etapa 1; v1.6 corrección del registro/carga MCP de Claude observada
+en el E2E real de Etapa 2)
 
 Basado en template: `docs/playbook/07-FEATURE-TEMPLATE.md` v2.1
 
@@ -135,10 +136,15 @@ migra todavía; ese wiring pertenece a FEATURE-015B. El mecanismo debe:
      contenedores, red, memoria de replay, token y volúmenes privados.
 
 3. **Adaptador Claude Code**:
-   - Holder con `--tools ""`, `--mcp-config`, `--strict-mcp-config` y
-     `--no-session-persistence`; `--bare` no se usa porque deshabilita OAuth/keychain.
+   - Holder con `--tools mcp__<server>__<tool>`, `--allowedTools` con la misma lista exacta,
+     `--mcp-config`, `--strict-mcp-config` y `--no-session-persistence`; `--bare` no se usa porque
+     deshabilita OAuth/keychain. **No se usa `--tools ""`**: Claude Code 2.1.212 dejó el
+     inventario vacío y el MCP en estado `pending` durante el E2E real.
    - `--mcp-config` contiene un único servidor `stdio`: el adaptador confiable versionado de
-     FEATURE-015A. No apunta al worker directamente.
+     FEATURE-015A. No apunta al worker directamente. Ese servidor lleva `alwaysLoad: true` y el
+     settings efímero aprueba sólo su nombre mediante
+     `enabledMcpjsonServers=["<server>"]`; así el arranque espera conexión antes de construir el
+     prompt y no depende de aprobación interactiva.
    - El adaptador sólo implementa `initialize`, `notifications/initialized`, `tools/list`,
      `tools/call` y cancelación MCP. Rechaza resources, prompts, sampling, elicitation, OAuth y
      cualquier método o notification no enumerado. La cancelación MCP se convierte en
@@ -379,8 +385,8 @@ migra todavía; ese wiring pertenece a FEATURE-015B. El mecanismo debe:
 
 # 6. Estrategia Algorítmica
 
-La lógica normativa está definida en Scope puntos 1, 4, 5, 6 y 7. No existen alternativas de
-lock, proxy, transporte o pinning pendientes de selección en v1.5. La tupla Codex 0.145.0
+La lógica normativa está definida en Scope puntos 1, 3, 4, 5, 6 y 7. No existen alternativas de
+lock, proxy, transporte o pinning pendientes de selección en v1.6. La tupla Codex 0.145.0
 aprobada está materializada en `docker/codex-pin.json`.
 
 ---
@@ -485,8 +491,9 @@ La evidencia seguirá el formato de `FEATURE-012-implementation-results.md` y
 - La Feature protege OAuth, no secretos del worktree.
 - Un allowlist de egress podría detectar superficies omitidas, pero agrega mantenimiento y no
   previene tráfico encubierto a destinos permitidos.
-- `claude auth logout` intenta revocar el refresh token server-side en versiones inspeccionadas,
-  pero es best-effort; no debe considerarse mecanismo de cleanup suficiente para pruebas.
+- En el E2E con Claude Code 2.1.212, `claude auth logout` invalidó server-side las copias probadas
+  de access y refresh token. Sigue tratándose como best-effort: Settings y destrucción de todas
+  las copias continúan siendo obligatorios, y el resultado no se generaliza a futuras versiones.
 
 ---
 
@@ -539,12 +546,22 @@ reales.
 Requiere cuenta Pro personal desechable pagada para la prueba. Nunca se usa la sesión real
 `asdrubal.perez@santexgroup.com`.
 
-1. ☐ Login aislado de la cuenta desechable.
-2. ☐ Handshake y tool call end-to-end de Claude; inventario efectivo de tools en ambos
-   adaptadores.
-3. ☐ Refresh real sobre copia privada y promoción con fencing vigente.
-4. ☐ Pruebas controladas de copia/reuso/revocación, sin asumir que logout invalida todo token.
-5. ☐ Revocar por CLI y por Settings, documentar resultados y destruir todos los volúmenes.
+1. ☑ Login aislado de la cuenta desechable. Evidencia:
+   `docs/features/evidence/FEATURE-015A-stage2/item1_auth_status.json`.
+2. ☑ Handshake y tool call end-to-end de Claude; inventario efectivo de tools en ambos
+   adaptadores. Claude pasó con una única tool; Codex quedó limitado a su contrato no autenticado
+   de Etapa 1 porque no hubo credencial OpenAI desechable autorizada. Evidencia:
+   `docs/features/evidence/FEATURE-015A-stage2/item2_claude_e2e.txt`.
+3. ☑ Refresh real sobre copia privada y promoción con fencing vigente. Evidencia:
+   `docs/features/evidence/FEATURE-015A-stage2/item3_refresh.txt` y
+   `docs/features/evidence/FEATURE-015A-stage2/item3_promotion.txt`.
+4. ☑ Pruebas controladas de copia/reuso/revocación, sin asumir que logout invalida todo token.
+   Evidencia: `docs/features/FEATURE-015A-stage2-results.md`, sección 5.
+5. ☑ Revocar por CLI y por Settings, documentar resultados y destruir todos los volúmenes.
+   Evidencia: `docs/features/evidence/FEATURE-015A-stage2/item4_web_revoke.txt` y
+   `docs/features/evidence/FEATURE-015A-stage2/item5_cleanup_verification.txt`.
+
+**Etapa 2 cerrada: 5/5 ítems ☑.** Este cierre no autoriza producción ni Etapa 3.
 
 ## Etapa 3 — Aceptación
 

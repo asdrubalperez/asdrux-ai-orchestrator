@@ -10,6 +10,14 @@ Executors.
 - `claude-mcp-adapter.mjs`: servidor MCP `stdio` mínimo para el smoke pre-auth.
 - `codex-schema-contract.mjs`: comprueba la allowlist contra los schemas generados por la versión
   candidata de `app-server`.
+- `claude-mcp-worker-adapter.mjs` + `stage2-worker.mjs`: E2E real Claude MCP → worker aislado.
+- `stage2-claude-runner.mjs`: ejecuta probes baseline/access/refresh sin imprimir credenciales.
+- `stage2-credential-summary.mjs`: emite sólo hashes y metadata para comparar copias.
+- `stage2-fenced-promotion.ts`: promoción real condicionada por fencing Postgres.
+- `stage2-run-holder.sh`: holder efímero con redes y mounts cerrados.
+
+Los scripts `stage2-*` sólo se ejecutan con una cuenta desechable expresamente autorizada. Nunca
+deben apuntar a una sesión de trabajo real.
 
 Comandos:
 
