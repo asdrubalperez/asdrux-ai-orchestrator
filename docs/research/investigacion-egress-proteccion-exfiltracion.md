@@ -296,3 +296,229 @@ proxy DLP como defensa adicional y no como frontera única.
   restricciones de filesystem/red y límites de namespaces como control de acceso.
 - Suricata, [EVE JSON Output](https://docs.suricata.io/en/suricata-6.0.20/output/eve/eve-json-output.html):
   eventos DNS, TLS, HTTP, alertas y flows.
+
+---
+
+## Anexo — Factibilidad del patrón broker (Enfoque 2)
+
+Fecha de verificación: 2026-07-22
+
+### Pregunta y criterio
+
+Se investigó si el proceso que posee/refresca la sesión OAuth y llama al modelo puede quedar
+separado del proceso no confiable que ejecuta Bash y modifica el worktree. La condición de
+seguridad no es sólo que exista otro proceso: el credential holder tampoco debe ofrecer una
+herramienta integrada que ejecute comandos del modelo en su propio filesystem, y el worker no debe
+recibir el caché, tokens, variables de autenticación ni file descriptors que los contengan.
+
+La respuesta corta es distinta por proveedor:
+
+| CLI | Respuesta | Fragilidad | Conclusión operacional |
+|---|---|---|---|
+| Claude Code | **Sí, documentado** mediante herramientas MCP remotas y desactivación de herramientas integradas | Baja/media | El broker es viable conservando la CLI y OAuth de suscripción |
+| Codex | **Sí, pero experimental** mediante `codex app-server` + `dynamicTools` | Media/alta | Viable con versión fijada y tests de contrato; todavía no es una interfaz estable |
+
+No se encontró un flag llamado literalmente “inference-only server”. La separación se construye
+con los puntos de extensión oficiales de tools de cada CLI, sin usar hooks internos ni parsear
+texto libre del modelo.
+
+### Evidencia empírica acotada
+
+En la VPS se inspeccionaron las CLIs instaladas sin iniciar una conversación autenticada:
+
+- Claude Code `2.1.212`: `claude --help` expone `--tools`, `--mcp-config`,
+  `--strict-mcp-config`, `--disallowedTools` y modos JSON/streaming. El help confirma que
+  `--tools` controla el conjunto integrado y que una configuración MCP explícita puede cargarse
+  de forma aislada.
+- Codex CLI `0.144.5`: `codex app-server --help` expone el servidor y la generación de schemas.
+  El schema JSON generado por esa misma instalación contiene `DynamicToolSpec`,
+  `DynamicToolCallParams`, `DynamicToolCallResponse` y el request `item/tool/call`.
+
+El schema se generó en `/tmp/feature015-codex-schema` sólo como evidencia de interfaz. No se
+probaron tools contra el modelo ni se leyó/cargó ningún token OAuth. Por eso esta verificación
+demuestra disponibilidad del contrato en las versiones instaladas, no equivalencia funcional
+completa con el Developer actual.
+
+---
+
+### Claude Code CLI — sí, mediante MCP remoto
+
+#### Mecanismo documentado
+
+El credential holder puede ejecutar Claude Code con su caché OAuth dedicado y sin worktree, con:
+
+1. herramientas integradas deshabilitadas mediante `--tools ""`;
+2. sólo una configuración MCP explícita mediante `--mcp-config` + `--strict-mcp-config`;
+3. un MCP remoto HTTP que vive en el worker Developer y expone las operaciones necesarias de
+   shell/filesystem;
+4. modo no interactivo/streaming para integrar el ciclo con el Orquestador.
+
+La referencia oficial de la CLI dice expresamente que `--tools` restringe las herramientas
+integradas, acepta `""` para deshabilitarlas todas y **no afecta las herramientas MCP**. La
+documentación MCP recomienda HTTP para servidores remotos y confirma que Claude Code invoca las
+tools publicadas por ese servidor. Por lo tanto, el proceso Claude Code conserva autenticación e
+inferencia, mientras la implementación real de Bash/Read/Write/Edit puede vivir en otro proceso o
+contenedor que nunca monta el caché OAuth.
+
+Esto requiere reemplazar las tools integradas por equivalentes MCP, no reemplazar Claude Code ni
+su llamada autenticada al modelo. El holder debe ejecutarse en un filesystem mínimo, sin el
+worktree, y su red sólo necesita alcanzar Anthropic y el endpoint privado del worker. El worker
+conserva el acceso amplio a internet requerido para investigación.
+
+`--allowedTools` no alcanza para este límite: esa opción controla qué tools ejecutan sin pedir
+permiso, no cuáles existen. La opción relevante es `--tools ""`, complementada por una lista MCP
+explícita. Tampoco conviene `--bare` para este caso: en la versión inspeccionada deshabilita OAuth
+y keychain, contradiciendo el objetivo de FEATURE-016.
+
+#### Garantía y límites
+
+Una prompt injection puede lograr que el modelo solicite comandos maliciosos al MCP worker, pero
+el worker no posee la credencial y por eso no puede copiarla. El holder no debe exponer Bash,
+Read/Edit ni un MCP local con acceso a su home. El contenido devuelto por el worker sigue siendo
+no confiable y puede manipular decisiones posteriores del modelo, pero no crea por sí mismo una
+ruta de lectura al archivo OAuth.
+
+La equivalencia funcional queda pendiente: hay que definir schemas MCP que preserven cwd,
+streaming, cancelación, límites de output, patches y códigos de salida del Developer actual. Eso es
+trabajo de diseño/validación posterior, no una duda sobre la posibilidad de separar procesos.
+
+#### Fragilidad
+
+**Baja/media.** MCP remoto, `--tools`, `--mcp-config` y `--strict-mcp-config` están documentados
+públicamente. No dependen de una variable privada ni de interpretar el JSON interno de una versión
+concreta. La fragilidad restante está en reproducir con fidelidad la experiencia de las tools
+integradas y en cambios normales de compatibilidad/versionado de Claude Code/MCP; se mitiga fijando
+versión durante la implementación y validando el inventario efectivo de tools al arrancar.
+
+#### Refresh OAuth
+
+Lo realiza el holder. La documentación de errores de Claude Code describe refresh automático y el
+changelog oficial registra que las sesiones OAuth de la CLI refrescan reactivamente ante un `401`.
+Si el token vence mientras el worker ejecuta una tool larga, no hay una llamada al proveedor que
+refrescar durante ese intervalo: al devolver el `tool_result`, la siguiente llamada del holder al
+modelo puede refrescar y continuar. El worker no participa ni necesita bloquearse por el mecanismo
+de refresh, salvo por el tiempo normal de espera del turno.
+
+El caché del holder debe ser escribible sólo por él para persistir la rotación. Múltiples holders
+no deberían compartir copias independientes del mismo refresh token; esa topología queda fuera de
+esta prueba y requiere validación de concurrencia.
+
+#### Alternativa por fuera de la CLI
+
+La Messages API de Anthropic soporta de forma estable tools ejecutadas por el cliente: el modelo
+devuelve bloques `tool_use`, la aplicación ejecuta la operación y responde con `tool_result`. Eso
+permite la misma separación estructural mediante integración directa. Sin embargo, esa API usa la
+autenticación de Claude Platform/cloud provider; no se encontró documentación que permita tratar
+el OAuth personal cacheado por Claude Code como credencial pública para Messages API. Por tanto,
+esta alternativa cambiaría el supuesto de autenticación/costos de FEATURE-016 y no es necesaria
+para demostrar viabilidad con Claude Code.
+
+Fuentes:
+
+- Anthropic, [Claude Code CLI reference](https://code.claude.com/docs/en/cli-usage).
+- Anthropic, [Connect Claude Code to tools via MCP](https://code.claude.com/docs/en/mcp).
+- Anthropic, [How tool use works](https://platform.claude.com/docs/en/agents-and-tools/tool-use/how-tool-use-works).
+- Anthropic, [Authentication](https://code.claude.com/docs/en/iam).
+- Anthropic, [Error reference](https://code.claude.com/docs/en/errors).
+- Anthropic, [Claude Code changelog](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md).
+
+---
+
+### Codex CLI — sí, pero mediante una API experimental
+
+#### Mecanismo documentado
+
+`codex app-server` separa el runtime Codex de un cliente mediante JSON-RPC. Su API oficial abierta
+ofrece `dynamicTools` en `thread/start`: cuando el modelo llama una de ellas, app-server envía un
+request `item/tool/call` al cliente y espera una respuesta con los resultados. Esto permite que:
+
+1. el app-server holder posea el login ChatGPT/OAuth y haga las llamadas upstream;
+2. el cliente/worker reciba únicamente nombre, argumentos e identificadores de la tool;
+3. Bash y las operaciones del worktree se ejecuten en el worker, que no posee `auth.json`;
+4. el resultado vuelva al holder para continuar el turno.
+
+El app-server holder debe correr sin montar el worktree, con sandbox read-only y sin shell
+integrado (`features.shell_tool=false`, mecanismo ya usado por este repo para QA). Las operaciones
+Developer se registran como dynamic tools; no se debe usar `command/exec`, `process/spawn` ni la
+ejecución integrada del app-server, porque esas rutas correrían comandos donde vive el holder y
+romperían el límite de confianza.
+
+La interfaz no exige WebSocket: puede usarse el transporte stdio o Unix socket. Esto evita sumar
+la fragilidad del WebSocket, que también está marcado experimental. El cliente del Orquestador
+actúa como relay hacia el worker aislado.
+
+#### Garantía y límites
+
+El proceso que ejecuta los comandos sólo ve los argumentos de `item/tool/call` y devuelve
+`contentItems`; el schema no incluye credenciales upstream. El holder sigue siendo responsable de
+no interpolar tokens en prompts, errores o respuestas. Un filesystem mínimo y la ausencia de tools
+integradas ejecutables son controles obligatorios: app-server, por sí solo, también soporta
+ejecución local y no constituye aislamiento automáticamente.
+
+El contrato dinámico admite tools genéricas, por lo que en principio puede representar shell,
+lectura, edición y patches. No se validó todavía paridad de streaming binario, cancelación,
+aprobaciones, output grande ni reproducción exacta de las tools entrenadas de Codex. En especial,
+reemplazar tools integradas por schemas propios puede afectar calidad/comportamiento aun cuando el
+transporte funcione.
+
+#### Fragilidad
+
+**Media/alta.** El repositorio oficial documenta `dynamicTools`, pero lo marca explícitamente
+**experimental** y exige `experimentalApi: true`. Los schemas se generan por versión y la propia
+documentación señala que corresponden exactamente al binario que los generó. No es un hack ni un
+flag interno: existe en el código abierto, en la documentación oficial y en Codex `0.144.5` de la
+VPS. Aun así, nombres, payloads o lifecycle pueden cambiar entre upgrades sin la garantía de una
+API estable.
+
+Una implementación podría reducir fragilidad fijando versión, generando bindings desde el mismo
+binario y ejecutando contract tests antes de cada upgrade. Eso la hace operable, pero no convierte
+el protocolo en estable. Si el owner exige una interfaz no experimental como condición previa, la
+vía CLI de Codex todavía no satisface ese umbral.
+
+#### Refresh OAuth
+
+Lo realiza el app-server holder. Su documentación de autenticación indica que el modo ChatGPT
+managed posee el flujo OAuth y los refresh tokens, los persiste y los refresca automáticamente;
+`account/read` permite además solicitar refresh explícito. El worker no ve ni rota el token.
+
+Para una tool larga aplica el mismo desacople temporal: mientras app-server espera el
+`item/tool/call`, el worker puede continuar; al reanudarse el turno, el holder autentica la próxima
+llamada upstream. Debe existir un único dueño del caché o coordinación explícita; copiar `auth.json`
+a varios holders reintroduciría carreras/rotación y ampliaría el secreto, contrario al patrón.
+
+#### Alternativa por fuera de la CLI
+
+La Responses API ofrece function calling estable: el modelo devuelve items `function_call`, la
+aplicación ejecuta la función donde decida y responde con `function_call_output`. Esto separa de
+forma limpia inferencia y tools sin depender de `dynamicTools`. Sin embargo, la API pública se
+autentica como plataforma; no hay documentación oficial para reutilizar el OAuth personal de
+Codex/ChatGPT como credencial de Responses API. Reemplazar la CLI por Responses API implicaría
+volver a API key/facturación de plataforma y es un cambio explícito de alcance, no una sustitución
+transparente.
+
+Fuentes:
+
+- OpenAI, [Codex app-server README y protocolo](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md).
+- OpenAI, [Codex app-server source](https://github.com/openai/codex/tree/main/codex-rs/app-server).
+- OpenAI, [Function calling en Responses API](https://developers.openai.com/api/docs/guides/function-calling).
+
+---
+
+### Conclusión de factibilidad
+
+El Enfoque 2 **sigue siendo viable, pero debe ajustarse a dos adaptadores específicos**:
+
+- Claude Code: holder OAuth + CLI sin tools integradas + worker MCP remoto. Es una base
+  documentada y razonablemente estable; no requiere reemplazar la CLI.
+- Codex: holder OAuth en app-server + dynamic tools ejecutadas por el worker. Es técnicamente
+  viable en la versión real instalada, pero depende de una API experimental y necesita version pin
+  + contract tests.
+
+Por lo tanto, no corresponde concluir que ambas CLIs deban reemplazarse por APIs directas. La
+integración directa es un fallback claro para Codex si el owner rechaza depender de una interfaz
+experimental; en ese caso también debe aceptar que la autenticación pasaría a credenciales y
+facturación de plataforma, porque no se encontró una vía pública soportada para usar el OAuth
+personal de Codex contra Responses API.
+
+Esta conclusión sólo resuelve factibilidad. No define el protocolo del broker, los schemas de
+tools, la topología Docker ni los criterios de aprobación de FEATURE-015.
