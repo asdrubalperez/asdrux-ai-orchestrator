@@ -196,13 +196,43 @@ Resultado: **validación real completa**.
 - el holder y el worker se iniciaron separados; el worker reportó las tres tools y ningún secreto;
 - no hubo fallback a `codex exec`, shell nativo ni otro catálogo.
 
-El turn autenticado no pudo completarse: la `CODEX_API_KEY` configurada actualmente en
-`/home/asdru/ai-orchestrator/.env.local` recibió `401 Unauthorized` de
-`wss://api.openai.com/v1/responses`. El runtime falló cerrado y no ejecutó una tool.
+La investigación posterior aisló primero la credencial fuera del runtime:
 
-Por tanto, el inventario Codex está validado contractualmente y aceptado por `thread/start`, pero
-la llamada efectiva desde el modelo queda **pendiente de repetir con una API key válida**. No se
-usó OAuth ni se sustituyó la credencial.
+```text
+GET https://api.openai.com/v1/models
+Authorization: Bearer <CODEX_API_KEY>
+HTTP 200
+modelCount=123
+```
+
+La misma key, dentro de la imagen fijada `feature015a-codex-pin-candidate:0.145.0`, produjo
+`OK` con `CODEX_API_KEY`. Como control, pasarla solo como `OPENAI_API_KEY` reprodujo el
+`401 Unauthorized`. Esto descartó expiración, Docker, red e imagen.
+
+La causa era específica del protocolo app-server: a diferencia de `codex exec`, no consume la
+API key del entorno automáticamente para el thread. Requiere, después de `initialize` y antes de
+`thread/start`, el request `account/login/start` con `{type:"apiKey", apiKey}`. El holder
+ahora realiza ese paso con la credencial solo en memoria; no la agrega a argv, filesystem, eventos
+ni worker.
+
+Reintento E2E real en VPS:
+
+```text
+status=completed
+summary=QA isolated smoke ok
+outputArtifact=package leído mediante fs_read
+escalationReason=null
+```
+
+Evidencia efectiva del flujo:
+
+```json
+{"provider":"codex","tools":["fs_read","fs_search","fs_glob"],"nativeTools":[]}
+{"provider":"codex","tool":"fs_read"}
+```
+
+El prompt contenía la misma inyección adversarial de Bash/red/env. No hubo shell, red, escritura,
+lectura de credenciales ni fallback. El único despacho fue `fs_read` al worker aislado.
 
 ## 7. Ajustes surgidos
 
@@ -216,12 +246,14 @@ Correcciones de implementación:
 3. El glob de `npm test` debía citarse para incluir tests anidados también en Bash/VPS.
 4. El worker QA usa `--network none`; holder y control plane se comunican mediante Unix socket
    efímero autenticado, sin puerto TCP.
+5. El app-server Codex requiere `account/login/start` explícito para API key antes de
+   `thread/start`; la mera presencia de `CODEX_API_KEY` solo era suficiente para `codex exec`.
 
 ## 8. Dictamen
 
-El wiring QA y la validación Claude quedan completos. Codex está implementado, compila, pasa
-contract tests y llega a `thread/start`, pero su E2E autenticado permanece abierto exclusivamente
-por la credencial 401 de la VPS. Parte 2 no debe declararse validada al 100% hasta repetir ese
-smoke con una `CODEX_API_KEY` válida.
+El wiring QA y la validación real quedan completos para Claude Code y Codex. Ambos proveedores
+exponen exactamente `fs_read`, `fs_search` y `fs_glob`, sin tools nativas; Codex confirmó
+además un despacho efectivo de `fs_read` y resultado funcional `completed`.
 
-No se autoriza merge a `main` ni inicio de Parte 3 por este documento.
+Parte 2 queda validada al 100%. Este documento no autoriza por sí mismo merge a `main` ni inicio
+de Parte 3; esas acciones siguen sujetas al workflow y al handoff correspondiente.

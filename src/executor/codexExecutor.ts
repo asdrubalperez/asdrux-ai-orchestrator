@@ -240,15 +240,18 @@ export class CodexExecutor implements Executor {
         clientInfo: { name: "asdrux-qa-holder", title: "Asdrux QA Holder", version: "1.0.0" },
         capabilities: { experimentalApi: true },
       });
+      let loginRequestId = 0;
       let threadRequestId = 0;
       let turnRequestId = 0;
+      let timeout: NodeJS.Timeout | undefined;
       const fail = (error: Error) => {
         if (settled) return;
         settled = true;
+        if (timeout) clearTimeout(timeout);
         child.kill();
         reject(error);
       };
-      const timeout = setTimeout(() => fail(new Error("Codex QA app-server timeout")), options.timeoutMs ?? 300_000);
+      timeout = setTimeout(() => fail(new Error("Codex QA app-server timeout")), options.timeoutMs ?? 300_000);
       options.signal?.addEventListener("abort", () => fail(new Error("Codex QA app-server aborted")), { once: true });
       lines.on("line", async (line) => {
         let message: any;
@@ -257,6 +260,14 @@ export class CodexExecutor implements Executor {
         if (message.id === initializeId) {
           if (message.error) { fail(new Error(JSON.stringify(message.error))); return; }
           child.stdin.write(JSON.stringify({ method: "initialized", params: {} }) + "\n");
+          loginRequestId = send("account/login/start", {
+            type: "apiKey",
+            apiKey: env.CODEX_API_KEY,
+          });
+          return;
+        }
+        if (message.id === loginRequestId) {
+          if (message.error) { fail(new Error(JSON.stringify(message.error))); return; }
           threadRequestId = send("thread/start", {
             cwd: "/holder-empty", sandbox: "read-only", ephemeral: true, environments: [],
             model: this.options.model,
@@ -296,6 +307,10 @@ export class CodexExecutor implements Executor {
             return;
           }
           try {
+            options.onEvent?.({
+              type: "qa_isolated_tool_call",
+              data: { provider: "codex", tool: params.tool },
+            });
             const result = await callQaWorker(
               worker,
               params.tool,
@@ -333,7 +348,13 @@ export class CodexExecutor implements Executor {
         }
       });
       child.stderr.on("data", (chunk) => options.onEvent?.({
-        type: "qa_holder_stderr", data: { provider: "codex", text: String(chunk).slice(0, 500) },
+        type: "qa_holder_stderr",
+        data: {
+          provider: "codex",
+          text: String(chunk)
+            .slice(0, 500)
+            .replaceAll(env.CODEX_API_KEY ?? "", env.CODEX_API_KEY ? "[REDACTED]" : ""),
+        },
       }));
       child.once("error", fail);
       child.once("exit", (code) => {
