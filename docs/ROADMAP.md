@@ -29,32 +29,17 @@
 - FEATURE-014 — Autenticación unificada CLI + Web: tabla `sessions`, hash SHA-256 y revocación
   server-side compartidos, TTL único de 48 horas y validación real en VPS; resultados en
   `docs/features/FEATURE-014-implementation-results.md`
-- FEATURE-015A — Arquitectura holder/worker genérica: Approval Gate completo (Etapas 1, 2 y 3),
-  aceptada con tests, evidencia real y revisión conjunta Architect + owner. Diseño y resultados en
-  `docs/features/FEATURE-015-egress-aislamiento-oauth-parte-015a-arquitectura-holder-worker.md`.
+- FEATURE-015 — Egress y aislamiento de credenciales OAuth: 015A y 015B ✅ Ejecutadas,
+  aceptadas con tests, evidencia real en VPS y revisión conjunta Architect + owner. Las 10
+  combinaciones rol/proveedor usan catálogos cerrados sin tools nativas. Diseños y resultados en
+  `docs/features/FEATURE-015-egress-aislamiento-oauth-parte-015a-arquitectura-holder-worker.md` y
+  `docs/features/FEATURE-015B-Wiring-real-por-rol-y-por-proveedor.md`.
 
 **🟡 Confirmado**
-- FEATURE-015 — estado global pendiente porque 015B continúa 🟡 Confirmada; 015A ya está
-  ✅ Ejecutada. Egress y aislamiento de credenciales OAuth, sin bloquear investigación. Ya no es
-  específica de Developer (corrección respecto a la formulación anterior): el canal de fuga por
-  lectura (`Read`/`Grep`/`Glob` devolviendo el secreto en la respuesta del modelo, vía prompt
-  injection) aplica a cualquier rol con `cli_session`, con o sin Bash. Desdoblada en dos partes
-  **secuenciales** (015B depende de 015A — a diferencia del intento fallido de separar FEATURE-016
-  en partes independientes, ver abajo): **015A** — arquitectura holder/worker genérica (protocolo
-  holder↔worker, adaptador Claude Code vía MCP remoto, adaptador Codex vía `dynamicTools`),
-  validada con spikes acotados, sin habilitar ningún rol real todavía. **015B** — wiring real por
-  rol y por proveedor sobre la base de 015A: Architect/Functional/Planning con worker de internet
-  amplio (agregando esa capacidad en Claude Code, hoy inexistente — `resolveTools()` no les da
-  ningún tool de red; y re-cableando el Bash que Codex ya tiene hoy para estos roles —
-  `shouldDisableShellTool` solo excluye a QA — hacia el worker protegido); QA con worker de
-  internet mínimo/nulo; Developer con worker de internet amplio + Bash. Las 5 combinaciones de rol
-  (Architect, Functional, Planning, QA, Developer) aplican a los dos proveedores (Claude Code y
-  Codex) por igual, sin distinción. Prerequisito explícito de FEATURE-016 completo (ver abajo, ya
-  no desdoblada).
 - FEATURE-016 — Modo de autenticación por cuenta personal (OAuth) para Executors, alternativo a
-  API Key. **Se revierte el desdoblamiento 016A/016B**: no existía tal independencia — toda la
-  Feature depende de FEATURE-015 completa (015A+015B), sin partes que puedan implementarse antes.
-  Investigación empírica ya realizada, ver
+  API Key. **Se revierte el desdoblamiento 016A/016B**: no existía tal independencia. Su
+  prerequisito FEATURE-015 completa (015A+015B) ya está satisfecho; FEATURE-016 permanece
+  confirmada y pendiente de su propia revisión/Approval Gate. Investigación empírica ya realizada, ver
   `docs/research/investigacion-auth-cuenta-personal-executors.md` v1.1. Diseño formal en
   `docs/features/FEATURE-016-auth-oauth-executors.md` (el desdoblamiento 016A/016B fue revertido;
   este archivo sigue vigente como diseño único, pendiente de revisión con el nuevo alcance de
@@ -122,9 +107,9 @@ vigencia se determinan desde DB. Validado con 24/24 tests, build completo y fluj
 login, `run:status`, logout y rechazo de una copia restaurada del archivo después de revocar la
 fila. Ver `docs/features/FEATURE-014-implementation-results.md`.
 
-### 🟡 FEATURE-015 — Egress y aislamiento de credenciales OAuth
+### ✅ FEATURE-015 — Egress y aislamiento de credenciales OAuth
 
-Estado: 015A ✅ Ejecutada; 015B 🟡 Confirmada.
+Estado: 015A ✅ Ejecutada; 015B ✅ Ejecutada. FEATURE-015 completa y aceptada; el prerequisito de FEATURE-016 está satisfecho.
 
 Reemplaza al ítem Tentativo anterior "Egress de red con allowlist fino (Developer)". Ya no está
 acotada a Developer — corrección respecto a la formulación original.
@@ -136,12 +121,10 @@ injection, a leer el caché de credenciales OAuth y devolverlo dentro de su prop
 texto al proveedor — sin que haya tráfico de red de por medio. Este canal aplica a los 5 roles
 (Architect, Functional, Planning, QA, Developer) por igual, con o sin Bash.
 
-**Asimetría real verificada entre proveedores** (no era una decisión de diseño documentada, es una
-discrepancia real del código): en `src/executor/codexExecutor.ts`, `shouldDisableShellTool` solo
-devuelve `true` para `agentRole === "qa"` — Architect, Functional y Planning tienen Bash habilitado
-hoy en Codex. En `src/executor/claudeCodeExecutor.ts`, `resolveTools()` no les da Bash a esos
-mismos roles, y tampoco ningún tool de red (`WebFetch`/`WebSearch`) — hoy no pueden investigar en
-internet en absoluto bajo Claude Code.
+**Asimetría histórica corregida entre proveedores**: antes de 015B, Codex mantenía
+`shell_tool` para Architect/Functional/Planning y Claude Code carecía de tools de red para esos
+roles. 015B eliminó ambas discrepancias: todos los roles usan el runtime aislado y ningún
+proveedor conserva tools nativas ejecutables.
 
 **Requisito funcional confirmado por el owner**: Architect, Functional y Planning deben poder
 investigar en internet como parte de su rol — en los dos proveedores por igual, protegido (vía
@@ -155,17 +138,15 @@ de desdoblar FEATURE-016 en partes independientes — ver abajo):
   adaptador Codex (holder vía `codex app-server` + `dynamicTools`, sin
   `command/exec`/`process/spawn`). Validada con spikes acotados, sin credenciales reales. No
   habilita ningún rol real todavía — es la base de la que depende 015B.
-- **🟡 015B — Wiring real por rol y por proveedor — Confirmada, pendiente**: sobre la base de 015A,
-  las 5 combinaciones de rol × 2 proveedores. Architect/Functional/Planning con worker de internet
-  amplio sin allowlist
-  (agregando esa capacidad en Claude Code, hoy inexistente; re-cableando hacia el worker protegido
-  el Bash que Codex ya tiene hoy para estos roles). QA con worker de internet mínimo/nulo — su rol
-  es leer el artefacto y los casos de prueba, no investigar. Developer con worker de internet
-  amplio + Bash — ya cubierto por el diseño previo de esta Feature. Las 5 combinaciones aplican a
-  Claude Code y Codex por igual, sin distinción de proveedor.
+- **✅ 015B — Wiring real por rol y por proveedor — Ejecutada**: las 5 combinaciones de rol
+  × 2 proveedores usan el catálogo cerrado aprobado. Architect/Functional/Planning disponen de
+  `fs_read`, `fs_search`, `fs_glob`, `web_search` y `web_fetch`; QA conserva solo las tres
+  tools de lectura; Developer agrega `fs_write`, `fs_edit` y `command_exec`. Validada con 55/55
+  tests en VPS, ocho smokes reales con Tavily y pipelines completos Claude/Codex. Ver
+  `docs/features/FEATURE-015B-part1-results.md`, `part2-results.md` y `part3-results.md`.
 
-Prerequisito explícito de FEATURE-016 completo — ya no hay ninguna parte de esa Feature que pueda
-implementarse sin depender de esta.
+Prerequisito de FEATURE-016 completo: satisfecho. El bloqueo por dependencia de FEATURE-015 queda
+levantado; FEATURE-016 no inicia automáticamente y conserva su propio diseño/Approval Gate pendiente.
 
 ### 🟡 FEATURE-016 — Modo de autenticación por cuenta personal (OAuth) para Executors
 **Se revierte el desdoblamiento anterior en 016A/016B**: asumía que Architect/Functional/Planning/
@@ -187,9 +168,8 @@ El diseño formal queda en `docs/features/FEATURE-016-auth-oauth-executors.md` (
 diseño de 016A generado en una sesión anterior, evaluado y no aprobado, queda como referencia
 histórica de un alcance descartado — ver
 `docs/features/FEATURE-016-auth-oauth-executors-parte-016a-infraestructura-roles-sin-bash.md`, no
-se elimina, pero no representa el alcance vigente). `cli_session` para cualquier rol queda
-condicionado a que FEATURE-015 (015A+015B) esté implementada y validada. La Feature mantiene
-Approval Gate pendiente; no implementa `authMode` todavía.
+se elimina, pero no representa el alcance vigente). El prerequisito FEATURE-015 (015A+015B) para `cli_session` ya está satisfecho. FEATURE-016 mantiene
+su diseño y Approval Gate pendientes; no implementa `authMode` todavía ni arranca por este cambio.
 
 ### 🟡 FEATURE-017 (antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases + Release Plan
 Promovido de ⚪ Tentativo a 🟡 Confirmado. El diseño ya existe en el Runbook
