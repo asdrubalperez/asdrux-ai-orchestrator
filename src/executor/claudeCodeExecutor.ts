@@ -3,8 +3,9 @@ import { readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { QA_MCP_TOOL_NAMES } from "./isolated-tools/qaPolicy.js";
-import { qaMcpBridgePath, startQaWorker } from "./isolated-tools/qaRuntime.js";
+import { TOOL_SCHEMAS } from "./isolated-tools/contracts.js";
+import { mcpToolNames, resolveRolePolicy } from "./isolated-tools/rolePolicy.js";
+import { roleMcpBridgePath, startRoleWorker } from "./isolated-tools/roleRuntime.js";
 import type {
   Executor,
   ExecutorEvent,
@@ -18,9 +19,7 @@ import type {
 // FEATURE-001 (docs/features/FEATURE-001-spike-results.md) y FEATURE-002
 // (docs/features/FEATURE-002-spike-results.md):
 //   - invocación headless vía Claude Code CLI (`claude -p`), no Agent SDK;
-//   - "read-only" se impone restringiendo el toolset (--tools sin Write/Edit/Bash), H1;
-//   - "workspace-write" se impone acotando cwd al worktree del run, sin --add-dir fuera de
-//     él — el propio CLI bloquea escrituras fuera de ese directorio, H5;
+//   - toda capacidad de filesystem, comando y red se media por el runtime aislado;
 //   - autenticación exclusivamente vía ANTHROPIC_API_KEY + --bare, sin OAuth, H4.
 
 // FEATURE-006 (resuelve H14): el proceso hijo NUNCA hereda el process.env completo del
@@ -117,59 +116,32 @@ export class ClaudeCodeExecutor implements Executor {
       throw new Error("ANTHROPIC_API_KEY no está definida en el entorno del proceso.");
     }
 
-    if (invocation.agentRole === "qa") {
-      return this.runQaIsolated(invocation, apiKey, options);
-    }
-
-    const tools = this.resolveTools(invocation);
-    const args = [
-      "-p",
-      "--bare",
-      "--system-prompt",
-      invocation.roleInstructions,
-      "--tools",
-      tools,
-      "--output-format",
-      "json",
-      "--no-session-persistence",
-      "--strict-mcp-config",
-    ];
-
-    if (this.options.model) {
-      args.push("--model", this.options.model);
-    }
-
-    if (invocation.permissions.filesystem === "workspace-write") {
-      args.push("--permission-mode", "acceptEdits");
-      this.assertWritableRootsMatchCwd(invocation);
-    }
-
-    const prompt = this.buildPrompt(invocation);
-
-    const raw =
-      this.options.sandbox === "container"
-        ? await this.spawnClaudeInContainer(args, prompt, apiKey, options)
-        : await this.spawnClaude(args, prompt, apiKey, options);
-    return this.mapToPhaseResult(raw);
+    return this.runRoleIsolated(invocation, apiKey, options);
   }
 
-  private resolveTools(invocation: PhaseInvocation): string {
-    if (invocation.permissions.filesystem === "workspace-write") {
-      return "Read,Grep,Glob,Write,Edit,Bash";
-    }
-    return "Read,Grep,Glob";
-  }
-
-  private async runQaIsolated(
+  private async runRoleIsolated(
     invocation: PhaseInvocation,
     apiKey: string,
     options: RunPhaseOptions
   ): Promise<PhaseResult> {
-    if (invocation.permissions.filesystem !== "read-only") {
-      throw new Error("QA isolated runtime requires read-only permissions.");
+    const policy = resolveRolePolicy(invocation.agentRole);
+    if (invocation.permissions.filesystem !== policy.filesystem) {
+      throw new Error(`${invocation.agentRole} filesystem policy mismatch`);
     }
-    const worker = await startQaWorker(this.options.workingDirectory, options.signal);
-    const temporary = await mkdtemp(path.join(os.tmpdir(), "qa-claude-holder-"));
+    if (policy.filesystem === "workspace-write") this.assertWritableRootsMatchCwd(invocation);
+    const worker = await startRoleWorker(
+      invocation.agentRole,
+      this.options.workingDirectory,
+      process.env.TAVILY_API_KEY,
+      options.signal,
+      (event) => {
+        if (event.type === "isolated_tool_call") {
+          options.onEvent?.({ type: "isolated_tool_call", data: { ...event, provider: "claude" } });
+        }
+      },
+    );
+    const isolatedMcpTools = mcpToolNames(policy);
+    const temporary = await mkdtemp(path.join(os.tmpdir(), `${invocation.agentRole}-claude-holder-`));
     const configPath = path.join(temporary, "mcp.json");
     try {
       await writeFile(configPath, JSON.stringify({
@@ -177,30 +149,37 @@ export class ClaudeCodeExecutor implements Executor {
           orchestrator_worker: {
             type: "stdio",
             command: "node",
-            args: ["/isolated/qaMcpBridge.mjs"],
-            env: { QA_WORKER_SOCKET: "/channel/worker.sock", QA_CHANNEL_TOKEN: worker.channelToken },
+            args: ["/isolated/roleMcpBridge.mjs"],
+            env: {
+              ISOLATED_WORKER_SOCKET: "/channel/worker.sock",
+              ISOLATED_CHANNEL_TOKEN: worker.channelToken,
+              ISOLATED_TOOL_SCHEMAS: JSON.stringify(Object.fromEntries(
+                policy.tools.map((name) => [name, TOOL_SCHEMAS[name].args]),
+              )),
+            },
             alwaysLoad: true,
           },
         },
       }), "utf8");
       options.onEvent?.({
-        type: "qa_isolated_inventory",
-        data: { provider: "claude", tools: [...worker.effectiveTools], nativeTools: [] },
+        type: "isolated_inventory",
+        data: { role: invocation.agentRole, provider: "claude", tools: [...worker.effectiveTools], nativeTools: [] },
       });
       const args = [
         "run", "--rm", "-i", "--read-only",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
+        "--tmpfs", "/holder-empty:rw,noexec,nosuid,size=16m",
         "--workdir", "/holder-empty",
         "-e", "ANTHROPIC_API_KEY",
         "-v", `${worker.socketDirectory}:/channel:rw`,
-        "-v", `${qaMcpBridgePath()}:/isolated/qaMcpBridge.mjs:ro`,
+        "-v", `${roleMcpBridgePath()}:/isolated/roleMcpBridge.mjs:ro`,
         "-v", `${configPath}:/isolated/mcp.json:ro`,
         this.options.containerImage ?? DEFAULT_DEVELOPER_CONTAINER_IMAGE,
         "claude", "-p", "--bare",
         "--system-prompt", invocation.roleInstructions,
-        "--tools", QA_MCP_TOOL_NAMES.join(","),
-        ...QA_MCP_TOOL_NAMES.flatMap((tool) => ["--allowedTools", tool]),
+        "--tools", isolatedMcpTools.join(","),
+        ...isolatedMcpTools.flatMap((tool) => ["--allowedTools", tool]),
         "--mcp-config", "/isolated/mcp.json",
         "--strict-mcp-config",
         "--settings", JSON.stringify({ enabledMcpjsonServers: ["orchestrator_worker"] }),
@@ -250,58 +229,6 @@ export class ClaudeCodeExecutor implements Executor {
     }
     env.ANTHROPIC_API_KEY = apiKey;
     return env;
-  }
-
-  private spawnClaude(
-    args: string[],
-    prompt: string,
-    apiKey: string,
-    options: RunPhaseOptions
-  ): Promise<RawCliResult> {
-    return this.execAndCapture(this.claudeBinary, [...args, prompt], this.options.workingDirectory, this.buildChildEnv(apiKey), options);
-  }
-
-  /**
-   * FEATURE-006: corre `claude` ENTERO (no solo comandos individuales) dentro de un contenedor
-   * Docker — su herramienta Bash interna queda confinada al filesystem/red/usuario del
-   * contenedor, no del host. Solo se pasa ANTHROPIC_API_KEY al contenedor, nada más del entorno
-   * del Orquestador (ni siquiera las variables de sistema que sí se reenvían en modo host — el
-   * contenedor ya trae las suyas propias). Sin --network none: a diferencia del TestExecutor de
-   * QA, Developer necesita alcanzar la API del proveedor de IA — limitación documentada (no hay
-   * allowlist de egress fino en este incremento, ver FEATURE-006 Scope/Excluded).
-   */
-  private spawnClaudeInContainer(
-    args: string[],
-    prompt: string,
-    apiKey: string,
-    options: RunPhaseOptions
-  ): Promise<RawCliResult> {
-    const image = this.options.containerImage ?? DEFAULT_DEVELOPER_CONTAINER_IMAGE;
-    const dockerArgs = [
-      "run",
-      "--rm",
-      "--cap-drop",
-      "ALL",
-      "--security-opt",
-      "no-new-privileges",
-      "--pids-limit",
-      "256",
-      "--memory",
-      "512m",
-      "--cpus",
-      "1",
-      "-v",
-      `${this.options.workingDirectory}:/workspace:rw`,
-      "--workdir",
-      "/workspace",
-      "-e",
-      `ANTHROPIC_API_KEY=${apiKey}`,
-      image,
-      "claude",
-      ...args,
-      prompt,
-    ];
-    return this.execAndCapture("docker", dockerArgs, undefined, undefined, options);
   }
 
   private execAndCapture(

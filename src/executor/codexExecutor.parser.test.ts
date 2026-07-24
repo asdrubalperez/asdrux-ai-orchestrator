@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractCodexHeaderValue, parseCodexPhaseResultFromStdout } from "./codexExecutor.js";
+import { extractCodexHeaderValue, parseCodexPhaseResultFromStdout, parseLastJsonObject } from "./codexExecutor.js";
 
 test("parsea header de modelo y JSON final de Codex", () => {
   const stdout = [
@@ -30,4 +30,13 @@ test("rechaza status fuera del contrato", () => {
   const stdout = '{"status":"unknown","outputArtifact":null,"summary":"x","escalationReason":null}';
 
   assert.throws(() => parseCodexPhaseResultFromStdout(stdout), /status invalido/);
+});
+
+
+test("app-server selecciona el último JSON completo de un turno multi-mensaje", () => {
+  const output = '{"status":"completed","summary":"intermedio"}' +
+    '{"status":"completed","outputArtifact":"final","summary":"ok","escalationReason":null}';
+  assert.deepEqual(parseLastJsonObject(output), {
+    status: "completed", outputArtifact: "final", summary: "ok", escalationReason: null,
+  });
 });

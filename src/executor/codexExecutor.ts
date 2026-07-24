@@ -2,11 +2,10 @@ import { spawn, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
-import os from "node:os";
 import readline from "node:readline";
 import path from "node:path";
-import { QA_ISOLATED_POLICY } from "./isolated-tools/qaPolicy.js";
-import { callQaWorker, startQaWorker } from "./isolated-tools/qaRuntime.js";
+import { resolveRolePolicy } from "./isolated-tools/rolePolicy.js";
+import { callRoleWorker, startRoleWorker } from "./isolated-tools/roleRuntime.js";
 import { TOOL_SCHEMAS } from "./isolated-tools/contracts.js";
 import type {
   Executor,
@@ -130,70 +129,33 @@ export class CodexExecutor implements Executor {
       throw new Error("CODEX_API_KEY no esta definida en el entorno del proceso.");
     }
 
-    if (invocation.agentRole === "qa") {
-      return this.runQaIsolated(invocation, apiKey, options);
-    }
-
-    if (invocation.permissions.allowedCommands?.length) {
-      throw new Error("CodexExecutor no soporta allowedCommands en FEATURE-008 parte 1b.");
-    }
-
-    if (invocation.permissions.filesystem === "workspace-write") {
-      this.assertWritableRootsMatchCwd(invocation);
-    }
-
-    const schemaDir = await mkdtemp(path.join(os.tmpdir(), "codex-phase-schema-"));
-    const schemaPath = path.join(schemaDir, "phase-result.schema.json");
-
-    try {
-      await writeFile(schemaPath, JSON.stringify(PHASE_RESULT_SCHEMA, null, 2), "utf8");
-
-      const runsInContainer =
-        this.options.sandbox === "container" && invocation.permissions.filesystem === "workspace-write";
-      const args = [
-        "exec",
-        "--sandbox",
-        runsInContainer ? "danger-full-access" : invocation.permissions.filesystem,
-        ...(this.shouldDisableShellTool(invocation) ? ["--config", "features.shell_tool=false"] : []),
-        "--output-schema",
-        runsInContainer ? CONTAINER_SCHEMA_PATH : schemaPath,
-      ];
-
-      if (this.options.model) {
-        args.push("--model", this.options.model);
-      }
-
-      args.push(this.buildPrompt(invocation));
-
-      const raw = runsInContainer
-        ? await this.spawnCodexInContainer(args, apiKey, schemaDir, options)
-        : await this.execAndCapture(
-            this.codexBinary,
-            args,
-            this.options.workingDirectory,
-            this.buildChildEnv(apiKey),
-            options
-          );
-
-      options.onEvent?.({ type: "codex_raw_output", data: raw } satisfies ExecutorEvent);
-      return this.mapToPhaseResult(raw);
-    } finally {
-      await rm(schemaDir, { recursive: true, force: true });
-    }
+    return this.runRoleIsolated(invocation, apiKey, options);
   }
 
-  private async runQaIsolated(
+  private async runRoleIsolated(
     invocation: PhaseInvocation,
     apiKey: string,
     options: RunPhaseOptions
   ): Promise<PhaseResult> {
-    if (invocation.permissions.filesystem !== "read-only") {
-      throw new Error("QA isolated runtime requires read-only permissions.");
+    const policy = resolveRolePolicy(invocation.agentRole);
+    if (invocation.permissions.filesystem !== policy.filesystem) {
+      throw new Error(`${invocation.agentRole} filesystem policy mismatch`);
     }
-    const worker = await startQaWorker(this.options.workingDirectory, options.signal);
+    if (policy.filesystem === "workspace-write") this.assertWritableRootsMatchCwd(invocation);
+    const worker = await startRoleWorker(
+      invocation.agentRole,
+      this.options.workingDirectory,
+      process.env.TAVILY_API_KEY,
+      options.signal,
+      (event) => {
+        if (event.type === "isolated_tool_call") {
+          options.onEvent?.({ type: "isolated_tool_call", data: { ...event, provider: "codex" } });
+        }
+      },
+    );
     options.onEvent?.({
-      type: "qa_isolated_inventory",
-      data: { provider: "codex", tools: [...worker.effectiveTools], nativeTools: [] },
+      type: "isolated_inventory",
+      data: { role: invocation.agentRole, provider: "codex", tools: [...worker.effectiveTools], nativeTools: [] },
     });
     const dockerArgs = [
       "run", "--rm", "-i", "--read-only",
@@ -209,19 +171,20 @@ export class CodexExecutor implements Executor {
     ];
     const env = { ...this.buildChildEnv(apiKey), CODEX_API_KEY: apiKey };
     try {
-      const output = await this.runQaCodexAppServer(dockerArgs, env, invocation, worker, options);
-      const parsed = validatePhaseResult(JSON.parse(output));
+      const output = await this.runRoleCodexAppServer(dockerArgs, env, invocation, policy, worker, options);
+      const parsed = validatePhaseResult(parseLastJsonObject(output));
       return { ...parsed, executorMetadata: { provider: "codex", model: this.options.model } };
     } finally {
       await worker.close();
     }
   }
 
-  private runQaCodexAppServer(
+  private runRoleCodexAppServer(
     dockerArgs: string[],
     env: NodeJS.ProcessEnv,
     invocation: PhaseInvocation,
-    worker: Awaited<ReturnType<typeof startQaWorker>>,
+    policy: ReturnType<typeof resolveRolePolicy>,
+    worker: Awaited<ReturnType<typeof startRoleWorker>>,
     options: RunPhaseOptions
   ): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -237,7 +200,7 @@ export class CodexExecutor implements Executor {
         return id;
       };
       const initializeId = send("initialize", {
-        clientInfo: { name: "asdrux-qa-holder", title: "Asdrux QA Holder", version: "1.0.0" },
+        clientInfo: { name: "asdrux-isolated-holder", title: "Asdrux Isolated Holder", version: "1.0.0" },
         capabilities: { experimentalApi: true },
       });
       let loginRequestId = 0;
@@ -257,7 +220,7 @@ export class CodexExecutor implements Executor {
         let message: any;
         try { message = JSON.parse(line); }
         catch { fail(new Error("Codex QA app-server emitted invalid JSON")); return; }
-        if (message.id === initializeId) {
+        if (!message.method && message.id === initializeId) {
           if (message.error) { fail(new Error(JSON.stringify(message.error))); return; }
           child.stdin.write(JSON.stringify({ method: "initialized", params: {} }) + "\n");
           loginRequestId = send("account/login/start", {
@@ -266,25 +229,25 @@ export class CodexExecutor implements Executor {
           });
           return;
         }
-        if (message.id === loginRequestId) {
+        if (!message.method && message.id === loginRequestId) {
           if (message.error) { fail(new Error(JSON.stringify(message.error))); return; }
           threadRequestId = send("thread/start", {
             cwd: "/holder-empty", sandbox: "read-only", ephemeral: true, environments: [],
             model: this.options.model,
-            dynamicTools: QA_ISOLATED_POLICY.tools.map((name) => ({
+            dynamicTools: policy.tools.map((name) => ({
               type: "function", name, description: TOOL_SCHEMAS[name].description,
               inputSchema: TOOL_SCHEMAS[name].args,
             })),
           });
           return;
         }
-        if (message.id === threadRequestId) {
+        if (!message.method && message.id === threadRequestId) {
           if (message.error) { fail(new Error(JSON.stringify(message.error))); return; }
           threadId = message.result?.thread?.id ?? message.result?.threadId ?? "";
           if (!threadId) { fail(new Error("Codex thread/start returned no thread id")); return; }
           options.onEvent?.({
-            type: "qa_holder_thread_started",
-            data: { provider: "codex", tools: [...QA_ISOLATED_POLICY.tools], nativeTools: [] },
+            type: "isolated_holder_thread_started",
+            data: { role: invocation.agentRole, provider: "codex", tools: [...policy.tools], nativeTools: [] },
           });
           turnRequestId = send("turn/start", {
             threadId,
@@ -295,23 +258,28 @@ export class CodexExecutor implements Executor {
           });
           return;
         }
-        if (message.id === turnRequestId && message.error) {
+        if (!message.method && message.id === turnRequestId && message.error) {
           fail(new Error(JSON.stringify(message.error))); return;
+        }
+        if (message.method === "item/fileChange/requestApproval" ||
+            message.method === "item/commandExecution/requestApproval") {
+          options.onEvent?.({
+            type: "isolated_native_tool_denied",
+            data: { role: invocation.agentRole, provider: "codex", method: message.method },
+          });
+          child.stdin.write(JSON.stringify({ id: message.id, result: { decision: "decline" } }) + "\n");
+          return;
         }
         if (message.method === "item/tool/call") {
           const params = message.params ?? {};
-          if (!QA_ISOLATED_POLICY.tools.includes(params.tool)) {
+          if (!policy.tools.includes(params.tool)) {
             child.stdin.write(JSON.stringify({ id: message.id, result: {
               success: false, contentItems: [{ type: "inputText", text: "TOOL_NOT_FOUND" }],
             }}) + "\n");
             return;
           }
           try {
-            options.onEvent?.({
-              type: "qa_isolated_tool_call",
-              data: { provider: "codex", tool: params.tool },
-            });
-            const result = await callQaWorker(
+            const result = await callRoleWorker(
               worker,
               params.tool,
               params.arguments,
@@ -348,8 +316,9 @@ export class CodexExecutor implements Executor {
         }
       });
       child.stderr.on("data", (chunk) => options.onEvent?.({
-        type: "qa_holder_stderr",
+        type: "isolated_holder_stderr",
         data: {
+          role: invocation.agentRole,
           provider: "codex",
           text: String(chunk)
             .slice(0, 500)
@@ -374,14 +343,14 @@ export class CodexExecutor implements Executor {
     }
   }
 
-  private shouldDisableShellTool(invocation: PhaseInvocation): boolean {
-    return invocation.agentRole === "qa";
-  }
-
   private buildPrompt(invocation: PhaseInvocation): string {
     return [
       "INSTRUCCIONES DE ROL:",
       invocation.roleInstructions,
+      "",
+      "CAPACIDADES EFECTIVAS: usa exclusivamente las dynamic tools provistas por orchestrator.",
+      "No intentes shell_tool, apply_patch, fileChange ni ninguna tool nativa.",
+      "Para cambios usa fs_write/fs_edit; para comandos usa command_exec.",
       "",
       "Responde exclusivamente con un objeto JSON que respete el schema provisto por --output-schema.",
       "No agregues Markdown ni texto fuera del JSON final.",
@@ -401,47 +370,6 @@ export class CodexExecutor implements Executor {
     }
     env.CODEX_API_KEY = apiKey;
     return env;
-  }
-
-  /**
-   * FEATURE-008 Parte 2: en la VPS, `workspace-write` nativo de Codex dispara bubblewrap y falla
-   * por privilegios de red del kernel (`RTM_NEWADDR`). En modo contenedor, Codex corre sin su
-   * sandbox propio (`danger-full-access`) y el confinamiento lo imponen los mounts/capabilities de
-   * Docker, igual que el camino Developer ya validado para Claude Code.
-   */
-  private spawnCodexInContainer(
-    args: string[],
-    apiKey: string,
-    schemaDir: string,
-    options: RunPhaseOptions
-  ): Promise<RawCodexResult> {
-    const image = this.options.containerImage ?? DEFAULT_CODEX_DEVELOPER_CONTAINER_IMAGE;
-    const dockerArgs = [
-      "run",
-      "--rm",
-      "--cap-drop",
-      "ALL",
-      "--security-opt",
-      "no-new-privileges",
-      "--pids-limit",
-      "256",
-      "--memory",
-      "512m",
-      "--cpus",
-      "1",
-      "-v",
-      `${this.options.workingDirectory}:/workspace:rw`,
-      "-v",
-      `${schemaDir}:/schema:ro`,
-      "--workdir",
-      "/workspace",
-      "-e",
-      `CODEX_API_KEY=${apiKey}`,
-      image,
-      "codex",
-      ...args,
-    ];
-    return this.execAndCapture("docker", dockerArgs, undefined, undefined, options);
   }
 
   private execAndCapture(
@@ -543,6 +471,18 @@ export function parseCodexPhaseResultFromStdout(stdout: string): PhaseResult {
 export function extractCodexHeaderValue(stdout: string, key: string): string | undefined {
   const line = stdout.split(/\r?\n/).find((l) => l.startsWith(`${key}:`));
   return line?.slice(key.length + 1).trim();
+}
+
+export function parseLastJsonObject(output: string): unknown {
+  const starts: number[] = [];
+  for (let index = 0; index < output.length; index++) {
+    if (output[index] === "{") starts.push(index);
+  }
+  for (const index of starts.reverse()) {
+    try { return JSON.parse(output.slice(index)); }
+    catch { /* try the previous object boundary */ }
+  }
+  throw new Error("Codex app-server returned no valid JSON object");
 }
 
 function validatePhaseResult(value: unknown): PhaseResult {
