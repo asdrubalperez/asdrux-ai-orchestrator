@@ -7,7 +7,7 @@ Versión: v4 — backend de `web_search` reemplazado por Tavily Search básico (
 > rediseñan aquí. FEATURE-015A entregó arquitectura, contratos y spikes; no dejó un runtime
 > productivo integrado en `src/`.
 
-Estado: 🟢 Diseño v4 aprobado por el owner para implementación por partes (2026-07-24).
+Estado: Implementada y aceptada — Partes 1, 2 y 3 completas, validadas con evidencia real en VPS y revisión conjunta Architect + owner (2026-07-24).
 
 ---
 
@@ -16,7 +16,7 @@ Estado: 🟢 Diseño v4 aprobado por el owner para implementación por partes (2
 - **Name**: FEATURE-015B — Wiring real por rol y por proveedor
 - **Type**: Seguridad / Arquitectura — extensión de FEATURE-015A
 - **Owner**: asdrubalperez
-- **Status**: Diseño v4 aprobado; implementación en 3 partes
+- **Status**: Implementada y aceptada — Partes 1, 2 y 3 completas, validadas con evidencia real en VPS y revisión conjunta Architect + owner (2026-07-24).
 - **Priority**: Alta — prerequisito de FEATURE-016B (OAuth para Developer)
 
 ---
@@ -401,4 +401,8 @@ En v4, por decisión del owner tras comparar tiers gratuitos, Brave fue reemplaz
 Search `basic`, con `include_answer:false`, `include_raw_content:false`,
 `include_images:false`, `auto_parameters:false` y prohibición de `/extract`.
 
-El Architect y el owner revisan esta v4 antes de aprobar implementación.
+Las 3 partes de implementación se completaron y validaron (ver
+`docs/features/FEATURE-015B-part1-results.md`, `part2-results.md`, `part3-results.md`). El
+Architect y el owner revisaron conjuntamente la Feature completa el 2026-07-24 y confirmaron
+su cierre — sin tools nativas remanentes en ningún rol/proveedor, catálogo verificado contra
+la Regla 3, evidencia real de las 10 combinaciones.
