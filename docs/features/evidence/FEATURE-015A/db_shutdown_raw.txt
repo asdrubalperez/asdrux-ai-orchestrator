@@ -1,0 +1,2 @@
+db_watcher=ready
+{"component":"postgres","status":"FAIL_CLOSED","promotionAllowed":false,"fallbackAllowed":false,"error":"terminating connection due to administrator command"}

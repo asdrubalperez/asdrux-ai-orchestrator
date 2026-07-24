@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "feature015a": {
+      "command": "node",
+      "args": [
+        "/stage2/claude-mcp-worker-adapter.mjs"
+      ],
+      "alwaysLoad": true
+    }
+  }
+}

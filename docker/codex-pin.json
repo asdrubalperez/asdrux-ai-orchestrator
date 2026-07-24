@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "platform": "linux/amd64",
+  "npmPackage": "@openai/codex",
+  "npmVersion": "0.145.0",
+  "npmIntegrity": "sha512-/PSPSFujjjmiyVFvG2yu/grOFhsWdokTH8t2KGWhXSo/M5n/dIDsnbsnO82/7bLtIoDuzQf7ATBUMWqPWQINlQ==",
+  "baseImage": "node:22-alpine",
+  "baseImageDigest": "sha256:b74031e546d7f4faf561d797ac1b76beccac856a042815ca77db4fd047581605",
+  "expectedCliVersion": "codex-cli 0.145.0",
+  "appServerSchemaTreeSha256": "bd3888e9fbdd115552d2847f3f5b343f5d2ecc30912b48d8ead399b6a2b4d329"
+}

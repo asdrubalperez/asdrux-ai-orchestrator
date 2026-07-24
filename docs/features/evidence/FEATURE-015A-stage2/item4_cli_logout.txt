@@ -1,0 +1,6 @@
+Successfully logged out from your Anthropic account.
+{
+  "loggedIn": false,
+  "authMethod": "none",
+  "apiProvider": "firstParty"
+}

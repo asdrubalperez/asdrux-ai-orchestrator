@@ -1,0 +1,2 @@
+{"supervisor":"ready","holderPid":133607,"workerPid":133608}
+{"component":"supervisor","status":"FAIL_CLOSED","holderStopped":true,"workerStopped":true,"fallbackAllowed":false}

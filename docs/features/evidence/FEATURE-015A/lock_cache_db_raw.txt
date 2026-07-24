@@ -1,0 +1,1 @@
+{"status":"passed","concurrentContenders":12,"winners":1,"firstFencingToken":"1","takeoverFencingToken":"13","stalePromotionRejected":true,"validPromotionApplied":true,"postgresBackendTerminationDetected":true}
