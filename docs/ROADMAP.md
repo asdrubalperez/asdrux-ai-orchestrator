@@ -29,9 +29,13 @@
 - FEATURE-014 — Autenticación unificada CLI + Web: tabla `sessions`, hash SHA-256 y revocación
   server-side compartidos, TTL único de 48 horas y validación real en VPS; resultados en
   `docs/features/FEATURE-014-implementation-results.md`
+- FEATURE-015A — Arquitectura holder/worker genérica: Approval Gate completo (Etapas 1, 2 y 3),
+  aceptada con tests, evidencia real y revisión conjunta Architect + owner. Diseño y resultados en
+  `docs/features/FEATURE-015-egress-aislamiento-oauth-parte-015a-arquitectura-holder-worker.md`.
 
 **🟡 Confirmado**
-- FEATURE-015 — Egress y aislamiento de credenciales OAuth, sin bloquear investigación. Ya no es
+- FEATURE-015 — estado global pendiente porque 015B continúa 🟡 Confirmada; 015A ya está
+  ✅ Ejecutada. Egress y aislamiento de credenciales OAuth, sin bloquear investigación. Ya no es
   específica de Developer (corrección respecto a la formulación anterior): el canal de fuga por
   lectura (`Read`/`Grep`/`Glob` devolviendo el secreto en la respuesta del modelo, vía prompt
   injection) aplica a cualquier rol con `cli_session`, con o sin Bash. Desdoblada en dos partes
@@ -118,7 +122,10 @@ vigencia se determinan desde DB. Validado con 24/24 tests, build completo y fluj
 login, `run:status`, logout y rechazo de una copia restaurada del archivo después de revocar la
 fila. Ver `docs/features/FEATURE-014-implementation-results.md`.
 
-### 🟡 FEATURE-015 — Egress y aislamiento de credenciales OAuth, sin bloquear investigación
+### 🟡 FEATURE-015 — Egress y aislamiento de credenciales OAuth
+
+Estado: 015A ✅ Ejecutada; 015B 🟡 Confirmada.
+
 Reemplaza al ítem Tentativo anterior "Egress de red con allowlist fino (Developer)". Ya no está
 acotada a Developer — corrección respecto a la formulación original.
 
@@ -143,13 +150,14 @@ holder/worker), no bloqueado.
 Desdoblada en dos partes **secuenciales** (015B depende de 015A, a diferencia del intento fallido
 de desdoblar FEATURE-016 en partes independientes — ver abajo):
 
-- **015A — Arquitectura holder/worker genérica**: protocolo holder↔worker, adaptador Claude Code
-  (holder ejecutado con `--tools ""` + MCP remoto expuesto por el worker), adaptador Codex (holder
-  vía `codex app-server` + `dynamicTools`, sin `command/exec`/`process/spawn`). Validada con
-  spikes acotados, sin credenciales reales. No habilita ningún rol real todavía — es la base de la
-  que depende 015B.
-- **015B — Wiring real por rol y por proveedor**: sobre la base de 015A, las 5 combinaciones de
-  rol × 2 proveedores. Architect/Functional/Planning con worker de internet amplio sin allowlist
+- **✅ 015A — Arquitectura holder/worker genérica — Ejecutada**: protocolo holder↔worker,
+  adaptador Claude Code (holder ejecutado con `--tools ""` + MCP remoto expuesto por el worker),
+  adaptador Codex (holder vía `codex app-server` + `dynamicTools`, sin
+  `command/exec`/`process/spawn`). Validada con spikes acotados, sin credenciales reales. No
+  habilita ningún rol real todavía — es la base de la que depende 015B.
+- **🟡 015B — Wiring real por rol y por proveedor — Confirmada, pendiente**: sobre la base de 015A,
+  las 5 combinaciones de rol × 2 proveedores. Architect/Functional/Planning con worker de internet
+  amplio sin allowlist
   (agregando esa capacidad en Claude Code, hoy inexistente; re-cableando hacia el worker protegido
   el Bash que Codex ya tiene hoy para estos roles). QA con worker de internet mínimo/nulo — su rol
   es leer el artefacto y los casos de prueba, no investigar. Developer con worker de internet
