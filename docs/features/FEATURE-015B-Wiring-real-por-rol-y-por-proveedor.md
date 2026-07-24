@@ -1,6 +1,6 @@
 # FEATURE-015B — Wiring real por rol y por proveedor
 
-Versión: v2 — validación técnica de Codex incorporada (2026-07-23)
+Versión: v3 — `web_search` y backend Brave Search API incorporados (2026-07-24)
 
 > Parte 015B de FEATURE-015. Depende de FEATURE-015A (ejecutada y mergeada): su protocolo
 > holder↔worker, autenticación de canal, pinning de Codex, credencial privada y fencing no se
@@ -17,7 +17,7 @@ y Approval Gate explícito.
 - **Name**: FEATURE-015B — Wiring real por rol y por proveedor
 - **Type**: Seguridad / Arquitectura — extensión de FEATURE-015A
 - **Owner**: asdrubalperez
-- **Status**: Diseño v2, no aprobado
+- **Status**: Diseño v3, no aprobado
 - **Priority**: Alta — prerequisito de FEATURE-016B (OAuth para Developer)
 
 ---
@@ -62,8 +62,8 @@ Feature.
 
 1. Productizar bajo `src/` los artefactos de 015A: supervisor por invocación, holder, worker,
    endpoint MCP Claude, controlador/proxy Codex, canal autenticado, lifecycle y fail-closed.
-2. Implementar siete tools reales sobre el protocolo v1 de 015A: `fs_read`, `fs_search`,
-   `fs_glob`, `fs_write`, `fs_edit`, `command_exec` y `web_fetch`.
+2. Implementar ocho tools reales sobre el protocolo v1 de 015A: `fs_read`, `fs_search`,
+   `fs_glob`, `fs_write`, `fs_edit`, `command_exec`, `web_search` y `web_fetch`.
 3. Aplicar un catálogo cerrado y un nivel de egress por rol, independiente del proveedor.
 4. Claude Code: deshabilitar tools nativas y exponer únicamente las tools MCP del rol.
 5. Codex: deshabilitar siempre `shell_tool` y exponer únicamente las `dynamicTools` del rol.
@@ -78,14 +78,11 @@ Feature.
 3. Allowlist de dominios para egress público, descartada como bloqueante en 015A.
 4. Repetir las Etapas 1/2/3 completas de 015A. Se valida la integración con los criterios de esta
    Feature.
-5. `web_search`: requiere elegir/autenticar un backend de búsqueda o delegar en una capacidad
-   server-side, rompiendo el contrato agnóstico. Esta versión permite fetch de URLs conocidas.
-6. Reintroducir Bash en QA. `TestExecutor` continúa ejecutando el comando de prueba sin red.
+5. Reintroducir Bash en QA. `TestExecutor` continúa ejecutando el comando de prueba sin red.
 
 ## Future ideas
 
 - Allowlist de dominios.
-- `web_search` agnóstico, una vez aprobado su backend y modelo de credenciales.
 - Hooks `PreToolUse` como defensa en profundidad.
 
 ---
@@ -99,11 +96,11 @@ Feature.
 
    | Rol | Tools |
    |---|---|
-   | Architect | `fs_read`, `fs_search`, `fs_glob`, `web_fetch` |
-   | Functional | `fs_read`, `fs_search`, `fs_glob`, `web_fetch` |
-   | Planning | `fs_read`, `fs_search`, `fs_glob`, `web_fetch` |
+   | Architect | `fs_read`, `fs_search`, `fs_glob`, `web_search`, `web_fetch` |
+   | Functional | `fs_read`, `fs_search`, `fs_glob`, `web_search`, `web_fetch` |
+   | Planning | `fs_read`, `fs_search`, `fs_glob`, `web_search`, `web_fetch` |
    | QA | `fs_read`, `fs_search`, `fs_glob` |
-   | Developer | `fs_read`, `fs_search`, `fs_glob`, `fs_write`, `fs_edit`, `command_exec`, `web_fetch` |
+   | Developer | `fs_read`, `fs_search`, `fs_glob`, `fs_write`, `fs_edit`, `command_exec`, `web_search`, `web_fetch` |
 
 4. El catálogo se valida al construir la invocación y nuevamente en el worker. Tool no autorizada
    produce `TOOL_NOT_FOUND`; nunca fallback nativo.
@@ -111,16 +108,21 @@ Feature.
    escapes por symlink y resoluciones finales fuera del worktree. Solo Developer puede escribir.
 6. `command_exec` recibe `program`, `args[]`, `cwd` relativo y `timeoutMs`; el worker usa
    `spawn(..., {shell:false})`. Solo Developer posee esta tool.
-7. `web_fetch` acepta solo HTTPS y `GET`/`HEAD`; valida cada resolución y redirect, y rechaza
+7. `web_search` usa exclusivamente Brave Search API a través del proxy confiable definido en 7.5.
+   No usa la búsqueda nativa de Claude/Codex ni hace fallback a ella: eso preserva el mismo
+   contrato, resultados y política de credenciales en ambos proveedores.
+8. `web_fetch` acepta solo HTTPS y `GET`/`HEAD`; valida cada resolución y redirect, y rechaza
    loopback, link-local, metadata endpoints, redes privadas y destinos no públicos. No acepta
    cookies, body ni headers de autenticación. “Egress amplio” significa sin allowlist de dominios,
    no acceso a redes internas.
-8. Rigen los límites de 015A: 10 MiB/frame, 120 s/call y 500 calls/invocación. Al excederlos se
+9. Rigen los límites de 015A: 10 MiB/frame, 120 s/call y 500 calls/invocación. Al excederlos se
    devuelve truncamiento seguro o `tool_error`, nunca buffers sin límite.
-9. El protocolo v1 entrega un resultado terminal por tool. No se agrega streaming incremental de
+10. El protocolo v1 entrega un resultado terminal por tool. No se agrega streaming incremental de
    stdout/body en 015B; el streaming de progreso de fase existente puede continuar.
-10. Error de worker, bridge, validación, timeout o canal falla cerrado y termina la fase; no se
-    rehabilitan tools nativas.
+11. Error de worker, bridge, search proxy, validación, timeout o canal falla cerrado y termina la
+    tool call con `tool_error`; no hay fallback a búsqueda nativa. La política existente del
+    Executor decide si el rol puede continuar o la fase falla, pero nunca se rehabilitan tools
+    nativas.
 
 ---
 
@@ -141,6 +143,7 @@ Se crea un módulo compartido bajo `src/executor/isolated-tools/` (nombre orient
 - validación de paths, symlinks, URLs y límites;
 - supervisor/lifecycle;
 - worker;
+- search proxy confiable;
 - bridge MCP Claude;
 - controlador/proxy app-server Codex.
 
@@ -161,6 +164,14 @@ Todos usan JSON Schema con `additionalProperties:false`:
   `{replacements, bytesWritten}`. Falla si la coincidencia no es determinística.
 - `command_exec`: `{program, args?, cwd?:".", timeoutMs?}` →
   `{exitCode, stdout, stderr, timedOut, truncated}`.
+- `web_search`: `{query, maxResults?}` →
+  `{results:[{url,title,snippet}], truncated}`.
+  `query` es texto UTF-8 no vacío de hasta 500 caracteres. `maxResults` es entero entre 1 y 20,
+  default 10. El proxy llama `GET https://api.search.brave.com/res/v1/web/search` con `q`,
+  `count=maxResults` y `safesearch=moderate`; normaliza únicamente `web.results[].url`,
+  `.title` y `.description`, elimina markup de `title`/`description`, descarta entradas sin URL
+  HTTPS válida y conserva el orden del backend. `truncated=true` si Brave indica más resultados,
+  devuelve más elementos que el límite o algún resultado se descarta por límites de tamaño.
 - `web_fetch`: `{url, method?:"GET"|"HEAD", timeoutMs?, maxBytes?}` →
   `{finalUrl,status,headers,contentType,body,truncated}`. Solo retorna headers allowlisted:
   `content-type`, `content-length`, `last-modified`, `etag`.
@@ -188,37 +199,83 @@ responde por JSON-RPC.
 Se mantienen `experimentalApi:true`, el proxy fail-closed y la versión/imagen fijadas por
 `docker/codex-pin.json`.
 
-## 7.5 Topología, egress y mounts
+## 7.5 Backend y credencial de `web_search`
 
-Cada fase crea holder y worker efímeros en una red privada exclusiva:
+Backend elegido: **Brave Search API, endpoint Web Search**.
+
+Se elige porque:
+
+- es independiente de Anthropic/OpenAI y mantiene comportamiento agnóstico entre Executors;
+- expone resultados web estructurados con URL, título y descripción, suficientes para el patrón
+  `web_search` → selección del modelo → `web_fetch`;
+- tiene índice de búsqueda propio y API HTTP documentada;
+- evita depender de tools server-side nativas cuya disponibilidad, contrato, facturación y
+  ejecución difieren entre Claude y Codex.
+
+Tavily también ofrece resultados estructurados orientados a agentes, pero agrega capacidades de
+respuesta generada/extracción que se superponen con `web_fetch` y amplían el alcance. Las búsquedas
+nativas de Claude/Codex se descartan porque romperían la paridad por proveedor y el fail-closed.
+No se encontró un backend de búsqueda ya contratado o configurado en el repo.
+
+`BRAVE_SEARCH_API_KEY` es una credencial de servicio sensible: habilita consumo facturable,
+agotamiento de cuota y abuso. No vive en el holder —para no concentrarla con la credencial OAuth—
+ni en el worker —que procesa contenido no confiable y posee el worktree—. Se monta/injecta solo en
+un **search proxy confiable efímero** administrado por el Orquestador:
+
+- sin mount del worktree, caché OAuth ni socket Docker;
+- egress permitido únicamente a `api.search.brave.com:443`;
+- endpoint privado accesible solo desde el worker de esa invocación;
+- canal autenticado con token efímero distinto del canal holder↔worker;
+- acepta únicamente el contrato `web_search`, aplica rate/timeout/tamaño y agrega
+  `X-Subscription-Token` al request saliente;
+- nunca registra la key, token de canal ni headers completos;
+- al faltar key, recibir 401/403/429/5xx, timeout o respuesta inválida devuelve `tool_error`
+  usando el enum existente de 015A: `WORKER_UNAVAILABLE` para indisponibilidad/rate limit y
+  `INTERNAL_ERROR` para respuesta inválida, con causa sanitizada en `details.reason`; jamás usa
+  otro backend.
+
+El worker recibe la tool call y consulta al proxy; por tanto toda tool sigue mediada por el worker
+sin revelar la key. La configuración del secreto en la VPS debe usar el mecanismo de secretos que
+se apruebe para producción; queda prohibido guardarla en git, `.env` versionado, DB o `run_events`.
+
+## 7.6 Topología, egress y mounts
+
+Cada fase crea holder y worker efímeros en una red privada exclusiva. Cuando el catálogo incluye
+`web_search`, crea además el search proxy:
 
 - holder: caché/credencial privada y egress al proveedor; sin worktree;
 - worker: worktree RO para Architect/Functional/Planning/QA, RW para Developer; sin credenciales,
   caché, socket Docker ni control plane;
+- search proxy: `BRAVE_SEARCH_API_KEY`, sin worktree ni OAuth, con egress solo a Brave;
 - QA worker: sin egress;
 - otros workers: egress público. `web_fetch` aplica protección SSRF; Developer conserva egress
   amplio también mediante `command_exec`, riesgo ya aceptado en 015A.
 
 Esta parametrización es necesaria para 015B y no cambia el modelo de aislamiento aprobado.
 
-## 7.6 Lifecycle
+## 7.7 Lifecycle
 
 El Executor crea la topología, espera readiness, ejecuta el turno, propaga cancelación/timeout y
-destruye holder, worker, red, token y temporales en `finally`. Una falla material de readiness,
+destruye holder, worker, search proxy, redes, tokens y temporales en `finally`. Una falla material
+de readiness,
 canal o cleanup se registra sanitizada y falla la fase. Ningún log contiene credenciales ni el
 channel token.
 
-## 7.7 Dependencias y ambiente
+## 7.8 Dependencias y ambiente
 
-No se agrega SDK de búsqueda. Cualquier librería nueva para glob/regex debe justificarse antes de
-incorporarla; se prefieren APIs de Node y capacidades ya disponibles.
+No se agrega SDK de búsqueda: el search proxy usa HTTPS y valida el JSON de Brave contra un schema
+local. Cualquier librería nueva para glob/regex debe justificarse antes de incorporarla; se
+prefieren APIs de Node y capacidades ya disponibles.
 
 Checkout de origen: VPS, porque la evidencia normativa exige Docker y CLIs Linux reales. La
 notebook se actualiza solo con `git pull` tras el push, conforme al Delivery Workflow.
 
 Fuentes de producto consultadas durante la revisión: documentación oficial de
 [tools de Claude](https://platform.claude.com/docs/en/managed-agents/tools) y
-[tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview). Para Codex,
+[tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview), y documentación
+oficial de [Brave Search API](https://brave.com/search/api/) y su
+[Web Search endpoint](https://api-dashboard.search.brave.com/api-reference/web/search/get).
+Para Codex,
 015B se mantiene sobre el contrato app-server y el pin ya validados localmente por 015A; cualquier
 desvío de la versión pinneada falla cerrado.
 
@@ -230,6 +287,9 @@ desvío de la versión pinneada falla cerrado.
 |---|---|---|
 | Inventario por rol/proveedor | 10 combinaciones | Cero tools nativas; catálogo exactamente igual a la Regla 3 |
 | Investigación | Architect/Functional/Planning, ambos proveedores, URL HTTPS | `web_fetch` pasa por worker y devuelve contrato equivalente |
+| Descubrimiento web | Architect/Functional/Planning, ambos proveedores, consulta real | `web_search` pasa worker→search proxy→Brave y retorna URL/título/snippet normalizados; luego una URL puede consumirse con `web_fetch` |
+| Resultados de búsqueda acotados | Consulta con más resultados que `maxResults` | Máximo solicitado, orden preservado y `truncated=true`; frame dentro del límite |
+| Backend de búsqueda caído | Key ausente, 401/403/429/5xx, timeout o JSON inválido | `tool_error` tipado y sanitizado; sin fallback nativo y sin key en logs |
 | QA intenta red/shell | Prompt adversarial | Tool ausente/rechazada; `TestExecutor` sigue ejecutando el test |
 | Developer compila | Comando real | `command_exec` conserva exit code/stdout/stderr |
 | Developer edita | Crear y modificar archivo | Patch esperado solo en el worktree |
@@ -243,9 +303,12 @@ desvío de la versión pinneada falla cerrado.
 ### Validation Evidence
 
 - Run real completo por rol y proveedor (10).
-- Tests unitarios de policy matrix, schemas y las siete tools.
+- Tests unitarios de policy matrix, schemas y las ocho tools.
 - Contract tests Claude MCP y Codex `dynamicTools`/`item/tool/call`.
-- Integración Docker: mounts, paths/symlinks, SSRF, red por rol, cancelación, límites y cleanup.
+- Contract tests del normalizador Brave con fixtures válidas, vacías, sobredimensionadas y
+  malformadas; ningún test imprime una key real.
+- Integración Docker: mounts, paths/symlinks, SSRF, red por rol, aislamiento del search proxy,
+  backend caído/rate limit, cancelación, límites y cleanup.
 - Inventario efectivo de tools capturado.
 - Hashes antes/después del repo principal, worktree y canary de credencial.
 - Tiempo de startup y pico de memoria de la topología en la VPS.
@@ -261,6 +324,16 @@ desvío de la versión pinneada falla cerrado.
   fail-closed.
 - **SSRF/DNS rebinding**: mitigación mediante validación de esquema, resolución y redirects,
   conexión solo a IP pública validada y tests negativos.
+- **Dependencia/costo de Brave**: precio, cuota, rate limits y disponibilidad pertenecen a un
+  tercero adicional. Mitigación: límites por invocación, métricas sin query sensible, errores
+  explícitos para 429/5xx y ausencia de fallback silencioso. El owner debe contratar/configurar
+  el plan antes de la validación E2E real.
+- **Privacidad de consultas**: las queries se envían a Brave y pueden contener contexto sensible.
+  Los prompts de rol prohíben incluir secretos/código privado; no se persiste la query en logs
+  operativos por defecto y esta transferencia debe aceptarse en el Approval Gate.
+- **Compromiso de la key de búsqueda**: permitiría abuso/costo aunque no dé acceso OAuth.
+  Mitigación: proxy separado, egress cerrado, secreto fuera de git/DB/eventos y rotación/revocación
+  independiente.
 - **Egress amplio de Developer**: riesgo aceptado en 015A; el aislamiento protege la credencial,
   no convierte al worker Developer en un sandbox sin Internet.
 - **Costo operativo**: holder+worker por fase aumenta startup/CPU/RAM en una VPS de 2 vCPU.
@@ -274,11 +347,12 @@ desvío de la versión pinneada falla cerrado.
 
 Implementación prohibida hasta aprobación humana explícita.
 
-La revisión técnica v2 cerró los huecos conocidos. El documento queda listo para revisión del
+La revisión técnica v3 cerró los huecos conocidos. El documento queda listo para revisión del
 Architect/owner, quienes deben confirmar antes del Approval Gate:
 
 1. que 015B incluye productizar el runtime de 015A, no solo modificar Executors;
-2. que `web_fetch` sin `web_search` cubre la red inicial;
+2. que Brave Search API, el search proxy y el tratamiento de su key son aceptados, y que
+   `web_search` + `web_fetch` cubren el flujo de investigación;
 3. que la matriz cerrada de tools por rol es correcta;
 4. que la VPS es checkout de origen y ambiente obligatorio de validación.
 
@@ -286,9 +360,12 @@ Architect/owner, quienes deben confirmar antes del Approval Gate:
 
 ## Trazabilidad de la revisión
 
-Codex corrigió: estado real de QA; diferencia entre spikes y runtime productivo; omisión de
+Codex corrigió en v2: estado real de QA; diferencia entre spikes y runtime productivo; omisión de
 `Write/Edit`; contratos y catálogo; lifecycle; SSRF; topología/egress; validación proporcional; y
 la falsa necesidad de interceptar `shell_tool` en Codex, que se deshabilita y reemplaza por
 `dynamicTools`.
 
-El Architect y el owner revisan esta v2 antes de aprobar implementación.
+En v3, por decisión del owner, se incorporó `web_search` con Brave Search API, contrato
+agnóstico, proxy confiable separado, gestión explícita de credencial, validaciones y riesgos.
+
+El Architect y el owner revisan esta v3 antes de aprobar implementación.
