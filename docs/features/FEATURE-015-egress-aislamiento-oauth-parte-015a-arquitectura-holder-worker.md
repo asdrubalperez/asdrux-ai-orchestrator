@@ -292,8 +292,9 @@ migra todavía; ese wiring pertenece a FEATURE-015B. El mecanismo debe:
      }
      ```
 
-   - `0.144.6` es sólo evidencia histórica/ilustrativa hasta que el owner apruebe la tupla; no es
-     un pin aprobado.
+   - La tupla candidata inicial (`0.144.6`) fue evidencia histórica/ilustrativa durante el diseño.
+     El owner aprobó explícitamente la tupla definitiva (`0.145.0`) el 2026-07-23; el pin aprobado
+     y vigente es el materializado en `docker/codex-pin.json`, no un valor de este documento.
    - Dockerfile/CI leen el manifest: el build exige `platform`; `FROM` usa
      `baseImage@baseImageDigest`; npm instala `npmPackage@npmVersion` y verifica
      `npmIntegrity`; dentro de la imagen se compara `npm ls -g --json` con `npmVersion` y, por
