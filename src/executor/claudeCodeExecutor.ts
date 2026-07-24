@@ -1,6 +1,10 @@
 import { spawn, execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { QA_MCP_TOOL_NAMES } from "./isolated-tools/qaPolicy.js";
+import { qaMcpBridgePath, startQaWorker } from "./isolated-tools/qaRuntime.js";
 import type {
   Executor,
   ExecutorEvent,
@@ -113,6 +117,10 @@ export class ClaudeCodeExecutor implements Executor {
       throw new Error("ANTHROPIC_API_KEY no está definida en el entorno del proceso.");
     }
 
+    if (invocation.agentRole === "qa") {
+      return this.runQaIsolated(invocation, apiKey, options);
+    }
+
     const tools = this.resolveTools(invocation);
     const args = [
       "-p",
@@ -134,14 +142,6 @@ export class ClaudeCodeExecutor implements Executor {
     if (invocation.permissions.filesystem === "workspace-write") {
       args.push("--permission-mode", "acceptEdits");
       this.assertWritableRootsMatchCwd(invocation);
-    } else if (invocation.permissions.allowedCommands?.length) {
-      // Permisos híbridos (QA, FEATURE-005): read-only + un comando de shell puntual autorizado.
-      // Sin validar todavía si --allowedTools restringe realmente a ese patrón o solo evita el
-      // prompt de aprobación — se documenta como hallazgo en la evidencia de FEATURE-005.
-      for (const cmd of invocation.permissions.allowedCommands) {
-        args.push("--allowedTools", `Bash(${cmd})`);
-      }
-      args.push("--permission-mode", "acceptEdits");
     }
 
     const prompt = this.buildPrompt(invocation);
@@ -157,12 +157,67 @@ export class ClaudeCodeExecutor implements Executor {
     if (invocation.permissions.filesystem === "workspace-write") {
       return "Read,Grep,Glob,Write,Edit,Bash";
     }
-    if (invocation.permissions.allowedCommands?.length) {
-      // read-only + comando puntual habilitado (QA): Bash debe estar en el toolset para que el
-      // patrón de --allowedTools tenga algo que restringir.
-      return "Read,Grep,Glob,Bash";
-    }
     return "Read,Grep,Glob";
+  }
+
+  private async runQaIsolated(
+    invocation: PhaseInvocation,
+    apiKey: string,
+    options: RunPhaseOptions
+  ): Promise<PhaseResult> {
+    if (invocation.permissions.filesystem !== "read-only") {
+      throw new Error("QA isolated runtime requires read-only permissions.");
+    }
+    const worker = await startQaWorker(this.options.workingDirectory, options.signal);
+    const temporary = await mkdtemp(path.join(os.tmpdir(), "qa-claude-holder-"));
+    const configPath = path.join(temporary, "mcp.json");
+    try {
+      await writeFile(configPath, JSON.stringify({
+        mcpServers: {
+          orchestrator_worker: {
+            type: "stdio",
+            command: "node",
+            args: ["/isolated/qaMcpBridge.mjs"],
+            env: { QA_WORKER_SOCKET: "/channel/worker.sock", QA_CHANNEL_TOKEN: worker.channelToken },
+            alwaysLoad: true,
+          },
+        },
+      }), "utf8");
+      options.onEvent?.({
+        type: "qa_isolated_inventory",
+        data: { provider: "claude", tools: [...worker.effectiveTools], nativeTools: [] },
+      });
+      const args = [
+        "run", "--rm", "-i", "--read-only",
+        "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+        "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
+        "--workdir", "/holder-empty",
+        "-e", "ANTHROPIC_API_KEY",
+        "-v", `${worker.socketDirectory}:/channel:rw`,
+        "-v", `${qaMcpBridgePath()}:/isolated/qaMcpBridge.mjs:ro`,
+        "-v", `${configPath}:/isolated/mcp.json:ro`,
+        this.options.containerImage ?? DEFAULT_DEVELOPER_CONTAINER_IMAGE,
+        "claude", "-p", "--bare",
+        "--system-prompt", invocation.roleInstructions,
+        "--tools", QA_MCP_TOOL_NAMES.join(","),
+        ...QA_MCP_TOOL_NAMES.flatMap((tool) => ["--allowedTools", tool]),
+        "--mcp-config", "/isolated/mcp.json",
+        "--strict-mcp-config",
+        "--settings", JSON.stringify({ enabledMcpjsonServers: ["orchestrator_worker"] }),
+        "--output-format", "json",
+        "--no-session-persistence",
+      ];
+      if (this.options.model) args.push("--model", this.options.model);
+      args.push(this.buildPrompt(invocation));
+      const raw = await this.execAndCapture("docker", args, undefined, {
+        ...this.buildChildEnv(apiKey),
+        ANTHROPIC_API_KEY: apiKey,
+      }, options);
+      return this.mapToPhaseResult(raw);
+    } finally {
+      await worker.close();
+      await rm(temporary, { recursive: true, force: true });
+    }
   }
 
   private assertWritableRootsMatchCwd(invocation: PhaseInvocation): void {

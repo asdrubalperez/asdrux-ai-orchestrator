@@ -3,7 +3,11 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import os from "node:os";
+import readline from "node:readline";
 import path from "node:path";
+import { QA_ISOLATED_POLICY } from "./isolated-tools/qaPolicy.js";
+import { callQaWorker, startQaWorker } from "./isolated-tools/qaRuntime.js";
+import { TOOL_SCHEMAS } from "./isolated-tools/contracts.js";
 import type {
   Executor,
   ExecutorEvent,
@@ -58,6 +62,7 @@ const PHASE_RESULT_SCHEMA = {
 };
 
 const DEFAULT_CODEX_DEVELOPER_CONTAINER_IMAGE = "ai-orchestrator-codex-developer:latest";
+const DEFAULT_CODEX_QA_HOLDER_IMAGE = "feature015a-codex-pin-candidate:0.145.0";
 const CONTAINER_SCHEMA_PATH = "/schema/phase-result.schema.json";
 
 export interface CodexExecutorOptions {
@@ -125,6 +130,10 @@ export class CodexExecutor implements Executor {
       throw new Error("CODEX_API_KEY no esta definida en el entorno del proceso.");
     }
 
+    if (invocation.agentRole === "qa") {
+      return this.runQaIsolated(invocation, apiKey, options);
+    }
+
     if (invocation.permissions.allowedCommands?.length) {
       throw new Error("CodexExecutor no soporta allowedCommands en FEATURE-008 parte 1b.");
     }
@@ -171,6 +180,166 @@ export class CodexExecutor implements Executor {
     } finally {
       await rm(schemaDir, { recursive: true, force: true });
     }
+  }
+
+  private async runQaIsolated(
+    invocation: PhaseInvocation,
+    apiKey: string,
+    options: RunPhaseOptions
+  ): Promise<PhaseResult> {
+    if (invocation.permissions.filesystem !== "read-only") {
+      throw new Error("QA isolated runtime requires read-only permissions.");
+    }
+    const worker = await startQaWorker(this.options.workingDirectory, options.signal);
+    options.onEvent?.({
+      type: "qa_isolated_inventory",
+      data: { provider: "codex", tools: [...worker.effectiveTools], nativeTools: [] },
+    });
+    const dockerArgs = [
+      "run", "--rm", "-i", "--read-only",
+      "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+      "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
+      "--tmpfs", "/holder-empty:rw,noexec,nosuid,size=16m",
+      "--tmpfs", "/home/node/.codex:rw,nosuid,size=64m",
+      "--workdir", "/holder-empty",
+      "-e", "CODEX_API_KEY",
+      DEFAULT_CODEX_QA_HOLDER_IMAGE,
+      "codex", "--config", "features.shell_tool=false",
+      "app-server", "--listen", "stdio://",
+    ];
+    const env = { ...this.buildChildEnv(apiKey), CODEX_API_KEY: apiKey };
+    try {
+      const output = await this.runQaCodexAppServer(dockerArgs, env, invocation, worker, options);
+      const parsed = validatePhaseResult(JSON.parse(output));
+      return { ...parsed, executorMetadata: { provider: "codex", model: this.options.model } };
+    } finally {
+      await worker.close();
+    }
+  }
+
+  private runQaCodexAppServer(
+    dockerArgs: string[],
+    env: NodeJS.ProcessEnv,
+    invocation: PhaseInvocation,
+    worker: Awaited<ReturnType<typeof startQaWorker>>,
+    options: RunPhaseOptions
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const child = spawn("docker", dockerArgs, { env, stdio: ["pipe", "pipe", "pipe"] });
+      const lines = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
+      let requestId = 1;
+      let threadId = "";
+      let finalText = "";
+      let settled = false;
+      const send = (method: string, params: unknown) => {
+        const id = requestId++;
+        child.stdin.write(JSON.stringify({ method, id, params }) + "\n");
+        return id;
+      };
+      const initializeId = send("initialize", {
+        clientInfo: { name: "asdrux-qa-holder", title: "Asdrux QA Holder", version: "1.0.0" },
+        capabilities: { experimentalApi: true },
+      });
+      let threadRequestId = 0;
+      let turnRequestId = 0;
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        child.kill();
+        reject(error);
+      };
+      const timeout = setTimeout(() => fail(new Error("Codex QA app-server timeout")), options.timeoutMs ?? 300_000);
+      options.signal?.addEventListener("abort", () => fail(new Error("Codex QA app-server aborted")), { once: true });
+      lines.on("line", async (line) => {
+        let message: any;
+        try { message = JSON.parse(line); }
+        catch { fail(new Error("Codex QA app-server emitted invalid JSON")); return; }
+        if (message.id === initializeId) {
+          if (message.error) { fail(new Error(JSON.stringify(message.error))); return; }
+          child.stdin.write(JSON.stringify({ method: "initialized", params: {} }) + "\n");
+          threadRequestId = send("thread/start", {
+            cwd: "/holder-empty", sandbox: "read-only", ephemeral: true, environments: [],
+            model: this.options.model,
+            dynamicTools: QA_ISOLATED_POLICY.tools.map((name) => ({
+              type: "function", name, description: TOOL_SCHEMAS[name].description,
+              inputSchema: TOOL_SCHEMAS[name].args,
+            })),
+          });
+          return;
+        }
+        if (message.id === threadRequestId) {
+          if (message.error) { fail(new Error(JSON.stringify(message.error))); return; }
+          threadId = message.result?.thread?.id ?? message.result?.threadId ?? "";
+          if (!threadId) { fail(new Error("Codex thread/start returned no thread id")); return; }
+          options.onEvent?.({
+            type: "qa_holder_thread_started",
+            data: { provider: "codex", tools: [...QA_ISOLATED_POLICY.tools], nativeTools: [] },
+          });
+          turnRequestId = send("turn/start", {
+            threadId,
+            input: [{ type: "text", text: this.buildPrompt(invocation) }],
+            model: this.options.model,
+            outputSchema: PHASE_RESULT_SCHEMA,
+            cwd: "/holder-empty",
+          });
+          return;
+        }
+        if (message.id === turnRequestId && message.error) {
+          fail(new Error(JSON.stringify(message.error))); return;
+        }
+        if (message.method === "item/tool/call") {
+          const params = message.params ?? {};
+          if (!QA_ISOLATED_POLICY.tools.includes(params.tool)) {
+            child.stdin.write(JSON.stringify({ id: message.id, result: {
+              success: false, contentItems: [{ type: "inputText", text: "TOOL_NOT_FOUND" }],
+            }}) + "\n");
+            return;
+          }
+          try {
+            const result = await callQaWorker(
+              worker,
+              params.tool,
+              params.arguments,
+              AbortSignal.timeout(120_000),
+            );
+            child.stdin.write(JSON.stringify({ id: message.id, result: {
+              success: true,
+              contentItems: [{ type: "inputText", text: JSON.stringify(result) }],
+            }}) + "\n");
+          } catch {
+            child.stdin.write(JSON.stringify({ id: message.id, result: {
+              success: false, contentItems: [{ type: "inputText", text: "WORKER_UNAVAILABLE" }],
+            }}) + "\n");
+          }
+          return;
+        }
+        if (message.method === "item/agentMessage/delta" && typeof message.params?.delta === "string") {
+          finalText += message.params.delta;
+        }
+        if (message.method === "turn/completed") {
+          clearTimeout(timeout);
+          if (settled) return;
+          if (!finalText.trim()) {
+            fail(new Error("Codex QA turn completed without assistant output: " +
+              JSON.stringify(message.params?.turn?.status ?? message.params?.status ?? "unknown")));
+            return;
+          }
+          settled = true;
+          child.kill("SIGTERM");
+          resolve(finalText.trim());
+        }
+        if (message.id !== undefined && message.method && message.method !== "item/tool/call") {
+          fail(new Error(`Codex QA denied server request: ${message.method}`));
+        }
+      });
+      child.stderr.on("data", (chunk) => options.onEvent?.({
+        type: "qa_holder_stderr", data: { provider: "codex", text: String(chunk).slice(0, 500) },
+      }));
+      child.once("error", fail);
+      child.once("exit", (code) => {
+        if (!settled) fail(new Error(`Codex QA holder exited early: ${code}`));
+      });
+    });
   }
 
   private assertWritableRootsMatchCwd(invocation: PhaseInvocation): void {

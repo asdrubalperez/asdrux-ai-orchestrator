@@ -115,7 +115,7 @@ test("Codex proxy pins holder-empty and dispatches item/tool/call", async () => 
   assert.equal(proxy.threadStartParams().cwd, "/holder-empty");
   assert.equal(proxy.threadStartParams().sandbox, "read-only");
   assert.deepEqual(await proxy.handleToolCall({
-    method: "item/tool/call", params: { callId: "c1", name: "fs_read", arguments: { path: "a" } },
+    method: "item/tool/call", params: { callId: "c1", tool: "fs_read", arguments: { path: "a" } },
   }), { callId: "c1", result: "ok" });
   await assert.rejects(proxy.handleToolCall({ method: "command/exec", params: {} }), /METHOD_DENIED/);
 });

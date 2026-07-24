@@ -62,12 +62,12 @@ export class CodexAppServerProxy {
     if (!notification || typeof notification !== "object") throw new Error("INVALID_APP_SERVER_MESSAGE");
     const value = notification as Record<string, unknown>;
     if (value.method !== "item/tool/call") throw new Error("METHOD_DENIED");
-    const params = value.params as { callId?: string; name?: IsolatedToolName; arguments?: unknown };
-    if (!params.callId || !params.name || !this.policy.tools.includes(params.name)) throw new Error("TOOL_NOT_FOUND");
+    const params = value.params as { callId?: string; tool?: IsolatedToolName; arguments?: unknown };
+    if (!params.callId || !params.tool || !this.policy.tools.includes(params.tool)) throw new Error("TOOL_NOT_FOUND");
     if (this.pending.has(params.callId)) throw new Error("REPLAY_DETECTED");
     this.pending.add(params.callId);
     try {
-      return { callId: params.callId, result: await this.dispatcher.call(params.name, params.arguments) };
+      return { callId: params.callId, result: await this.dispatcher.call(params.tool, params.arguments) };
     } finally {
       this.pending.delete(params.callId);
     }
