@@ -27,7 +27,7 @@ Insumos:
   genérica
 - **Type**: Seguridad / Infraestructura de confinamiento de ejecución
 - **Owner**: Asdrubal Perez
-- **Status**: Draft — pendiente de Approval Gate
+- **Status**: Aceptada — Approval Gate completo (Etapas 1, 2 y 3)
 - **Priority**: Alta — prerequisito de 015B, que a su vez es prerequisito de FEATURE-016 completo
 
 ---
@@ -566,9 +566,15 @@ Requiere cuenta Pro personal desechable pagada para la prueba. Nunca se usa la s
 
 ## Etapa 3 — Aceptación
 
-1. ☐ Tests automatizados y contract tests pasando.
-2. ☐ Evidencia real completa en el formato de Features 012/014.
-3. ☐ Revisión conjunta Architect + owner y aprobación explícita antes de wiring de FEATURE-015B.
+1. ☑ Tests automatizados y contract tests pasando. 24/24 en cada ronda de Etapa 1 y Etapa 2.
+2. ☑ Evidencia real completa en el formato de Features 012/014. Ver
+   `docs/features/FEATURE-015A-stage1-results.md`, `docs/features/FEATURE-015A-stage2-results.md`
+   y `docs/features/evidence/FEATURE-015A/` y `docs/features/evidence/FEATURE-015A-stage2/`.
+3. ☑ Revisión conjunta Architect + owner completada el 2026-07-23, incluyendo auditoría de
+   consistencia de punta a punta y verificación independiente de ausencia de secretos en toda la
+   evidencia commiteada. Sin hallazgos pendientes.
+
+**Etapa 3 cerrada: 3/3 ítems ☑. FEATURE-015A aceptada.**
 
 ---
 
