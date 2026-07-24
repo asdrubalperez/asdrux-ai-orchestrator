@@ -7,8 +7,7 @@ Versión: v4 — backend de `web_search` reemplazado por Tavily Search básico (
 > rediseñan aquí. FEATURE-015A entregó arquitectura, contratos y spikes; no dejó un runtime
 > productivo integrado en `src/`.
 
-Estado: 🟡 Diseño técnicamente completo, no aprobado — pendiente de revisión del Architect/owner
-y Approval Gate explícito.
+Estado: 🟢 Diseño v4 aprobado por el owner para implementación por partes (2026-07-24).
 
 ---
 
@@ -17,7 +16,7 @@ y Approval Gate explícito.
 - **Name**: FEATURE-015B — Wiring real por rol y por proveedor
 - **Type**: Seguridad / Arquitectura — extensión de FEATURE-015A
 - **Owner**: asdrubalperez
-- **Status**: Diseño v4, no aprobado
+- **Status**: Diseño v4 aprobado; implementación en 3 partes
 - **Priority**: Alta — prerequisito de FEATURE-016B (OAuth para Developer)
 
 ---
@@ -374,10 +373,10 @@ desvío de la versión pinneada falla cerrado.
 
 # 10. Approval Gate
 
-Implementación prohibida hasta aprobación humana explícita.
+Approval Gate cerrado por confirmación explícita del owner el 2026-07-24. La implementación
+se ejecuta en tres partes dentro de la misma rama; ninguna parte aislada autoriza merge a `main`.
 
-La revisión técnica v4 cerró los huecos conocidos. El documento queda listo para revisión del
-Architect/owner, quienes deben confirmar antes del Approval Gate:
+El owner confirmó los cuatro puntos del Approval Gate:
 
 1. que 015B incluye productizar el runtime de 015A, no solo modificar Executors;
 2. que Tavily Search `basic`, el body cerrado sin Answer/Raw/Extract, el search proxy y el
