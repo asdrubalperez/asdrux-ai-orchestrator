@@ -1,6 +1,6 @@
 # FEATURE-015B — Wiring real por rol y por proveedor
 
-Versión: v3 — `web_search` y backend Brave Search API incorporados (2026-07-24)
+Versión: v4 — backend de `web_search` reemplazado por Tavily Search básico (2026-07-24)
 
 > Parte 015B de FEATURE-015. Depende de FEATURE-015A (ejecutada y mergeada): su protocolo
 > holder↔worker, autenticación de canal, pinning de Codex, credencial privada y fencing no se
@@ -17,7 +17,7 @@ y Approval Gate explícito.
 - **Name**: FEATURE-015B — Wiring real por rol y por proveedor
 - **Type**: Seguridad / Arquitectura — extensión de FEATURE-015A
 - **Owner**: asdrubalperez
-- **Status**: Diseño v3, no aprobado
+- **Status**: Diseño v4, no aprobado
 - **Priority**: Alta — prerequisito de FEATURE-016B (OAuth para Developer)
 
 ---
@@ -108,7 +108,9 @@ Feature.
    escapes por symlink y resoluciones finales fuera del worktree. Solo Developer puede escribir.
 6. `command_exec` recibe `program`, `args[]`, `cwd` relativo y `timeoutMs`; el worker usa
    `spawn(..., {shell:false})`. Solo Developer posee esta tool.
-7. `web_search` usa exclusivamente Brave Search API a través del proxy confiable definido en 7.5.
+7. `web_search` usa exclusivamente Tavily Search API en modo básico a través del proxy confiable
+   definido en 7.5. `search_depth`, `include_answer`, `include_raw_content` y `auto_parameters`
+   siempre se envían explícitamente con los valores cerrados de 7.2.
    No usa la búsqueda nativa de Claude/Codex ni hace fallback a ella: eso preserva el mismo
    contrato, resultados y política de credenciales en ambos proveedores.
 8. `web_fetch` acepta solo HTTPS y `GET`/`HEAD`; valida cada resolución y redirect, y rechaza
@@ -167,11 +169,23 @@ Todos usan JSON Schema con `additionalProperties:false`:
 - `web_search`: `{query, maxResults?}` →
   `{results:[{url,title,snippet}], truncated}`.
   `query` es texto UTF-8 no vacío de hasta 500 caracteres. `maxResults` es entero entre 1 y 20,
-  default 10. El proxy llama `GET https://api.search.brave.com/res/v1/web/search` con `q`,
-  `count=maxResults` y `safesearch=moderate`; normaliza únicamente `web.results[].url`,
-  `.title` y `.description`, elimina markup de `title`/`description`, descarta entradas sin URL
-  HTTPS válida y conserva el orden del backend. `truncated=true` si Brave indica más resultados,
-  devuelve más elementos que el límite o algún resultado se descarta por límites de tamaño.
+  default 10. El proxy llama `POST https://api.tavily.com/search`, con
+  `Authorization: Bearer <TAVILY_API_KEY>`, `Content-Type: application/json` y exactamente:
+
+  `{query, search_depth:"basic", max_results:maxResults, topic:"general", include_answer:false,
+  include_raw_content:false, include_images:false, auto_parameters:false, safe_search:true}`.
+
+  `search_depth:"basic"` cuesta 1 crédito y produce un resumen NLP por URL.
+  `include_answer:false` y `include_raw_content:false` son obligatorios y explícitos: nunca se
+  omiten confiando en defaults. `auto_parameters:false` impide que Tavily cambie automáticamente a
+  `advanced`; `include_images:false` evita datos fuera del contrato. Esta Feature nunca llama
+  `/extract`.
+
+  El normalizador consume exclusivamente `results[].url`, `.title` y `.content`; mapea `content`
+  a `snippet`, descarta `answer`, `raw_content`, `score`, imágenes, favicon, metadata de uso y
+  cualquier otro campo. Rechaza entradas sin URL HTTPS/título/content válidos y conserva el orden.
+  `truncated=true` si Tavily devuelve `maxResults` elementos —señal conservadora de que puede
+  haber más—, devuelve elementos por encima del límite, se descarta alguno o se recorta un campo.
 - `web_fetch`: `{url, method?:"GET"|"HEAD", timeoutMs?, maxBytes?}` →
   `{finalUrl,status,headers,contentType,body,truncated}`. Solo retorna headers allowlisted:
   `content-type`, `content-length`, `last-modified`, `etag`.
@@ -201,35 +215,42 @@ Se mantienen `experimentalApi:true`, el proxy fail-closed y la versión/imagen f
 
 ## 7.5 Backend y credencial de `web_search`
 
-Backend elegido: **Brave Search API, endpoint Web Search**.
+Backend elegido: **Tavily Search API, endpoint `/search`, modo `basic`**.
 
 Se elige porque:
 
 - es independiente de Anthropic/OpenAI y mantiene comportamiento agnóstico entre Executors;
-- expone resultados web estructurados con URL, título y descripción, suficientes para el patrón
+- expone resultados estructurados con URL, título y `content`, suficientes para el patrón
   `web_search` → selección del modelo → `web_fetch`;
-- tiene índice de búsqueda propio y API HTTP documentada;
+- el tier Researcher incluye 1.000 créditos/mes sin tarjeta; una búsqueda `basic` consume 1
+  crédito, suficiente para el bajo volumen esperado;
+- no exige la posible atribución pública asociada al crédito gratuito de Brave;
+- con `include_answer:false`, `include_raw_content:false`, `include_images:false` y sin usar
+  `/extract`, no extrae contenido completo ni genera una respuesta, evitando superposición con
+  `web_fetch`;
 - evita depender de tools server-side nativas cuya disponibilidad, contrato, facturación y
   ejecución difieren entre Claude y Codex.
 
-Tavily también ofrece resultados estructurados orientados a agentes, pero agrega capacidades de
-respuesta generada/extracción que se superponen con `web_fetch` y amplían el alcance. Las búsquedas
-nativas de Claude/Codex se descartan porque romperían la paridad por proveedor y el fail-closed.
-No se encontró un backend de búsqueda ya contratado o configurado en el repo.
+Brave ofrece el mismo volumen gratuito aproximado y menor precio por excedente, pero requiere
+tarjeta para habilitar el plan y su anuncio vigente asocia el crédito gratuito a atribución
+pública. Tavily avanzado, Answers/Research y Extract se descartan: amplían contenido/costo y no
+pertenecen a esta Feature. Las búsquedas nativas de Claude/Codex también se descartan porque
+romperían la paridad por proveedor y el fail-closed.
 
-`BRAVE_SEARCH_API_KEY` es una credencial de servicio sensible: habilita consumo facturable,
-agotamiento de cuota y abuso. No vive en el holder —para no concentrarla con la credencial OAuth—
-ni en el worker —que procesa contenido no confiable y posee el worktree—. Se monta/injecta solo en
-un **search proxy confiable efímero** administrado por el Orquestador:
+`TAVILY_API_KEY` es una credencial de servicio sensible: habilita consumo de cuota y, si en el
+futuro se activa PAYG, consumo facturable, agotamiento de cuota y abuso. No vive en el holder
+—para no concentrarla con la credencial OAuth— ni en el worker —que procesa contenido no confiable
+y posee el worktree—. Se monta/injecta solo en un **search proxy confiable efímero** administrado
+por el Orquestador:
 
 - sin mount del worktree, caché OAuth ni socket Docker;
-- egress permitido únicamente a `api.search.brave.com:443`;
+- egress permitido únicamente a `api.tavily.com:443`;
 - endpoint privado accesible solo desde el worker de esa invocación;
 - canal autenticado con token efímero distinto del canal holder↔worker;
-- acepta únicamente el contrato `web_search`, aplica rate/timeout/tamaño y agrega
-  `X-Subscription-Token` al request saliente;
+- acepta únicamente el contrato `web_search`, construye el body cerrado anterior, aplica
+  rate/timeout/tamaño y agrega `Authorization: Bearer <TAVILY_API_KEY>`;
 - nunca registra la key, token de canal ni headers completos;
-- al faltar key, recibir 401/403/429/5xx, timeout o respuesta inválida devuelve `tool_error`
+- al faltar key, recibir 401/403/429/432/433/5xx, timeout o respuesta inválida devuelve `tool_error`
   usando el enum existente de 015A: `WORKER_UNAVAILABLE` para indisponibilidad/rate limit y
   `INTERNAL_ERROR` para respuesta inválida, con causa sanitizada en `details.reason`; jamás usa
   otro backend.
@@ -246,7 +267,7 @@ Cada fase crea holder y worker efímeros en una red privada exclusiva. Cuando el
 - holder: caché/credencial privada y egress al proveedor; sin worktree;
 - worker: worktree RO para Architect/Functional/Planning/QA, RW para Developer; sin credenciales,
   caché, socket Docker ni control plane;
-- search proxy: `BRAVE_SEARCH_API_KEY`, sin worktree ni OAuth, con egress solo a Brave;
+- search proxy: `TAVILY_API_KEY`, sin worktree ni OAuth, con egress solo a Tavily;
 - QA worker: sin egress;
 - otros workers: egress público. `web_fetch` aplica protección SSRF; Developer conserva egress
   amplio también mediante `command_exec`, riesgo ya aceptado en 015A.
@@ -263,7 +284,7 @@ channel token.
 
 ## 7.8 Dependencias y ambiente
 
-No se agrega SDK de búsqueda: el search proxy usa HTTPS y valida el JSON de Brave contra un schema
+No se agrega SDK de búsqueda: el search proxy usa HTTPS y valida el JSON de Tavily contra un schema
 local. Cualquier librería nueva para glob/regex debe justificarse antes de incorporarla; se
 prefieren APIs de Node y capacidades ya disponibles.
 
@@ -273,8 +294,9 @@ notebook se actualiza solo con `git pull` tras el push, conforme al Delivery Wor
 Fuentes de producto consultadas durante la revisión: documentación oficial de
 [tools de Claude](https://platform.claude.com/docs/en/managed-agents/tools) y
 [tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview), y documentación
-oficial de [Brave Search API](https://brave.com/search/api/) y su
-[Web Search endpoint](https://api-dashboard.search.brave.com/api-reference/web/search/get).
+oficial de [Tavily Search](https://docs.tavily.com/documentation/api-reference/endpoint/search),
+[créditos/precios](https://docs.tavily.com/documentation/api-credits) y
+[rate limits](https://docs.tavily.com/documentation/rate-limits).
 Para Codex,
 015B se mantiene sobre el contrato app-server y el pin ya validados localmente por 015A; cualquier
 desvío de la versión pinneada falla cerrado.
@@ -287,9 +309,9 @@ desvío de la versión pinneada falla cerrado.
 |---|---|---|
 | Inventario por rol/proveedor | 10 combinaciones | Cero tools nativas; catálogo exactamente igual a la Regla 3 |
 | Investigación | Architect/Functional/Planning, ambos proveedores, URL HTTPS | `web_fetch` pasa por worker y devuelve contrato equivalente |
-| Descubrimiento web | Architect/Functional/Planning, ambos proveedores, consulta real | `web_search` pasa worker→search proxy→Brave y retorna URL/título/snippet normalizados; luego una URL puede consumirse con `web_fetch` |
+| Descubrimiento web | Architect/Functional/Planning, ambos proveedores, consulta real | `web_search` pasa worker→search proxy→Tavily basic y retorna URL/título/snippet normalizados desde `results[].content`; luego una URL puede consumirse con `web_fetch` |
 | Resultados de búsqueda acotados | Consulta con más resultados que `maxResults` | Máximo solicitado, orden preservado y `truncated=true`; frame dentro del límite |
-| Backend de búsqueda caído | Key ausente, 401/403/429/5xx, timeout o JSON inválido | `tool_error` tipado y sanitizado; sin fallback nativo y sin key en logs |
+| Backend de búsqueda caído | Key ausente, 401/403/429/432/433/5xx, timeout o JSON inválido | `tool_error` tipado y sanitizado; sin fallback nativo y sin key en logs |
 | QA intenta red/shell | Prompt adversarial | Tool ausente/rechazada; `TestExecutor` sigue ejecutando el test |
 | Developer compila | Comando real | `command_exec` conserva exit code/stdout/stderr |
 | Developer edita | Crear y modificar archivo | Patch esperado solo en el worktree |
@@ -305,8 +327,11 @@ desvío de la versión pinneada falla cerrado.
 - Run real completo por rol y proveedor (10).
 - Tests unitarios de policy matrix, schemas y las ocho tools.
 - Contract tests Claude MCP y Codex `dynamicTools`/`item/tool/call`.
-- Contract tests del normalizador Brave con fixtures válidas, vacías, sobredimensionadas y
-  malformadas; ningún test imprime una key real.
+- Contract tests del request Tavily que exigen literalmente `search_depth:"basic"`,
+  `include_answer:false`, `include_raw_content:false`, `include_images:false` y
+  `auto_parameters:false`, y prohíben `/extract`.
+- Contract tests del normalizador Tavily con fixtures válidas, vacías, sobredimensionadas y
+  malformadas; verifican `content`→`snippet` y que ningún test imprime una key real.
 - Integración Docker: mounts, paths/symlinks, SSRF, red por rol, aislamiento del search proxy,
   backend caído/rate limit, cancelación, límites y cleanup.
 - Inventario efectivo de tools capturado.
@@ -324,11 +349,15 @@ desvío de la versión pinneada falla cerrado.
   fail-closed.
 - **SSRF/DNS rebinding**: mitigación mediante validación de esquema, resolución y redirects,
   conexión solo a IP pública validada y tests negativos.
-- **Dependencia/costo de Brave**: precio, cuota, rate limits y disponibilidad pertenecen a un
-  tercero adicional. Mitigación: límites por invocación, métricas sin query sensible, errores
-  explícitos para 429/5xx y ausencia de fallback silencioso. El owner debe contratar/configurar
-  el plan antes de la validación E2E real.
-- **Privacidad de consultas**: las queries se envían a Brave y pueden contener contexto sensible.
+- **Dependencia/costo de Tavily**: el tier Researcher entrega 1.000 créditos/mes sin tarjeta y
+  `basic` consume 1 crédito/request. La clave Development del tier gratuito admite 100 RPM; 1.000
+  RPM requiere clave Production con plan pago activo o PAYG. Mitigación: rate limit local menor o
+  igual a 100 RPM, límites por invocación, métricas sin query sensible, errores explícitos para
+  429/432/433/5xx y ausencia de fallback. PAYG no se habilita como parte de esta Feature.
+- **Cambio accidental de costo/shape**: `auto_parameters:true` podría promover a `advanced`
+  (2 créditos) y las opciones answer/raw podrían ampliar contenido. Mitigación: body cerrado con
+  valores explícitos, schema/contract tests y rechazo de config diferente.
+- **Privacidad de consultas**: las queries se envían a Tavily y pueden contener contexto sensible.
   Los prompts de rol prohíben incluir secretos/código privado; no se persiste la query en logs
   operativos por defecto y esta transferencia debe aceptarse en el Approval Gate.
 - **Compromiso de la key de búsqueda**: permitiría abuso/costo aunque no dé acceso OAuth.
@@ -347,12 +376,13 @@ desvío de la versión pinneada falla cerrado.
 
 Implementación prohibida hasta aprobación humana explícita.
 
-La revisión técnica v3 cerró los huecos conocidos. El documento queda listo para revisión del
+La revisión técnica v4 cerró los huecos conocidos. El documento queda listo para revisión del
 Architect/owner, quienes deben confirmar antes del Approval Gate:
 
 1. que 015B incluye productizar el runtime de 015A, no solo modificar Executors;
-2. que Brave Search API, el search proxy y el tratamiento de su key son aceptados, y que
-   `web_search` + `web_fetch` cubren el flujo de investigación;
+2. que Tavily Search `basic`, el body cerrado sin Answer/Raw/Extract, el search proxy y el
+   tratamiento de `TAVILY_API_KEY` son aceptados, y que `web_search` + `web_fetch` cubren el flujo
+   de investigación;
 3. que la matriz cerrada de tools por rol es correcta;
 4. que la VPS es checkout de origen y ambiente obligatorio de validación.
 
@@ -365,7 +395,11 @@ Codex corrigió en v2: estado real de QA; diferencia entre spikes y runtime prod
 la falsa necesidad de interceptar `shell_tool` en Codex, que se deshabilita y reemplaza por
 `dynamicTools`.
 
-En v3, por decisión del owner, se incorporó `web_search` con Brave Search API, contrato
+En v3 se incorporó `web_search` con Brave Search API, contrato
 agnóstico, proxy confiable separado, gestión explícita de credencial, validaciones y riesgos.
 
-El Architect y el owner revisan esta v3 antes de aprobar implementación.
+En v4, por decisión del owner tras comparar tiers gratuitos, Brave fue reemplazado por Tavily
+Search `basic`, con `include_answer:false`, `include_raw_content:false`,
+`include_images:false`, `auto_parameters:false` y prohibición de `/extract`.
+
+El Architect y el owner revisan esta v4 antes de aprobar implementación.
