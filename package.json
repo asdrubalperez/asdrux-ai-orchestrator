@@ -12,7 +12,7 @@
     "web:typecheck": "tsc -p web/tsconfig.json --noEmit",
     "web:build": "vite build",
     "build": "tsc --noEmit && tsc -p web/tsconfig.json --noEmit && vite build",
-    "test": "tsx --test src/**/*.test.ts"
+    "test": "tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.20",

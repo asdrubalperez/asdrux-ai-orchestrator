@@ -2,8 +2,11 @@ import { spawn, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
-import os from "node:os";
+import readline from "node:readline";
 import path from "node:path";
+import { resolveRolePolicy } from "./isolated-tools/rolePolicy.js";
+import { callRoleWorker, startRoleWorker } from "./isolated-tools/roleRuntime.js";
+import { TOOL_SCHEMAS } from "./isolated-tools/contracts.js";
 import type {
   Executor,
   ExecutorEvent,
@@ -58,6 +61,7 @@ const PHASE_RESULT_SCHEMA = {
 };
 
 const DEFAULT_CODEX_DEVELOPER_CONTAINER_IMAGE = "ai-orchestrator-codex-developer:latest";
+const DEFAULT_CODEX_QA_HOLDER_IMAGE = "feature015a-codex-pin-candidate:0.145.0";
 const CONTAINER_SCHEMA_PATH = "/schema/phase-result.schema.json";
 
 export interface CodexExecutorOptions {
@@ -125,52 +129,207 @@ export class CodexExecutor implements Executor {
       throw new Error("CODEX_API_KEY no esta definida en el entorno del proceso.");
     }
 
-    if (invocation.permissions.allowedCommands?.length) {
-      throw new Error("CodexExecutor no soporta allowedCommands en FEATURE-008 parte 1b.");
+    return this.runRoleIsolated(invocation, apiKey, options);
+  }
+
+  private async runRoleIsolated(
+    invocation: PhaseInvocation,
+    apiKey: string,
+    options: RunPhaseOptions
+  ): Promise<PhaseResult> {
+    const policy = resolveRolePolicy(invocation.agentRole);
+    if (invocation.permissions.filesystem !== policy.filesystem) {
+      throw new Error(`${invocation.agentRole} filesystem policy mismatch`);
     }
-
-    if (invocation.permissions.filesystem === "workspace-write") {
-      this.assertWritableRootsMatchCwd(invocation);
-    }
-
-    const schemaDir = await mkdtemp(path.join(os.tmpdir(), "codex-phase-schema-"));
-    const schemaPath = path.join(schemaDir, "phase-result.schema.json");
-
+    if (policy.filesystem === "workspace-write") this.assertWritableRootsMatchCwd(invocation);
+    const worker = await startRoleWorker(
+      invocation.agentRole,
+      this.options.workingDirectory,
+      process.env.TAVILY_API_KEY,
+      options.signal,
+      (event) => {
+        if (event.type === "isolated_tool_call") {
+          options.onEvent?.({ type: "isolated_tool_call", data: { ...event, provider: "codex" } });
+        }
+      },
+    );
+    options.onEvent?.({
+      type: "isolated_inventory",
+      data: { role: invocation.agentRole, provider: "codex", tools: [...worker.effectiveTools], nativeTools: [] },
+    });
+    const dockerArgs = [
+      "run", "--rm", "-i", "--read-only",
+      "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+      "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
+      "--tmpfs", "/holder-empty:rw,noexec,nosuid,size=16m",
+      "--tmpfs", "/home/node/.codex:rw,nosuid,size=64m",
+      "--workdir", "/holder-empty",
+      "-e", "CODEX_API_KEY",
+      DEFAULT_CODEX_QA_HOLDER_IMAGE,
+      "codex", "--config", "features.shell_tool=false",
+      "app-server", "--listen", "stdio://",
+    ];
+    const env = { ...this.buildChildEnv(apiKey), CODEX_API_KEY: apiKey };
     try {
-      await writeFile(schemaPath, JSON.stringify(PHASE_RESULT_SCHEMA, null, 2), "utf8");
-
-      const runsInContainer =
-        this.options.sandbox === "container" && invocation.permissions.filesystem === "workspace-write";
-      const args = [
-        "exec",
-        "--sandbox",
-        runsInContainer ? "danger-full-access" : invocation.permissions.filesystem,
-        ...(this.shouldDisableShellTool(invocation) ? ["--config", "features.shell_tool=false"] : []),
-        "--output-schema",
-        runsInContainer ? CONTAINER_SCHEMA_PATH : schemaPath,
-      ];
-
-      if (this.options.model) {
-        args.push("--model", this.options.model);
-      }
-
-      args.push(this.buildPrompt(invocation));
-
-      const raw = runsInContainer
-        ? await this.spawnCodexInContainer(args, apiKey, schemaDir, options)
-        : await this.execAndCapture(
-            this.codexBinary,
-            args,
-            this.options.workingDirectory,
-            this.buildChildEnv(apiKey),
-            options
-          );
-
-      options.onEvent?.({ type: "codex_raw_output", data: raw } satisfies ExecutorEvent);
-      return this.mapToPhaseResult(raw);
+      const output = await this.runRoleCodexAppServer(dockerArgs, env, invocation, policy, worker, options);
+      const parsed = validatePhaseResult(parseLastJsonObject(output));
+      return { ...parsed, executorMetadata: { provider: "codex", model: this.options.model } };
     } finally {
-      await rm(schemaDir, { recursive: true, force: true });
+      await worker.close();
     }
+  }
+
+  private runRoleCodexAppServer(
+    dockerArgs: string[],
+    env: NodeJS.ProcessEnv,
+    invocation: PhaseInvocation,
+    policy: ReturnType<typeof resolveRolePolicy>,
+    worker: Awaited<ReturnType<typeof startRoleWorker>>,
+    options: RunPhaseOptions
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const child = spawn("docker", dockerArgs, { env, stdio: ["pipe", "pipe", "pipe"] });
+      const lines = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
+      let requestId = 1;
+      let threadId = "";
+      let finalText = "";
+      let settled = false;
+      const send = (method: string, params: unknown) => {
+        const id = requestId++;
+        child.stdin.write(JSON.stringify({ method, id, params }) + "\n");
+        return id;
+      };
+      const initializeId = send("initialize", {
+        clientInfo: { name: "asdrux-isolated-holder", title: "Asdrux Isolated Holder", version: "1.0.0" },
+        capabilities: { experimentalApi: true },
+      });
+      let loginRequestId = 0;
+      let threadRequestId = 0;
+      let turnRequestId = 0;
+      let timeout: NodeJS.Timeout | undefined;
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        child.kill();
+        reject(error);
+      };
+      timeout = setTimeout(() => fail(new Error("Codex QA app-server timeout")), options.timeoutMs ?? 300_000);
+      options.signal?.addEventListener("abort", () => fail(new Error("Codex QA app-server aborted")), { once: true });
+      lines.on("line", async (line) => {
+        let message: any;
+        try { message = JSON.parse(line); }
+        catch { fail(new Error("Codex QA app-server emitted invalid JSON")); return; }
+        if (!message.method && message.id === initializeId) {
+          if (message.error) { fail(new Error(JSON.stringify(message.error))); return; }
+          child.stdin.write(JSON.stringify({ method: "initialized", params: {} }) + "\n");
+          loginRequestId = send("account/login/start", {
+            type: "apiKey",
+            apiKey: env.CODEX_API_KEY,
+          });
+          return;
+        }
+        if (!message.method && message.id === loginRequestId) {
+          if (message.error) { fail(new Error(JSON.stringify(message.error))); return; }
+          threadRequestId = send("thread/start", {
+            cwd: "/holder-empty", sandbox: "read-only", ephemeral: true, environments: [],
+            model: this.options.model,
+            dynamicTools: policy.tools.map((name) => ({
+              type: "function", name, description: TOOL_SCHEMAS[name].description,
+              inputSchema: TOOL_SCHEMAS[name].args,
+            })),
+          });
+          return;
+        }
+        if (!message.method && message.id === threadRequestId) {
+          if (message.error) { fail(new Error(JSON.stringify(message.error))); return; }
+          threadId = message.result?.thread?.id ?? message.result?.threadId ?? "";
+          if (!threadId) { fail(new Error("Codex thread/start returned no thread id")); return; }
+          options.onEvent?.({
+            type: "isolated_holder_thread_started",
+            data: { role: invocation.agentRole, provider: "codex", tools: [...policy.tools], nativeTools: [] },
+          });
+          turnRequestId = send("turn/start", {
+            threadId,
+            input: [{ type: "text", text: this.buildPrompt(invocation) }],
+            model: this.options.model,
+            outputSchema: PHASE_RESULT_SCHEMA,
+            cwd: "/holder-empty",
+          });
+          return;
+        }
+        if (!message.method && message.id === turnRequestId && message.error) {
+          fail(new Error(JSON.stringify(message.error))); return;
+        }
+        if (message.method === "item/fileChange/requestApproval" ||
+            message.method === "item/commandExecution/requestApproval") {
+          options.onEvent?.({
+            type: "isolated_native_tool_denied",
+            data: { role: invocation.agentRole, provider: "codex", method: message.method },
+          });
+          child.stdin.write(JSON.stringify({ id: message.id, result: { decision: "decline" } }) + "\n");
+          return;
+        }
+        if (message.method === "item/tool/call") {
+          const params = message.params ?? {};
+          if (!policy.tools.includes(params.tool)) {
+            child.stdin.write(JSON.stringify({ id: message.id, result: {
+              success: false, contentItems: [{ type: "inputText", text: "TOOL_NOT_FOUND" }],
+            }}) + "\n");
+            return;
+          }
+          try {
+            const result = await callRoleWorker(
+              worker,
+              params.tool,
+              params.arguments,
+              AbortSignal.timeout(120_000),
+            );
+            child.stdin.write(JSON.stringify({ id: message.id, result: {
+              success: true,
+              contentItems: [{ type: "inputText", text: JSON.stringify(result) }],
+            }}) + "\n");
+          } catch {
+            child.stdin.write(JSON.stringify({ id: message.id, result: {
+              success: false, contentItems: [{ type: "inputText", text: "WORKER_UNAVAILABLE" }],
+            }}) + "\n");
+          }
+          return;
+        }
+        if (message.method === "item/agentMessage/delta" && typeof message.params?.delta === "string") {
+          finalText += message.params.delta;
+        }
+        if (message.method === "turn/completed") {
+          clearTimeout(timeout);
+          if (settled) return;
+          if (!finalText.trim()) {
+            fail(new Error("Codex QA turn completed without assistant output: " +
+              JSON.stringify(message.params?.turn?.status ?? message.params?.status ?? "unknown")));
+            return;
+          }
+          settled = true;
+          child.kill("SIGTERM");
+          resolve(finalText.trim());
+        }
+        if (message.id !== undefined && message.method && message.method !== "item/tool/call") {
+          fail(new Error(`Codex QA denied server request: ${message.method}`));
+        }
+      });
+      child.stderr.on("data", (chunk) => options.onEvent?.({
+        type: "isolated_holder_stderr",
+        data: {
+          role: invocation.agentRole,
+          provider: "codex",
+          text: String(chunk)
+            .slice(0, 500)
+            .replaceAll(env.CODEX_API_KEY ?? "", env.CODEX_API_KEY ? "[REDACTED]" : ""),
+        },
+      }));
+      child.once("error", fail);
+      child.once("exit", (code) => {
+        if (!settled) fail(new Error(`Codex QA holder exited early: ${code}`));
+      });
+    });
   }
 
   private assertWritableRootsMatchCwd(invocation: PhaseInvocation): void {
@@ -184,14 +343,14 @@ export class CodexExecutor implements Executor {
     }
   }
 
-  private shouldDisableShellTool(invocation: PhaseInvocation): boolean {
-    return invocation.agentRole === "qa";
-  }
-
   private buildPrompt(invocation: PhaseInvocation): string {
     return [
       "INSTRUCCIONES DE ROL:",
       invocation.roleInstructions,
+      "",
+      "CAPACIDADES EFECTIVAS: usa exclusivamente las dynamic tools provistas por orchestrator.",
+      "No intentes shell_tool, apply_patch, fileChange ni ninguna tool nativa.",
+      "Para cambios usa fs_write/fs_edit; para comandos usa command_exec.",
       "",
       "Responde exclusivamente con un objeto JSON que respete el schema provisto por --output-schema.",
       "No agregues Markdown ni texto fuera del JSON final.",
@@ -211,47 +370,6 @@ export class CodexExecutor implements Executor {
     }
     env.CODEX_API_KEY = apiKey;
     return env;
-  }
-
-  /**
-   * FEATURE-008 Parte 2: en la VPS, `workspace-write` nativo de Codex dispara bubblewrap y falla
-   * por privilegios de red del kernel (`RTM_NEWADDR`). En modo contenedor, Codex corre sin su
-   * sandbox propio (`danger-full-access`) y el confinamiento lo imponen los mounts/capabilities de
-   * Docker, igual que el camino Developer ya validado para Claude Code.
-   */
-  private spawnCodexInContainer(
-    args: string[],
-    apiKey: string,
-    schemaDir: string,
-    options: RunPhaseOptions
-  ): Promise<RawCodexResult> {
-    const image = this.options.containerImage ?? DEFAULT_CODEX_DEVELOPER_CONTAINER_IMAGE;
-    const dockerArgs = [
-      "run",
-      "--rm",
-      "--cap-drop",
-      "ALL",
-      "--security-opt",
-      "no-new-privileges",
-      "--pids-limit",
-      "256",
-      "--memory",
-      "512m",
-      "--cpus",
-      "1",
-      "-v",
-      `${this.options.workingDirectory}:/workspace:rw`,
-      "-v",
-      `${schemaDir}:/schema:ro`,
-      "--workdir",
-      "/workspace",
-      "-e",
-      `CODEX_API_KEY=${apiKey}`,
-      image,
-      "codex",
-      ...args,
-    ];
-    return this.execAndCapture("docker", dockerArgs, undefined, undefined, options);
   }
 
   private execAndCapture(
@@ -353,6 +471,18 @@ export function parseCodexPhaseResultFromStdout(stdout: string): PhaseResult {
 export function extractCodexHeaderValue(stdout: string, key: string): string | undefined {
   const line = stdout.split(/\r?\n/).find((l) => l.startsWith(`${key}:`));
   return line?.slice(key.length + 1).trim();
+}
+
+export function parseLastJsonObject(output: string): unknown {
+  const starts: number[] = [];
+  for (let index = 0; index < output.length; index++) {
+    if (output[index] === "{") starts.push(index);
+  }
+  for (const index of starts.reverse()) {
+    try { return JSON.parse(output.slice(index)); }
+    catch { /* try the previous object boundary */ }
+  }
+  throw new Error("Codex app-server returned no valid JSON object");
 }
 
 function validatePhaseResult(value: unknown): PhaseResult {
