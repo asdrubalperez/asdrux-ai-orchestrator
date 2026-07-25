@@ -21,7 +21,7 @@ const TIPO_SOLUCION_KEY = "tipo_solucion";
 // campo `select` del MVP (tipo_solucion) quedan fijas acá, no leídas de la definición.
 const TIPO_SOLUCION_OPTIONS = [
   { value: "nueva", label: "Nueva" },
-  { value: "mejora_existente", label: "Mejora existente" },
+  { value: "mejora_existente", label: "Mejora de una solución ya existente" },
 ];
 
 function withDefaults(values: BusinessCaseValues): BusinessCaseValues {
@@ -42,12 +42,10 @@ export function ReviewModal(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   fields: IntakeFieldDefinition[];
-  inputText: string;
   initialValues: BusinessCaseValues;
   onConfirmed: (run: RunCaseSummary) => void;
 }) {
   const [values, setValues] = React.useState<BusinessCaseValues>(() => withDefaults(props.initialValues));
-  const [recalculating, setRecalculating] = React.useState(false);
   const [confirming, setConfirming] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -63,26 +61,6 @@ export function ReviewModal(props: {
 
   const setFieldValue = (fieldKey: string, value: string) => {
     setValues((prev) => ({ ...prev, [fieldKey]: value.length > 0 ? value : null }));
-  };
-
-  const recalcular = async () => {
-    setRecalculating(true);
-    setError(null);
-    try {
-      const response = await fetch(apiUrl("/intake/map"), {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inputText: props.inputText, previousValues: values }),
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const body = (await response.json()) as { values: BusinessCaseValues };
-      setValues(withDefaults(body.values));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo recalcular el mapeo.");
-    } finally {
-      setRecalculating(false);
-    }
   };
 
   const confirmar = async () => {
@@ -125,10 +103,6 @@ export function ReviewModal(props: {
         </div>
 
         <DialogFooter>
-          <Button variant="outline" disabled={recalculating || confirming} onClick={() => void recalcular()}>
-            {recalculating ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Recalcular
-          </Button>
           <Button disabled={!canContinue} onClick={() => void confirmar()}>
             {confirming ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Continuar

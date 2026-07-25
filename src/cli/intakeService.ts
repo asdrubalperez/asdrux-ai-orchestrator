@@ -1,8 +1,8 @@
-import path from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   createRunPendingStart,
   ensurePipelineDefinition,
+  finalizeRun,
   forceUserEscalation,
   getIntakeFieldDefinitions,
   getPipelineDefinitionById,
@@ -15,8 +15,8 @@ import {
   resolveAgentConfig,
   type RunRow,
 } from "../db/repository.js";
-import { createRunWorktree, removeRunWorktree } from "../isolation/worktree.js";
-import { PIPELINES, SINGLE_PHASE_ARCHITECT } from "../pipelines/definitions.js";
+import { cloneRunRepository, removeRunClone, RunRepoCloneError } from "../isolation/worktree.js";
+import { FULL_PIPELINE, PIPELINES } from "../pipelines/definitions.js";
 import { parsePipelineDefinitionRow } from "./escalation.js";
 import { executePipelineRun } from "./commands/runStart.js";
 import { mapBusinessCase, type BusinessCaseValues } from "../intake/mapBusinessCase.js";
@@ -54,7 +54,11 @@ export async function confirmIntake(params: {
     throw new IntakeProjectNotFoundError("No existe un proyecto disponible para el usuario actual.");
   }
 
-  const pipelineName = params.pipelineName ?? SINGLE_PHASE_ARCHITECT.name;
+  // FEATURE-017, hallazgo de la prueba end-to-end del owner (2026-07-25): el default anterior,
+  // SINGLE_PHASE_ARCHITECT, solo tiene la fase Architect — los runs creados desde la UI
+  // terminaban "completed" tras esa única fase, sin Functional/Planning/Developer/QA. Default
+  // correcto: el pipeline real de 5 fases + loop Developer↔QA.
+  const pipelineName = params.pipelineName ?? FULL_PIPELINE.name;
   const pipelineSpec = PIPELINES[pipelineName];
   if (!pipelineSpec) {
     throw new Error(`Pipeline desconocido: "${pipelineName}".`);
@@ -82,12 +86,42 @@ export async function listMyCases(userId: string): Promise<RunRow[]> {
 export type StartPendingRunResult =
   | { kind: "not_found" }
   | { kind: "conflict" }
+  | { kind: "repo_clone_failed"; message: string }
   | { kind: "started"; run: RunRow; execute: () => Promise<void> };
+
+function isBusinessCaseValues(value: unknown): value is BusinessCaseValues {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  return Object.values(value as Record<string, unknown>).every((v) => v === null || typeof v === "string");
+}
+
+/** Corte técnico explícito antes de invocar al Architect — nunca se le pasa a un agente un
+ * problema de infraestructura para que lo note él (decisión del owner, 2026-07-25). */
+async function failPendingRunTechnically(
+  runId: string,
+  message: string
+): Promise<{ kind: "repo_clone_failed"; message: string }> {
+  await finalizeRun(runId, {
+    status: "failed",
+    outputArtifact: null,
+    summary: `Corte técnico antes de invocar al Architect: ${message}`,
+    escalationReason: null,
+  });
+  await recordRunEvent(runId, "repo_clone_failed", { message });
+  return { kind: "repo_clone_failed", message };
+}
 
 /**
  * FEATURE-017, Regla 7: Iniciar transiciona `sin_iniciar -> running` y dispara exactamente el
- * mismo flujo que hoy ejecuta runStart.ts (worktree/branch reales, primera invocación al
- * Architect con el caso mapeado como initialContext).
+ * mismo flujo que hoy ejecuta runStart.ts (primera invocación al Architect con el caso mapeado
+ * como initialContext).
+ *
+ * Hallazgo de la prueba end-to-end del owner (2026-07-25): el Repositorio/Rama Base del caso de
+ * negocio no eran el repo de trabajo real — el pipeline seguía usando el repo ya clonado del
+ * proyecto (`project.repo_path`), ignorando por completo lo que el usuario escribió en el intake.
+ * Ahora `business_case.repositorio`/`rama_base_trabajo` SON el repo de trabajo real: cada caso
+ * clona su propia copia aislada (`cloneRunRepository`, sin compartir working tree entre casos,
+ * incluso si dos casos apuntan al mismo repo/rama). Si el clonado o el checkout de rama fallan, el
+ * run se corta técnicamente (`failPendingRunTechnically`) antes de invocar al Architect.
  */
 export async function startPendingRun(params: { runId: string; userId: string }): Promise<StartPendingRunResult> {
   const detail = await getRunDetailForUser(params.runId, params.userId);
@@ -95,21 +129,33 @@ export async function startPendingRun(params: { runId: string; userId: string })
 
   const run = detail.run;
   if (run.status !== "sin_iniciar") return { kind: "conflict" };
-  if (!run.project_id) throw new Error(`Run ${run.id} no tiene project_id persistido.`);
-
-  const project = await getProjectForUser(params.userId, run.project_id);
-  if (!project) throw new Error(`Proyecto inaccesible para el run ${run.id}.`);
 
   const pipelineDefinition = await getPipelineDefinitionById(run.pipeline_definition_id);
   if (!pipelineDefinition) {
     throw new Error(`No existe pipeline_definition_id ${run.pipeline_definition_id} para el run ${run.id}.`);
   }
   const pipelineSpec = parsePipelineDefinitionRow(pipelineDefinition);
-
-  const projectRepoRoot = path.resolve(project.repo_path);
-  const worktree = await createRunWorktree(projectRepoRoot, run.id);
-
   const firstPhase = pipelineSpec.definition.phases[0].agentRole;
+
+  const businessCase = isBusinessCaseValues(run.business_case) ? run.business_case : {};
+  const repositorio = businessCase.repositorio?.trim();
+  // FEATURE-017, Regla 4: Rama Base de Trabajo tiene default "main" si el usuario no indica nada.
+  const ramaBase = businessCase.rama_base_trabajo?.trim() || "main";
+
+  if (!repositorio) {
+    return failPendingRunTechnically(run.id, "El caso de negocio no tiene Repositorio persistido.");
+  }
+
+  let worktree;
+  try {
+    worktree = await cloneRunRepository({ runId: run.id, repoUrl: repositorio, baseRef: ramaBase });
+  } catch (err) {
+    if (err instanceof RunRepoCloneError) {
+      return failPendingRunTechnically(run.id, err.message);
+    }
+    throw err;
+  }
+
   const promoted = await promoteRunToRunning({
     runId: run.id,
     firstPhase,
@@ -119,8 +165,8 @@ export async function startPendingRun(params: { runId: string; userId: string })
 
   if (!promoted) {
     // Carrera: el run dejó de estar en sin_iniciar entre el chequeo de arriba y la promoción
-    // (ej. otra pestaña ya lo inició). El worktree recién creado no debe quedar huérfano.
-    await removeRunWorktree(projectRepoRoot, worktree);
+    // (ej. otra pestaña ya lo inició). El clon recién creado no debe quedar huérfano.
+    await removeRunClone(worktree);
     return { kind: "conflict" };
   }
 
@@ -133,8 +179,9 @@ export async function startPendingRun(params: { runId: string; userId: string })
     authMode: agentSelection.authMode,
     model: null,
     pipeline: `${pipelineSpec.name}@${pipelineSpec.version}`,
-    projectId: project.id,
-    repoPath: projectRepoRoot,
+    projectId: run.project_id,
+    repoPath: repositorio,
+    baseRef: ramaBase,
   });
 
   return {
@@ -142,13 +189,13 @@ export async function startPendingRun(params: { runId: string; userId: string })
     run: promoted,
     execute: () =>
       executePipelineRun({
-        projectRepoRoot,
         runId: run.id,
         worktree,
         pipelineSpec,
         initialContext: run.business_case,
         userId: params.userId,
         cliAgentOverride: null,
+        cleanupStrategy: "standalone-clone",
       }),
   };
 }

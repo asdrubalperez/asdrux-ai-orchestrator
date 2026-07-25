@@ -9,6 +9,7 @@ import {
   commitAllChanges,
   createRunWorktree,
   pushRunBranch,
+  removeRunClone,
   removeRunWorktree,
   type RunWorktree,
 } from "../../isolation/worktree.js";
@@ -183,7 +184,13 @@ export async function runStart(args: string[]): Promise<void> {
 }
 
 export async function executePipelineRun(params: {
-  projectRepoRoot: string;
+  /**
+   * Requerido solo cuando cleanupStrategy es "shared-worktree" (default) — es el repo compartido
+   * del que `worktree` es un `git worktree add` linkeado, usado por `removeRunWorktree` al
+   * finalizar. Los runs con `cleanupStrategy: "standalone-clone"` (FEATURE-017) no tienen ningún
+   * repo compartido: `worktree.worktreePath` es un clon completo e independiente.
+   */
+  projectRepoRoot?: string;
   runId: string;
   worktree: RunWorktree;
   pipelineSpec: PipelineSpec;
@@ -196,8 +203,25 @@ export async function executePipelineRun(params: {
    */
   cliAgentOverride: AgentConfig | null;
   model?: string;
+  /**
+   * FEATURE-017: "shared-worktree" (default, sin cambios) — `worktree` es un `git worktree add`
+   * sobre `projectRepoRoot`, limpiado con `removeRunWorktree`. "standalone-clone" — `worktree` es
+   * un clon aislado propio del run (repo/rama del caso de negocio), limpiado con `removeRunClone`,
+   * sin ningún repoRoot compartido de por medio.
+   */
+  cleanupStrategy?: "shared-worktree" | "standalone-clone";
 }): Promise<void> {
-  const { projectRepoRoot, runId, worktree, pipelineSpec, initialContext, userId, cliAgentOverride, model } = params;
+  const {
+    projectRepoRoot,
+    runId,
+    worktree,
+    pipelineSpec,
+    initialContext,
+    userId,
+    cliAgentOverride,
+    model,
+    cleanupStrategy = "shared-worktree",
+  } = params;
   const resolveSelection = (role: AgentRole): Promise<AgentConfig> =>
     cliAgentOverride ? Promise.resolve(cliAgentOverride) : resolveAgentConfig(userId, role);
   const readRole = (agentRole: string) =>
@@ -268,12 +292,12 @@ export async function executePipelineRun(params: {
         }
 
         console.log(`[run:start] fase "${phase.agentRole}" terminó con status "${result.status}" — pipeline detenido.`);
-        await finishRun(projectRepoRoot, runId, worktree, result, { pushAndClean: false });
+        await finishRun(projectRepoRoot, runId, worktree, result, { pushAndClean: false, cleanupStrategy });
         return;
       }
 
       console.log(`[run:start] fase "${phase.agentRole}" terminó con status "${result.status}" — pipeline detenido.`);
-      await finishRun(projectRepoRoot, runId, worktree, result, { pushAndClean: false });
+      await finishRun(projectRepoRoot, runId, worktree, result, { pushAndClean: false, cleanupStrategy });
       return;
     }
 
@@ -292,11 +316,14 @@ export async function executePipelineRun(params: {
       });
 
       const approved = finalResult.status === "completed";
-      await finishRun(projectRepoRoot, runId, worktree, finalResult, { pushAndClean: approved });
+      await finishRun(projectRepoRoot, runId, worktree, finalResult, { pushAndClean: approved, cleanupStrategy });
       return;
     }
 
-    await finishRun(projectRepoRoot, runId, worktree, previousResult as PhaseResult, { pushAndClean: false });
+    await finishRun(projectRepoRoot, runId, worktree, previousResult as PhaseResult, {
+      pushAndClean: false,
+      cleanupStrategy,
+    });
   } catch (err) {
     if (err instanceof RunCancelledExternallyError) {
       // El run ya fue finalizado (aborted) por forceUserEscalation + respondToEscalation antes de
@@ -314,7 +341,7 @@ export async function executePipelineRun(params: {
       escalationReason: null,
     };
     await recordRunEvent(runId, "run_error", { message });
-    await finishRun(projectRepoRoot, runId, worktree, failure, { pushAndClean: false });
+    await finishRun(projectRepoRoot, runId, worktree, failure, { pushAndClean: false, cleanupStrategy });
     throw err;
   }
 }
@@ -518,11 +545,11 @@ export async function runDeveloperQaLoop(params: {
 }
 
 async function finishRun(
-  repoRoot: string,
+  repoRoot: string | undefined,
   runId: string,
   worktree: RunWorktree,
   finalResult: PhaseResult,
-  opts: { pushAndClean: boolean }
+  opts: { pushAndClean: boolean; cleanupStrategy: "shared-worktree" | "standalone-clone" }
 ): Promise<void> {
   await finalizeRun(runId, finalResult);
 
@@ -535,7 +562,14 @@ async function finishRun(
     await recordRunEvent(runId, "run_pushed", { branchName: worktree.branchName });
     console.log(`[run:start] push real de la rama "${worktree.branchName}" a origin.`);
 
-    await removeRunWorktree(repoRoot, worktree);
+    if (opts.cleanupStrategy === "standalone-clone") {
+      await removeRunClone(worktree);
+    } else {
+      if (!repoRoot) {
+        throw new Error("finishRun: cleanupStrategy 'shared-worktree' requiere projectRepoRoot.");
+      }
+      await removeRunWorktree(repoRoot, worktree);
+    }
     await recordRunEvent(runId, "worktree_cleaned", { worktreePath: worktree.worktreePath });
     console.log(`[run:start] worktree limpiado tras aprobación.`);
   } else {

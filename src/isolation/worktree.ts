@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { access } from "node:fs/promises";
+import { access, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -76,4 +77,58 @@ export async function pushRunBranch(worktree: RunWorktree): Promise<void> {
 export async function assertRunWorktreeAvailable(repoRoot: string, worktree: RunWorktree): Promise<void> {
   await access(worktree.worktreePath);
   await execFileAsync("git", ["rev-parse", "--verify", worktree.branchName], { cwd: repoRoot });
+}
+
+/**
+ * FEATURE-017, hallazgo de la prueba end-to-end del owner (2026-07-25): el repositorio/rama que
+ * el usuario escribe en el intake pasa a ser el repo de trabajo real (antes era solo texto de
+ * contexto para el Architect, ignorado por el pipeline real). Cada caso clona su propia copia
+ * aislada — nunca un `git worktree add` sobre un repo de proyecto ya clonado y compartido, a
+ * diferencia de `createRunWorktree` — porque dos casos pueden apuntar al mismo repo/rama y no
+ * deben compartir working tree. Si el clonado o el checkout de la rama fallan (repo inexistente,
+ * rama inexistente, sin permisos), se corta acá — antes de invocar al Architect — con un error
+ * explícito de infraestructura, nunca un problema de negocio para que el agente lo note.
+ *
+ * Credencial git: ninguna nueva — se asume la misma configuración ambiente de git del host/VPS
+ * que ya usa `pushRunBranch` para push a `origin` (SSH agent / credential helper ya configurado).
+ * No se introduce manejo de tokens/API keys de git en esta función.
+ */
+export class RunRepoCloneError extends Error {}
+
+export async function cloneRunRepository(params: {
+  runId: string;
+  repoUrl: string;
+  baseRef: string;
+}): Promise<RunWorktree> {
+  const branchName = `run/${params.runId}`;
+  const clonesBaseDir = process.env.RUN_CLONES_BASE_DIR ?? path.resolve(os.homedir(), "ai-orchestrator-case-clones");
+  const worktreePath = path.join(clonesBaseDir, params.runId);
+
+  try {
+    await execFileAsync("git", ["clone", "--branch", params.baseRef, "--single-branch", params.repoUrl, worktreePath]);
+  } catch (err) {
+    throw new RunRepoCloneError(
+      `No se pudo clonar "${params.repoUrl}" en la rama "${params.baseRef}": ${(err as Error).message}`
+    );
+  }
+
+  try {
+    await execFileAsync("git", ["checkout", "-b", branchName], { cwd: worktreePath });
+  } catch (err) {
+    await rm(worktreePath, { recursive: true, force: true });
+    throw new RunRepoCloneError(
+      `Clon de "${params.repoUrl}" exitoso, pero no se pudo crear la rama "${branchName}": ${(err as Error).message}`
+    );
+  }
+
+  return { branchName, worktreePath };
+}
+
+/**
+ * Contraparte de `removeRunWorktree` para clones aislados (no worktrees linkeados a un repo
+ * compartido) — no hay `git worktree remove`/`git branch -D` que correr contra ningún repoRoot,
+ * el clon completo es del run.
+ */
+export async function removeRunClone(worktree: RunWorktree): Promise<void> {
+  await rm(worktree.worktreePath, { recursive: true, force: true });
 }

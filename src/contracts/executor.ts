@@ -24,6 +24,10 @@ export interface PhaseResult {
   executorMetadata?: {
     provider: string;
     model?: string;
+    // FEATURE-017, hallazgo de la prueba end-to-end del owner (2026-07-25): sin esto no había
+    // forma de auditar después si una invocación real corrió con api_key o cli_session (OAuth) —
+    // ni logs ni metadata lo registraban.
+    authMode?: "api_key" | "cli_session";
   };
 }
 

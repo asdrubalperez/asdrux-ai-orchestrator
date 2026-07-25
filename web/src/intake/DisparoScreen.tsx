@@ -87,7 +87,6 @@ export function DisparoScreen(props: { onConfirmed: (run: RunCaseSummary) => voi
         open={reviewOpen}
         onOpenChange={setReviewOpen}
         fields={fields}
-        inputText={inputText}
         initialValues={values}
         onConfirmed={(run) => {
           setInputText("");

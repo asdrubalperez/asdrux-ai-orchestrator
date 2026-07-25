@@ -16,7 +16,7 @@ create table intake_field_definitions (
 
 insert into intake_field_definitions (field_key, field_order, label, description, field_type) values
   ('tipo_solucion', 1, 'Tipo de solución',
-   'nueva o mejora_existente. No condiciona ningún otro campo en el MVP.', 'select'),
+   'nueva o "mejora de una solución ya existente". No condiciona ningún otro campo en el MVP.', 'select'),
   ('vision', 2, 'Visión',
    'Visión general de la iniciativa: hacia dónde apunta.', 'textarea'),
   ('necesidad_problema', 3, 'Necesidad / Problema',

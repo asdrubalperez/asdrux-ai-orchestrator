@@ -162,9 +162,10 @@ interface PhaseResult {
   outputArtifact: unknown;
   summary: string;             // narrativa curada, no el log crudo de herramienta
   escalationReason: string | null;
-  executorMetadata?: {         // qué proveedor/modelo ejecutó realmente la fase (ver ADR sección 9)
+  executorMetadata?: {         // qué proveedor/modelo/authMode ejecutó realmente la fase (ver ADR sección 9)
     provider: string;
     model?: string;
+    authMode?: "api_key" | "cli_session"; // FEATURE-017: auditable después vía run_events, sin esto no había forma de confirmarlo
   };
 }
 ```
@@ -288,10 +289,11 @@ interface PhaseResult {
   executorMetadata?: {
     provider: string;
     model?: string;
+    authMode?: "api_key" | "cli_session";
   };
 }
 ```
-Aprobado explícitamente por el owner el 2026-07-16 (03-AI-CONSTITUTION.md, regla 2 — respeto por la arquitectura aprobada).
+Aprobado explícitamente por el owner el 2026-07-16 (03-AI-CONSTITUTION.md, regla 2 — respeto por la arquitectura aprobada). Campo `authMode` sumado en FEATURE-017 (2026-07-25): hallazgo de la prueba end-to-end del owner — no había forma de auditar después con qué authMode corrió una invocación real (ni logs ni metadata lo registraban).
 
 ## Nota: recomendación de `--json-schema` (hallazgo H2) no adoptada todavía
 **Motivo**: el spike de FEATURE-001 observó que la respuesta cruda de Claude Code CLI en `--output-format json` no viene en el shape de `PhaseResult` de forma nativa — es texto libre dentro de un campo `result`, mapeado en el spike mediante una convención de formato pedida por prompt. El `--help` del CLI instalado (v2.1.211) muestra un flag `--json-schema` que permitiría forzar salida estructurada validada contra un schema. Esta recomendación **no fue adoptada en el contrato ni en el Executor real** — queda pendiente verificarla contra la documentación oficial vigente del proveedor antes de comprometerse a usarla como mecanismo de mapeo de `PhaseResult`, en línea con el principio "Documentation first" de la sección 6 (Integration Principles).

@@ -56,6 +56,14 @@ export function CasesList(props: { onOpenRun: (runId: string) => void; onNewCase
         method: "POST",
         credentials: "include",
       });
+      if (response.status === 422) {
+        // FEATURE-017: corte técnico explícito (ej. no se pudo clonar el repo del caso) — el run
+        // ya quedó en status="failed", no hace falta reintentar la petición.
+        const body = (await response.json()) as { message?: string };
+        setError(body.message ?? "No se pudo iniciar el run: falló un chequeo técnico previo al Architect.");
+        refresh();
+        return;
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       refresh();
       props.onOpenRun(runId);

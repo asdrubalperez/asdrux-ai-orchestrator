@@ -484,6 +484,50 @@ evidencia end-to-end pedida en la sección 8 (mapeo real de un texto rico, trans
 `sin_iniciar → running` disparando un run real, `running → aborted` vía Cancelar). Falta correr
 esto contra el repo/VPS real antes del Go final, mismo criterio que el resto del proyecto.
 
+### Ronda 2 — hallazgos de la prueba end-to-end real del owner (2026-07-25)
+
+El owner corrió el flujo completo (mapeo → confirmación → Iniciar → run real) en la VPS y encontró
+6 problemas reales, verificados uno por uno contra el código. Correcciones aplicadas:
+
+1. **Recalcular eliminado** (`web/src/intake/ReviewModal.tsx`) — cambio de diseño, no bug menor: el
+   % en vivo (client-side) ya cubre completar campos vacíos a mano; una segunda llamada al modelo
+   pisaba ediciones ya hechas (`setValues` reemplazaba el estado completo sin fusionar, y Haiku no
+   repetía fielmente el valor editado). El fetch a `/intake/map` queda solo en `DisparoScreen.tsx`.
+2. **Pipeline default corregido** (`src/cli/intakeService.ts`, `confirmIntake`) —
+   `SINGLE_PHASE_ARCHITECT` → `FULL_PIPELINE`. El default anterior no era un bug de "corte", el run
+   nunca tuvo más fases definidas; los casos de la UI terminaban `completed` tras solo Architect.
+3. **Clonado real y aislado del repo del caso de negocio** — decisión del owner: `repositorio`/
+   `rama_base_trabajo` del business_case pasan a ser el repo de trabajo real (antes eran solo texto
+   de contexto, ignorado por el pipeline real, que seguía usando `project.repo_path`). Implementado
+   en `src/isolation/worktree.ts` (`cloneRunRepository`/`removeRunClone`/`RunRepoCloneError`, sin
+   compartir working tree entre casos) y `src/cli/intakeService.ts` (`startPendingRun` clona antes
+   de promover a `running`; si falla, corte técnico explícito vía `failPendingRunTechnically` —
+   `status='failed'` + evento `repo_clone_failed`, nunca se invoca al Architect). `runStart.ts`
+   (`executePipelineRun`/`finishRun`) gana un `cleanupStrategy: "shared-worktree" | "standalone-clone"`
+   para no romper el flujo CLI clásico (`--case`) ni el de reintento de escalamiento
+   (`respondService.ts`), que siguen usando worktrees compartidos sobre `project.repo_path` sin
+   cambios. Detalles de implementación dejados a mi criterio, según lo pedido: convención de path
+   (`RUN_CLONES_BASE_DIR`, default `~/ai-orchestrator-case-clones`) y credencial git (ninguna
+   nueva — se asume la misma configuración ambiente que ya usa `pushRunBranch` para push a
+   `origin`).
+4. **`authMode` auditable** — sumado a `executorMetadata` en el contrato (`src/contracts/executor.ts`,
+   con eco en `docs/playbook/02-ARCHITECTURE.md` secciones 6 y 9) y en ambos Executors
+   (`ClaudeCodeExecutor`, `CodexExecutor`), en el path activo de invocación real. Auditable desde
+   ahora vía `run_events.phase_finished`.
+5. **Texto de "Tipo de solución" corregido** — "Mejora existente" → "Mejora de una solución ya
+   existente" en la opción del `<select>` (`ReviewModal.tsx`, ya visible al usuario ahí; el schema
+   de `intake_field_definitions` no tiene columna de opciones, por eso vive en el frontend, no en
+   la migración). De paso corregí también la `description` sembrada de `tipo_solucion` en
+   `migrations/0009` (sí se muestra al usuario como texto de ayuda bajo el campo) y agregué
+   `migrations/0011_fix_tipo_solucion_description.sql` con el `UPDATE` puntual para el dev ya
+   migrado.
+6. Verificación repetida: `tsc --noEmit` (backend) y `tsc -p web/tsconfig.json --noEmit` (frontend)
+   sin errores; `npm test` completo — 61 pass / 2 skip / 0 fail; `vite build` sin errores.
+
+**No verificado en este entorno** (mismo motivo que la ronda 1 — sin DB ni VPS accesibles desde
+este sandbox): `npm run migrate` (incluida la migración 0011 nueva) y el reintento de la evidencia
+end-to-end de la sección 8, ahora con el pipeline completo y el clonado real del repo.
+
 ---
 
 # Design Principle

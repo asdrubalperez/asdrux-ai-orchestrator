@@ -247,6 +247,12 @@ export function createApp(config: ServerConfig): express.Express {
         res.status(409).json({ error: "run_not_pending_start" });
         return;
       }
+      if (result.kind === "repo_clone_failed") {
+        // FEATURE-017: corte técnico explícito — el run ya quedó en status="failed" con el
+        // motivo persistido en run_events (repo_clone_failed), no se invocó al Architect.
+        res.status(422).json({ error: "repo_clone_failed", message: result.message });
+        return;
+      }
 
       res.status(202).json({ run: result.run });
       void result.execute().catch((err) => {

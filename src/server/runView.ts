@@ -198,6 +198,8 @@ function narrativeText(event: RunEventRow): string {
       return "El pipeline se detuvo en el próximo punto de corte tras la cancelación.";
     case "intake_confirmed":
       return "Se confirmó el caso de negocio mapeado.";
+    case "repo_clone_failed":
+      return runRepoCloneFailedMessage(payload);
     case "run_error":
       return runErrorMessage(payload);
     case "test_executed":
@@ -292,6 +294,13 @@ function latestEscalationReasonFromEvents(events: RunEventRow[]): string | null 
 function runErrorMessage(payload: unknown): string {
   if (isRecord(payload) && typeof payload.message === "string") return `Error del run: ${payload.message}`;
   return "El run registró un error.";
+}
+
+function runRepoCloneFailedMessage(payload: unknown): string {
+  if (isRecord(payload) && typeof payload.message === "string") {
+    return `Corte técnico antes de invocar al Architect: ${payload.message}`;
+  }
+  return "Corte técnico: no se pudo preparar el repositorio del caso.";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
