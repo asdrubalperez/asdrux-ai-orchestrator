@@ -50,6 +50,7 @@
   FEATURE-013).
 - FEATURE-018 (antes FEATURE-017, antes FEATURE-014) — Milestone 2 — Validación end-to-end con
   caso de negocio real
+- Capa de UI — Disparo (intake de caso de negocio asistido por IA, en diseño)
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
@@ -60,7 +61,7 @@
 - `PreToolUse` hooks como defensa en profundidad (QA)
 - Creación real de PR vía API de GitHub / merge automático
 - Deployment Strategy y separación dev/staging/prod
-- Capa de UI (Disparo, Historial/admin — "Run en curso" ya pasó a Confirmado, ver arriba)
+- Capa de UI — Historial/admin (listado de runs, sin diseñar)
 - Notificación Slack/webhook complementaria a la UI de monitoreo (post FEATURE-013, si hace falta
   alertas fuera de cuando se está mirando activamente)
 - Limpieza de persistencia de codigo versionado: `artifacts.commit_ref` existe en schema pero no se
@@ -315,10 +316,19 @@ Documentos de resultados:
 
 Disparo e Historial/admin quedan fuera de esta Feature, ver ítem Tentativo "Capa de UI" abajo.
 
-### ⚪ Capa de UI (Disparo, Historial/admin)
-Dos pantallas — Disparo (crear un run nuevo desde la UI) e Historial/admin (listado de runs
-propios o del equipo) — siguen `[Pendiente]` en `02-ARCHITECTURE.md`. "Run en curso" ya se
-promovió a Confirmado (FEATURE-013, ver arriba) — este ítem es solo el resto.
+### ⚪ Capa de UI — Disparo
+Pantalla para crear un run nuevo: el usuario pega texto o carga un archivo con el relevamiento
+del caso de negocio, el Orquestador lo mapea (sin inventar, sin diálogo con el usuario) contra
+una estructura de campos predeterminados y parametrizables, más Repositorio y Rama Base de
+Trabajo (ambos siempre requeridos, Rama Base con default `main`). El usuario confirma o edita en
+un modal con % de completitud antes de poder iniciar el run. Sigue `[Pendiente]` en
+`02-ARCHITECTURE.md`. Separada de Historial/admin por ser funcionalmente independiente — en
+diseño, ver `docs/features/` cuando exista el documento.
+
+### ⚪ Capa de UI — Historial/admin
+Listado de runs propios o del equipo (si admin), con estado/dueño/fase/tiempo transcurrido — dato
+que ya existe en `runs`/`run_events`, sin necesidad de ningún mecanismo nuevo de intake. Sigue
+`[Pendiente]` en `02-ARCHITECTURE.md`. Sin diseñar todavía.
 
 ### ⚪ Notificación Slack/webhook complementaria
 Evaluada en la misma sesión que "Run en curso" como alternativa de monitoreo — se descartó como
