@@ -18,6 +18,7 @@ import {
   finalizeRun,
   findUserById,
   getProjectForUser,
+  getRunStatus,
   recordArtifact,
   recordRunConfigVersions,
   recordRunEvent,
@@ -42,6 +43,31 @@ const orchestratorRoot = path.resolve(__dirname, "..", "..", "..");
 export type ExecutorProvider = "claude" | "codex";
 type RunExecutor = ClaudeCodeExecutor | CodexExecutor;
 const MAX_ESCALATION_ATTEMPTS = 3;
+
+/**
+ * FEATURE-017, sección 7.4: señal interna para cortar el pipeline en el próximo punto de corte
+ * natural cuando un run fue forzado a `escalated`/`aborted` desde afuera (Cancelar por usuario) —
+ * distinta de un PhaseResult, porque acá no hay ningún resultado de fase que reportar: el run ya
+ * fue finalizado por forceUserEscalation + respondToEscalation antes de que este chequeo corra.
+ */
+class RunCancelledExternallyError extends Error {}
+
+/**
+ * FEATURE-017: el manejo de escalamiento por AGENTE (handleLinearEscalation, más abajo) es
+ * reactivo — reacciona al PhaseResult que la propia invocación devuelve al terminar, no consulta
+ * `runs.status`. No existía ningún guard previo a arrancar una fase; este es código nuevo,
+ * llamado antes de cada fase en el while de executePipelineRun y en cada iteración de
+ * runDeveloperQaLoop.
+ */
+async function haltIfCancelledExternally(runId: string): Promise<void> {
+  const status = await getRunStatus(runId);
+  if (status === "escalated" || status === "aborted") {
+    await recordRunEvent(runId, "run_halted_external_cancel", { status });
+    throw new RunCancelledExternallyError(
+      `Run ${runId} cancelado externamente (status=${status}) — pipeline detenido antes de la siguiente fase.`
+    );
+  }
+}
 
 export async function runStart(args: string[]): Promise<void> {
   const casePath = getFlag(args, "--case");
@@ -187,6 +213,7 @@ export async function executePipelineRun(params: {
 
     while (phaseIndex < pipelineSpec.definition.phases.length) {
       const phase = pipelineSpec.definition.phases[phaseIndex];
+      await haltIfCancelledExternally(runId);
       await updateRunCurrentPhase(runId, phase.agentRole);
       const context = previousResult === null ? currentInitialContext : previousResult.outputArtifact;
       const roleInstructions = await readRole(phase.agentRole);
@@ -271,6 +298,14 @@ export async function executePipelineRun(params: {
 
     await finishRun(projectRepoRoot, runId, worktree, previousResult as PhaseResult, { pushAndClean: false });
   } catch (err) {
+    if (err instanceof RunCancelledExternallyError) {
+      // El run ya fue finalizado (aborted) por forceUserEscalation + respondToEscalation antes de
+      // que este chequeo corriera — no llamar finishRun/finalizeRun acá, o se sobreescribiría ese
+      // status ya correcto.
+      console.log(`[run:start] ${err.message}`);
+      return;
+    }
+
     const message = err instanceof Error ? err.message : String(err);
     const failure: PhaseResult = {
       status: "failed",
@@ -377,6 +412,7 @@ export async function runDeveloperQaLoop(params: {
   let lastQaResult: PhaseResult | null = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await haltIfCancelledExternally(runId);
     await updateRunCurrentPhase(runId, "developer");
 
     const developerContext =
@@ -412,6 +448,7 @@ export async function runDeveloperQaLoop(params: {
       return developerResult;
     }
 
+    await haltIfCancelledExternally(runId);
     await updateRunCurrentPhase(runId, "qa");
 
     // FEATURE-006 (resuelve H14): el TestExecutor —no el agente QA— corre el comando de test,

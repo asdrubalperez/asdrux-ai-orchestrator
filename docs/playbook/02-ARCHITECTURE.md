@@ -66,12 +66,24 @@ Decisión explícita — evitar mezcla de estilos: los agentes nunca se autoconv
 
 ## Frontend Stack
 
-**[Pendiente]** — no definido en el handoff. A decidir antes de iniciar la capa UI (Milestone posterior al primer incremento del Orquestador).
+Resuelto de hecho por FEATURE-013 (implementado, no formalizado en este documento hasta
+FEATURE-017): **React 19 + Vite + TanStack Query + Radix UI**, con Tailwind CSS para estilos
+(`class-variance-authority`/`tailwind-merge` para variantes de componentes) y `lucide-react` para
+iconografía. Vive en `web/` (hermano de `src/`), servido por Vite en dev con proxy a `/runs`,
+`/health`, `/auth`, `/intake` hacia el backend Express. No hay router (react-router ni ningún
+otro): la navegación entre vistas es un `useState` a nivel de app (`web/src/main.tsx`) más el query
+param `?run=<id>` para deep-linking a un run puntual — no hay carpetas de "screens"/"routes"
+formales. Consumo de datos vía `fetch` nativo con `credentials: "include"` (cookie de sesión),
+nunca axios; SSE nativo (`EventSource`) para el stream de eventos de un run.
 
 ## Frontend Principles
 
 * Sin lógica de negocio — la UI únicamente refleja estado emitido por el Orquestador.
-* Tres pantallas: disparo (casos de negocio listos con un click), run en curso (avatar por agente + estado en vivo + narrativa curada + banner de validación al escalar), historial/admin (runs propios o del equipo si admin, con estado/dueño/fase/tiempo transcurrido).
+* Pantallas: disparo/intake (caso de negocio en texto libre, mapeado por IA — FEATURE-017), mis
+  casos (lista mínima filtrada por owner_id, con Iniciar/Cancelar/Visualizar según estado —
+  FEATURE-017), run en curso (avatar por agente + estado en vivo + narrativa curada + banner de
+  validación al escalar — FEATURE-013). Historial/admin completo (equipo, filtros, vista de
+  administrador) queda fuera de este incremento — ver FEATURE-017, Scope/Excluido.
 * Consumo de eventos vía SSE: snapshot inicial + stream de deltas.
 
 ---

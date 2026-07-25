@@ -20,7 +20,9 @@ Versión de plantilla usada: v2.1 (`docs/playbook/07-FEATURE-TEMPLATE.md`)
 - **Type**: Frontend (nueva pantalla) + Backend (mapeo por IA, nuevo estado de `runs`,
   cancelación real) + persistencia (DB)
 - **Owner**: asdru
-- **Status**: En diseño — pendiente de validación técnica del DAIA y Approval Gate del owner
+- **Status**: Implementado en la rama `feature/017-ui-disparo-intake` — pendiente de revisión del
+  owner y aprobación de merge a `main`. Ver "Estado de la implementación" al final de este
+  documento.
 - **Priority**: Confirmada — es el próximo incremento de trabajo real (ver `docs/ROADMAP.md`)
 
 ---
@@ -45,9 +47,9 @@ comprometerse a arrancar el pipeline real).
 1. El usuario pega texto libre (por ejemplo, la transcripción de un relevamiento) o carga un
    archivo `.md`/`.txt` con la información ya redactada de una iniciativa.
 2. El Orquestador mapea esa información, **sin inventar contenido y sin dialogar con el usuario**,
-   contra una estructura de 13 campos predeterminados y parametrizables (ver sección 7).
+   contra una estructura de 12 campos predeterminados y parametrizables (ver sección 7).
 3. El usuario ve el resultado del mapeo en una pantalla de revisión, con el % de completitud
-   calculado sobre esos 13 campos, puede editar cualquier campo, y solo puede continuar cuando
+   calculado sobre esos 12 campos, puede editar cualquier campo, y solo puede continuar cuando
    llega al 100% (o recalcula después de completar campos a mano).
 4. Al confirmar, el caso queda persistido en un estado **Sin Iniciar** — visible en una lista
    mínima de "mis casos", desde donde el usuario decide cuándo apretar **Iniciar** (recién ahí
@@ -64,9 +66,9 @@ comprometerse a arrancar el pipeline real).
 
 1. **Pantalla de Disparo**: input de texto libre o carga de archivo `.md`/`.txt`.
 2. **Mapeo por IA**: llamada directa y simple al proveedor (sin holder/worker, sin tools — ver
-   Regla 5), que intenta completar los 13 campos predeterminados a partir del texto de entrada.
+   Regla 5), que intenta completar los 12 campos predeterminados a partir del texto de entrada.
    Lo que no puede mapear queda vacío — nunca inventa contenido.
-3. **13 campos predeterminados**, con su definición viviendo en una tabla simple en DB (sin
+3. **12 campos predeterminados**, con su definición viviendo en una tabla simple en DB (sin
    versionado — ver Excluido #1):
    1. Tipo de solución (`nueva` | `mejora_existente`) — va primero, condiciona nada más en el MVP
       (Repositorio y Rama Base son siempre requeridos independientemente de este valor).
@@ -82,7 +84,7 @@ comprometerse a arrancar el pipeline real).
    11. Repositorio (siempre requerido)
    12. Rama Base de Trabajo (siempre requerida; default `main` si el usuario no indica nada)
 4. **Modal de revisión/confirmación**: muestra el resultado del mapeo campo por campo, editable,
-   con % de completitud (sobre los 13 campos). Botón **Continuar** deshabilitado hasta 100%;
+   con % de completitud (sobre los 12 campos). Botón **Continuar** deshabilitado hasta 100%;
    mientras no llegue a 100%, se ofrece **Recalcular** (vuelve a correr el mapeo sobre el texto
    original + las ediciones ya hechas por el usuario).
 5. **Nuevo estado `sin_iniciar` en `runs`**: el caso confirmado se persiste ahí, con el pipeline
@@ -97,7 +99,7 @@ comprometerse a arrancar el pipeline real).
 
 ### Excluido
 
-1. **Versionado de la definición de los 13 campos** — tabla simple, sin historial. Diseñada de
+1. **Versionado de la definición de los 12 campos** — tabla simple, sin historial. Diseñada de
    forma escalable para agregar versionado después (mismo criterio que `user_agent_config` en
    FEATURE-016), pero no se construye ahora.
 2. **Persistencia de borrador antes de confirmar** — el estado del mapeo/edición es *session-only*
@@ -117,7 +119,7 @@ comprometerse a arrancar el pipeline real).
 
 - Persistencia de borrador antes de confirmar (si en la práctica perder el texto al cerrar sin
   confirmar resulta molesto).
-- Versionado de la definición de los 13 campos.
+- Versionado de la definición de los 12 campos.
 - Pausar un run en curso.
 - Historial/admin completo (equipo, filtros, vista de administrador).
 - Elección de proveedor/modelo para el paso de mapeo, si en la práctica el default no da buenos
@@ -131,7 +133,7 @@ comprometerse a arrancar el pipeline real).
    entrada queda vacío — no rellena con contenido plausible, no hace preguntas de seguimiento al
    usuario durante el mapeo (esa construcción del caso de negocio, si hiciera falta, ocurre fuera
    del Orquestador, con otra herramienta ya existente del owner).
-2. **El % de completitud se calcula sobre los 13 campos**, no sobre 10 ni sobre ningún subconjunto
+2. **El % de completitud se calcula sobre los 12 campos**, no sobre 10 ni sobre ningún subconjunto
    — un campo vacío cuenta como incompleto sin importar cuál sea.
 3. **El botón Continuar está deshabilitado hasta el 100%.** Por debajo de 100%, la única acción
    disponible junto a los campos editables es **Recalcular** — vuelve a mapear usando el texto
@@ -171,13 +173,13 @@ comprometerse a arrancar el pipeline real).
 
 ## 6. Estrategia Algorítmica
 
-**Mapeo de texto libre a los 13 campos:** una única llamada al modelo (sin tools, sin turnos
-múltiples) con el texto/archivo de entrada y la definición vigente de los 13 campos (nombre,
+**Mapeo de texto libre a los 12 campos:** una única llamada al modelo (sin tools, sin turnos
+múltiples) con el texto/archivo de entrada y la definición vigente de los 12 campos (nombre,
 descripción, tipo), pidiendo como salida un JSON con esa forma exacta — mismo patrón de
 "structured output" que ya usa este proyecto en otros contextos (respuesta JSON forzada, sin
 preámbulo). Campos no encontrados en el texto: `null`/vacío, nunca un valor inventado.
 
-**Cálculo de completitud:** `campos_completos / 13 * 100`, redondeado. Un campo cuenta como
+**Cálculo de completitud:** `campos_completos / 12 * 100`, redondeado. Un campo cuenta como
 completo si tiene contenido no vacío después del mapeo o de la edición manual del usuario. Recalcular
 repite la misma llamada de mapeo, pasando el texto original **más** los valores ya editados a mano
 por el usuario como contexto adicional (para no perder ediciones ya hechas si el recálculo
@@ -190,7 +192,7 @@ por campo, simple a propósito (ver Risks si esto resulta insuficiente en la pr�
 
 ## 7. Technical Considerations
 
-### 7.1 Definición de los 13 campos — tabla simple, sin versionado
+### 7.1 Definición de los 12 campos — tabla simple, sin versionado
 
 Migración `0009_intake_field_definitions.sql`:
 
@@ -208,7 +210,7 @@ create table intake_field_definitions (
 );
 ```
 
-Sembrada (seed) con los 13 campos descriptos en Scope, incluido `tipo_solucion` como `select` con
+Sembrada (seed) con los 12 campos descriptos en Scope, incluido `tipo_solucion` como `select` con
 opciones `nueva`/`mejora_existente`. Sin `valid_from`/`valid_to` — una sola fila vigente por
 `field_key`, actualizable in-place. Diseño escalable: migrar a versionado después implicaría
 agregar esas dos columnas más un índice único parcial, sin romper esta forma.
@@ -222,7 +224,7 @@ alter table runs add column business_case jsonb;
 alter table runs alter column pipeline_definition_id drop not null;
 ```
 
-- `business_case`: el JSON resultante del mapeo (los 13 campos ya completos al 100%), guardado en
+- `business_case`: el JSON resultante del mapeo (los 12 campos ya completos al 100%), guardado en
   el momento de la confirmación — reemplaza el uso actual de `initialContext` como variable
   efímera en memoria (`runStart.ts`) por persistencia real.
 - **Decisión confirmada por el DAIA (verificada contra el repo real): `pipeline_definition_id` se
@@ -258,11 +260,11 @@ alter table runs alter column pipeline_definition_id drop not null;
 ### 7.3 Mecanismo de mapeo — llamada directa, sin Executor
 
 Un módulo nuevo (ej. `src/intake/mapBusinessCase.ts`), sin relación con `Executor`/`runRoleIsolated`:
-- Input: texto crudo (string) + definición vigente de los 13 campos (leída de
+- Input: texto crudo (string) + definición vigente de los 12 campos (leída de
   `intake_field_definitions`).
 - Llamada directa a la API del proveedor (mismo `ANTHROPIC_API_KEY` que ya usa el backend),
   pidiendo salida JSON estructurada, sin tools.
-- Output: objeto con los 13 campos, cada uno `string | null`.
+- Output: objeto con los 12 campos, cada uno `string | null`.
 - Sin holder, sin worker, sin contenedor Docker — proceso del propio backend del Orquestador.
 
 ### 7.4 Cancelar — reuso de `respondToEscalation` (FEATURE-013C), no una transición nueva desde cero
@@ -352,10 +354,10 @@ Un módulo nuevo (ej. `src/intake/mapBusinessCase.ts`), sin relación con `Execu
 
 | Escenario | Input | Salida esperada |
 |---|---|---|
-| Mapeo completo de un texto rico (ejemplo real ya usado en Discovery) | Transcripción de relevamiento completa | Los 13 campos completos, 100%, Continuar habilitado |
+| Mapeo completo de un texto rico (ejemplo real ya usado en Discovery) | Transcripción de relevamiento completa | Los 12 campos completos, 100%, Continuar habilitado |
 | Mapeo parcial | Texto que no menciona, por ejemplo, "Canales" | Ese campo queda vacío, completitud <100%, Continuar deshabilitado, Recalcular disponible |
 | Recalcular tras edición manual | Usuario completa un campo a mano, aprieta Recalcular | El campo editado a mano no se pierde; el mapeo puede completar otros campos nuevos |
-| Confirmar al 100% | Los 13 campos completos | Run creado con `status='sin_iniciar'`, `business_case` persistido, sin worktree/branch |
+| Confirmar al 100% | Los 12 campos completos | Run creado con `status='sin_iniciar'`, `business_case` persistido, sin worktree/branch |
 | Iniciar desde `sin_iniciar` | Usuario aprieta Iniciar | Transición a `running`, worktree/branch creados, primera invocación real al Architect con el caso mapeado |
 | Architect juzga insuficiencia real | Caso mapeado al 100% pero con contenido ambiguo/contradictorio | El Architect escala, mismo mecanismo ya existente — sin cambios de esta Feature |
 | Cancelar un run en curso | Usuario aprieta Cancelar desde la lista | Transición `running → escalated` (forzada por usuario) seguida de `respondToEscalation({ abort: true })` → `aborted`. Si hay una fase realmente en ejecución, se aplica recién en el próximo punto de corte, no interrumpe el proceso activo |
@@ -366,7 +368,7 @@ Un módulo nuevo (ej. `src/intake/mapBusinessCase.ts`), sin relación con `Execu
 
 Evidencia real esperada: al menos un caso mapeado de punta a punta con el ejemplo real ya usado en
 esta conversación de Discovery (la transcripción de Tempo Auto Planner), confirmando que el mapeo
-produce los 13 campos razonablemente poblados sin inventar contenido no presente en el texto
+produce los 12 campos razonablemente poblados sin inventar contenido no presente en el texto
 original. Además, evidencia real de la transición `sin_iniciar → running` disparando un run real
 (no simulado), y de `running → aborted` vía Cancelar sin pasar por escalamiento — a verificar
 independientemente contra el repo/VPS antes de aceptar cualquier cierre, mismo criterio del resto
@@ -422,6 +424,65 @@ scope original (secciones 7.2 y 7.4 ya actualizadas en este documento).** Resume
 
 El Architect verifica estas conclusiones de forma independiente contra el repo/VPS real antes de
 llevarlas al owner para el Go final.
+
+**Corrección post-Go (detectada al iniciar la implementación):** la sección 4 enumeraba solo 12
+campos, pero el resto del documento decía "13 campos" en todas sus menciones (Reglas 2 y 4,
+Estrategia Algorítmica, fórmula de completitud). Confirmado con el owner (2026-07-25): son **12**
+campos — se corrigió cada mención de "13" a "12" en todo el documento, incluida la fórmula de
+completitud (`campos_completos / 12 * 100`).
+
+---
+
+## Estado de la implementación (2026-07-25)
+
+Implementado completo en la rama `feature/017-ui-disparo-intake`, siguiendo las decisiones
+cerradas por el DAIA (secciones 7.2/7.4 de este documento). Resumen de archivos:
+
+**Backend**
+- `migrations/0009_intake_field_definitions.sql` — tabla + seed de los 12 campos.
+- `migrations/0010_runs_sin_iniciar.sql` — `runs.business_case jsonb`. `pipeline_definition_id`
+  se mantiene `not null`, resuelto en la confirmación (no en el arranque), tal como decidió el
+  DAIA.
+- `src/db/repository.ts` — funciones nuevas: `createRunPendingStart` (no reusa `createRun`, que
+  exige `branchName`/`worktreePath` — hallazgo de la validación técnica), `promoteRunToRunning`,
+  `getRunStatus`, `forceUserEscalation`, `listRunsForUser`, `getIntakeFieldDefinitions`.
+- `src/intake/mapBusinessCase.ts` (+ test) — llamada directa a la Messages API de Anthropic vía
+  `fetch` nativo (no hay SDK de Anthropic en este repo; los Executors invocan CLI, no aplica acá
+  porque no hay tools que aislar). Modelo fijo `claude-haiku-4-5-20251001`, sin exposición al
+  usuario (Scope/Excluido #5).
+- `src/cli/intakeService.ts` — `confirmIntake`, `startPendingRun`, `cancelRun`: orquestan
+  repository + mapBusinessCase + `respondToEscalation` (reusado tal cual, sin cambios).
+- `src/cli/commands/runStart.ts` — `haltIfCancelledExternally`, llamado antes de cada fase en el
+  `while` de `executePipelineRun` y en cada iteración de `runDeveloperQaLoop`. Código enteramente
+  nuevo, según lo verificado en la validación técnica (el escalamiento por agente es reactivo, no
+  hay guard previo que reusar).
+- `src/server/runView.ts` (+ test) — `motive` ampliado con `"user_cancel_requested"`;
+  `buildEscalationBanner` resuelve el `agentRole` desde el propio evento de cancelación forzada
+  cuando no hay `phase_finished` que lo indique.
+- `src/server/app.ts` — endpoints nuevos: `POST /intake/map`, `POST /runs`, `GET /runs`,
+  `POST /runs/:id/start`, `POST /runs/:id/cancel`.
+
+**Frontend** (`web/src/intake/`, sin router — mismo criterio que el resto del proyecto, navegación
+por `useState` de vista): `DisparoScreen.tsx` (texto libre o archivo `.md`/`.txt`), `ReviewModal.tsx`
+(edición inline, % de completitud, Recalcular, Continuar deshabilitado hasta 100%),
+`CasesList.tsx` ("mis casos" con Iniciar/Cancelar/Visualizar según `status`). `web/src/main.tsx`
+gana una barra de navegación mínima (`AppNav`); `RunDashboard` (FEATURE-013A) queda intacto, solo
+con un prop `hideHeader` para no duplicar el logout cuando se accede vía Visualizar.
+
+**Decisión de diseño no anticipada en el documento**: el schema de `intake_field_definitions`
+(sección 7.1) no tiene columna de opciones para el único campo `select` (`tipo_solucion`) — sus
+dos opciones (`nueva`/`mejora_existente`) quedaron hardcodeadas en `ReviewModal.tsx`, no leídas de
+la definición. No se tocó el schema aprobado para esto.
+
+**Verificado en este entorno**: `tsc --noEmit` (backend) y `tsc -p web/tsconfig.json --noEmit`
+(frontend) sin errores; `npm test` completo — 61 pass / 2 skip (normativos de Docker, preexistentes)
+/ 0 fail; `vite build` genera el bundle sin errores.
+
+**No verificado en este entorno** (sin acceso a la DB de desarrollo desde este sandbox — requiere
+correrse en el entorno real antes del merge): `npm run migrate` contra una base real, y la
+evidencia end-to-end pedida en la sección 8 (mapeo real de un texto rico, transición
+`sin_iniciar → running` disparando un run real, `running → aborted` vía Cancelar). Falta correr
+esto contra el repo/VPS real antes del Go final, mismo criterio que el resto del proyecto.
 
 ---
 

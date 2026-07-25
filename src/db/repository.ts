@@ -20,7 +20,20 @@ export interface RunRow {
   branch_name: string | null;
   worktree_path: string | null;
   originated_from_run_id: string | null;
+  business_case: unknown;
   created_at: string;
+  updated_at: string;
+}
+
+export type IntakeFieldType = "text" | "textarea" | "select" | "list";
+
+export interface IntakeFieldDefinitionRow {
+  id: string;
+  field_key: string;
+  field_order: number;
+  label: string;
+  description: string;
+  field_type: IntakeFieldType;
   updated_at: string;
 }
 
@@ -148,6 +161,94 @@ export async function createRun(params: {
     ]
   );
   return result.rows[0];
+}
+
+/**
+ * FEATURE-017: crea un run en estado `sin_iniciar` — el caso ya mapeado/confirmado, sin worktree,
+ * sin branch, sin invocación al Architect todavía (recién ocurre al apretar Iniciar). No reusa
+ * `createRun` porque esa función exige `branchName`/`worktreePath` como parámetros requeridos
+ * (no solo columnas DB nullable) — ver sección 7.2 del documento de la Feature.
+ */
+export async function createRunPendingStart(params: {
+  id: string;
+  pipelineDefinitionId: string;
+  ownerId: string;
+  projectId: string;
+  businessCase: unknown;
+  client?: PoolClient;
+}): Promise<RunRow> {
+  const db = params.client ?? pool;
+  const result = await db.query<RunRow>(
+    `insert into runs (id, pipeline_definition_id, owner_id, project_id, status, business_case)
+     values ($1, $2, $3, $4, 'sin_iniciar', $5)
+     returning *`,
+    [params.id, params.pipelineDefinitionId, params.ownerId, params.projectId, params.businessCase]
+  );
+  return result.rows[0];
+}
+
+/**
+ * FEATURE-017: transición `sin_iniciar -> running` (botón Iniciar). Update condicional
+ * (`where status = 'sin_iniciar'`), mismo patrón atómico que `resolveEscalatedRunStatus`, para
+ * evitar arrancar el mismo run dos veces por una carrera.
+ */
+export async function promoteRunToRunning(params: {
+  runId: string;
+  firstPhase: string;
+  branchName: string;
+  worktreePath: string;
+  client?: PoolClient;
+}): Promise<RunRow | null> {
+  const db = params.client ?? pool;
+  const result = await db.query<RunRow>(
+    `update runs
+     set status = 'running', current_phase = $2, branch_name = $3, worktree_path = $4, updated_at = now()
+     where id = $1 and status = 'sin_iniciar'
+     returning *`,
+    [params.runId, params.firstPhase, params.branchName, params.worktreePath]
+  );
+  return result.rows[0] ?? null;
+}
+
+/** FEATURE-017: chequeo pre-fase de cancelación externa — ver runStart.ts, executePipelineRun. */
+export async function getRunStatus(runId: string): Promise<string | null> {
+  const result = await pool.query<Pick<RunRow, "status">>("select status from runs where id = $1", [runId]);
+  return result.rows[0]?.status ?? null;
+}
+
+/**
+ * FEATURE-017: transición `running -> escalated` forzada por el usuario (Cancelar), no por el
+ * agente. Update condicional (`where owner_id = $2 and status = 'running'`) — verifica ownership
+ * y evita forzar un run que ya no está `running`. El motivo se registra aparte, vía
+ * `recordRunEvent`, para que `buildEscalationBanner()` pueda distinguirlo del escalamiento por
+ * agente (ver src/server/runView.ts).
+ */
+export async function forceUserEscalation(runId: string, userId: string): Promise<RunRow | null> {
+  const result = await pool.query<RunRow>(
+    `update runs set status = 'escalated', updated_at = now()
+     where id = $1 and owner_id = $2 and status = 'running'
+     returning *`,
+    [runId, userId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/** FEATURE-017: lista mínima de "mis casos" — exclusivamente los del usuario autenticado. */
+export async function listRunsForUser(userId: string): Promise<RunRow[]> {
+  const result = await pool.query<RunRow>("select * from runs where owner_id = $1 order by created_at desc", [
+    userId,
+  ]);
+  return result.rows;
+}
+
+/** FEATURE-017: definición vigente de los 12 campos del intake, en orden de exhibición. */
+export async function getIntakeFieldDefinitions(): Promise<IntakeFieldDefinitionRow[]> {
+  const result = await pool.query<IntakeFieldDefinitionRow>(
+    `select id, field_key, field_order, label, description, field_type, updated_at
+     from intake_field_definitions
+     order by field_order asc`
+  );
+  return result.rows;
 }
 
 export async function getCurrentProjectConfig(
