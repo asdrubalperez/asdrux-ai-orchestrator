@@ -34,16 +34,14 @@
   combinaciones rol/proveedor usan catálogos cerrados sin tools nativas. Diseños y resultados en
   `docs/features/FEATURE-015-egress-aislamiento-oauth-parte-015a-arquitectura-holder-worker.md` y
   `docs/features/FEATURE-015B-Wiring-real-por-rol-y-por-proveedor.md`.
+- FEATURE-016 — Modo de autenticación por cuenta personal (OAuth) para Executors: tabla
+  `user_agent_config` (global + override por rol), `authMode` (`api_key`/`cli_session`) en ambos
+  Executors, flag de CLI `--auth-mode` y resolución de precedencia en `runStart.ts`. Aprobada por
+  el owner, verificada independientemente por el Architect y mergeada a `main` (commits `133509d`
+  implementación, `fa42d0e` merge). Diseño y evidencia en
+  `docs/features/FEATURE-016-auth-oauth-executors.md`.
 
 **🟡 Confirmado**
-- FEATURE-016 — Modo de autenticación por cuenta personal (OAuth) para Executors, alternativo a
-  API Key. **Se revierte el desdoblamiento 016A/016B**: no existía tal independencia. Su
-  prerequisito FEATURE-015 completa (015A+015B) ya está satisfecho; FEATURE-016 permanece
-  confirmada y pendiente de su propia revisión/Approval Gate. Investigación empírica ya realizada, ver
-  `docs/research/investigacion-auth-cuenta-personal-executors.md` v1.1. Diseño formal en
-  `docs/features/FEATURE-016-auth-oauth-executors.md` (el desdoblamiento 016A/016B fue revertido;
-  este archivo sigue vigente como diseño único, pendiente de revisión con el nuevo alcance de
-  FEATURE-015).
 - FEATURE-017 (antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases (Architect) +
   Release Plan (Planning): conectar el diseño ya escrito en el Runbook
   (`docs/runbook/02-ARCHITECTURE-TEMPLATE.md` sección 0, y
