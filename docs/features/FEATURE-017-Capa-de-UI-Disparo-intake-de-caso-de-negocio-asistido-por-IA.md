@@ -395,6 +395,15 @@ del proyecto.
   instrucciones inyectadas en el texto pegado). No es un riesgo de credenciales (no hay ninguna en
   juego en este paso), pero sí de calidad del mapeo — mismo tipo de riesgo que ya existe hoy con
   cualquier input de texto libre a un modelo, no exclusivo de esta Feature.
+- **Limitación conocida, aceptada para esta versión: el clonado usa una única identidad git fija,
+  configurada a nivel de servidor** (hoy, la clave SSH del usuario del sistema que corre el proceso
+  del Orquestador) — no existe ningún concepto de credencial git por usuario del Orquestador. Esto
+  significa que solo se pueden clonar repos a los que esa identidad ya tenga acceso — hoy funciona
+  porque hay un solo usuario real (el owner) y sus propios repos. Si otra persona usara el
+  Orquestador con sus propios repos privados, esto fallaría de la misma manera que falló
+  inicialmente en esta prueba, porque la identidad que clona no sería la suya. No se resuelve en
+  esta Feature — ver ítem Tentativo "Credenciales git por usuario para el Orquestador" en
+  `docs/ROADMAP.md`.
 
 ---
 
@@ -527,6 +536,28 @@ El owner corrió el flujo completo (mapeo → confirmación → Iniciar → run 
 **No verificado en este entorno** (mismo motivo que la ronda 1 — sin DB ni VPS accesibles desde
 este sandbox): `npm run migrate` (incluida la migración 0011 nueva) y el reintento de la evidencia
 end-to-end de la sección 8, ahora con el pipeline completo y el clonado real del repo.
+
+### Ronda 3 — hallazgos adicionales de la corrida real (2026-07-25)
+
+1. **`git clone` colgado esperando credenciales interactivas** — un repo privado/inexistente-pero-
+   indistinguible-de-privado dejaba el proceso colgado para siempre en
+   `Username for 'https://github.com':`, nunca falla, nunca dispara `RunRepoCloneError`, bloquea el
+   request HTTP hasta matarlo a mano. Corregido con `GIT_TERMINAL_PROMPT=0` + `GIT_ASKPASS=echo` en
+   el env del `git clone` de `cloneRunRepository` (`src/isolation/worktree.ts`) — `checkout -b`
+   posterior no lo necesita, opera enteramente local sin acceso a red.
+2. **Normalización HTTPS → SSH para GitHub** — una vez resuelto el cuelgue, el clonado seguía
+   fallando para repos privados porque la VPS solo tiene configurada una clave SSH y el usuario
+   escribe la URL en formato https (la que copia del navegador). Se agrega
+   `normalizeGitCloneUrl()` (+ test, `src/isolation/worktree.test.ts`) que convierte
+   `https://github.com/OWNER/REPO(.git)?` → `git@github.com:OWNER/REPO.git` antes de clonar; deja
+   intacta cualquier URL ya en formato SSH o de otro host (solo GitHub por ahora, sin generalizar).
+3. **Limitación conocida documentada explícitamente** (sección 9, Risks): el clonado usa una única
+   identidad git fija a nivel de servidor (la clave SSH del usuario del sistema que corre el
+   proceso del Orquestador) — no hay concepto de credencial git por usuario del Orquestador. Sumado
+   el ítem Tentativo correspondiente a `docs/ROADMAP.md`.
+4. Verificación repetida: `tsc --noEmit` (backend) y `tsc -p web/tsconfig.json --noEmit` (frontend)
+   sin errores; `npm test` completo (incluye los 4 tests nuevos de `normalizeGitCloneUrl`);
+   `vite build` sin errores.
 
 ---
 

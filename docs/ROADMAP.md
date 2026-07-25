@@ -66,6 +66,11 @@
   alertas fuera de cuando se está mirando activamente)
 - Limpieza de persistencia de codigo versionado: `artifacts.commit_ref` existe en schema pero no se
   puebla nunca; los commits reales quedan hoy solo en `run_events`.
+- Credenciales git por usuario para el Orquestador — hoy el clonado de repos (FEATURE-017) usa una
+  única identidad git fija a nivel de servidor. Para que cualquier usuario pueda usar sus propios
+  repos privados sin intervención manual, hace falta un mecanismo de autorización por usuario
+  (patrón tipo GitHub App/OAuth, similar en espíritu al `authMode` de FEATURE-016 pero para acceso
+  a repos, no a modelos de IA). No diseñado todavía.
 
 ---
 

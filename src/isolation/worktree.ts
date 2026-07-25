@@ -95,6 +95,22 @@ export async function assertRunWorktreeAvailable(repoRoot: string, worktree: Run
  */
 export class RunRepoCloneError extends Error {}
 
+// FEATURE-017, hallazgo de una corrida real (2026-07-25): el usuario suele escribir el repo en
+// el intake como URL https (la forma que copia del navegador), pero la VPS solo tiene configurada
+// una clave SSH — https siempre termina pidiendo credenciales interactivas (o colgado, ver el fix
+// de GIT_TERMINAL_PROMPT más abajo). Se normaliza a SSH antes de clonar para reusar esa clave ya
+// configurada. Si la URL ya viene en formato SSH (o apunta a otro host), se deja tal cual — solo
+// se resuelve GitHub por ahora, no hace falta generalizar a otros hosts para esta Feature.
+export function normalizeGitCloneUrl(repoUrl: string): string {
+  const httpsGithubMatch = repoUrl
+    .trim()
+    .match(/^https:\/\/github\.com\/([^/]+)\/([^/]+?)(\.git)?\/?$/i);
+  if (!httpsGithubMatch) return repoUrl.trim();
+
+  const [, owner, repo] = httpsGithubMatch;
+  return `git@github.com:${owner}/${repo}.git`;
+}
+
 export async function cloneRunRepository(params: {
   runId: string;
   repoUrl: string;
@@ -103,6 +119,7 @@ export async function cloneRunRepository(params: {
   const branchName = `run/${params.runId}`;
   const clonesBaseDir = process.env.RUN_CLONES_BASE_DIR ?? path.resolve(os.homedir(), "ai-orchestrator-case-clones");
   const worktreePath = path.join(clonesBaseDir, params.runId);
+  const cloneUrl = normalizeGitCloneUrl(params.repoUrl);
 
   try {
     // Confirmado en una corrida real (2026-07-25): sin esto, un repo privado/inexistente-pero-
@@ -113,12 +130,12 @@ export async function cloneRunRepository(params: {
     // bloquea también cualquier askpass gráfico configurado en el host como vía alternativa.
     await execFileAsync(
       "git",
-      ["clone", "--branch", params.baseRef, "--single-branch", params.repoUrl, worktreePath],
+      ["clone", "--branch", params.baseRef, "--single-branch", cloneUrl, worktreePath],
       { env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "echo" } }
     );
   } catch (err) {
     throw new RunRepoCloneError(
-      `No se pudo clonar "${params.repoUrl}" en la rama "${params.baseRef}": ${(err as Error).message}`
+      `No se pudo clonar "${cloneUrl}" en la rama "${params.baseRef}": ${(err as Error).message}`
     );
   }
 
