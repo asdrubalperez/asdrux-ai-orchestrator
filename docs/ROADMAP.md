@@ -42,15 +42,15 @@
   `docs/features/FEATURE-016-auth-oauth-executors.md`.
 
 **🟡 Confirmado**
-- FEATURE-017 (antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases (Architect) +
+- FEATURE-017 — Capa de UI — Disparo (intake de caso de negocio asistido por IA, en diseño)
+- FEATURE-018 (antes FEATURE-017, antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases (Architect) +
   Release Plan (Planning): conectar el diseño ya escrito en el Runbook
   (`docs/runbook/02-ARCHITECTURE-TEMPLATE.md` sección 0, y
   `docs/runbook/09-RELEASE-PLAN-TEMPLATE.md`) con los roles reales del Orquestador
   (`architect.txt`, `planning.txt`) y con la UI (placeholder `ReleasePlanPanel` ya reservado en
   FEATURE-013).
-- FEATURE-018 (antes FEATURE-017, antes FEATURE-014) — Milestone 2 — Validación end-to-end con
-  caso de negocio real
-- Capa de UI — Disparo (intake de caso de negocio asistido por IA, en diseño)
+- FEATURE-019 (antes FEATURE-018, antes FEATURE-017, antes FEATURE-014) — Milestone 2 — Validación
+  end-to-end con caso de negocio real
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
@@ -191,7 +191,7 @@ dentro de contenedor con una sesión OAuth real montada como caché; (2) `CODEX_
 íntegro de solo lectura y Codex también lo usa para logs/sqlite — riesgo de que falle al intentar
 escribir ahí, sin probar todavía con un turno real de Codex en `cli_session`.
 
-### 🟡 FEATURE-017 (antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases + Release Plan
+### 🟡 FEATURE-018 (antes FEATURE-017, antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases + Release Plan
 Promovido de ⚪ Tentativo a 🟡 Confirmado. El diseño ya existe en el Runbook
 (`docs/runbook/02-ARCHITECTURE-TEMPLATE.md` sección 0, y `docs/runbook/09-RELEASE-PLAN-TEMPLATE.md`)
 pero no está implementado en los roles reales del Orquestador (`src/executor/roles/architect.txt`,
@@ -316,7 +316,7 @@ Documentos de resultados:
 
 Disparo e Historial/admin quedan fuera de esta Feature, ver ítem Tentativo "Capa de UI" abajo.
 
-### ⚪ Capa de UI — Disparo
+### 🟡 FEATURE-017 — Capa de UI — Disparo
 Pantalla para crear un run nuevo: el usuario pega texto o carga un archivo con el relevamiento
 del caso de negocio, el Orquestador lo mapea (sin inventar, sin diálogo con el usuario) contra
 una estructura de campos predeterminados y parametrizables, más Repositorio y Rama Base de
@@ -336,7 +336,7 @@ primera opción porque, a esfuerzo comparable, una UI mínima de solo lectura da
 reusable hacia la Capa de UI completa. Queda como complemento futuro si hace falta alertas push
 (fase completada/fallida) fuera de cuando alguien está mirando la UI activamente.
 
-### 🟡 FEATURE-018 (antes FEATURE-017, antes FEATURE-014) — Milestone 2 — Validación end-to-end con
-caso de negocio real
+### 🟡 FEATURE-019 (antes FEATURE-018, antes FEATURE-017, antes FEATURE-014) — Milestone 2 — Validación
+end-to-end con caso de negocio real
 Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
 Confirmado y no Tentativo.
