@@ -28,8 +28,9 @@ Versión de plantilla usada: v2.1 (`docs/playbook/07-FEATURE-TEMPLATE.md`)
   agente/authMode por usuario
 - **Type**: Backend (Executor / autenticación de proveedor) + persistencia (DB)
 - **Owner**: asdru
-- **Status**: **Aprobado (2026-07-25) — implementado en la rama `feature/016-auth-oauth-executors`,
-  pendiente de validación conjunta Architect + owner y merge a `main`.**
+- **Status**: **✅ Ejecutada (2026-07-25)** — implementada en la rama
+  `feature/016-auth-oauth-executors` (commit `133509d`), verificada independientemente por el
+  Architect y mergeada a `main` en `fa42d0e`. La rama se conserva como referencia histórica.
 - **Priority**: Media — no bloquea nada existente (comportamiento default sin cambios). Su
   prerequisito (FEATURE-015, arquitectura holder/worker) ya está completo y aceptado.
 
@@ -420,8 +421,12 @@ presentado en términos concretos y aceptado explícitamente. La secuencia de 3 
 la sección 7.4 fue reproducida independientemente por el DAIA con una cuenta OAuth real antes de
 la validación final.
 
-Implementación realizada en la rama `feature/016-auth-oauth-executors` (no mergeada a `main`).
-Pendiente: validación conjunta Architect + owner sobre el diff antes de mergear.
+Implementación realizada en la rama `feature/016-auth-oauth-executors` (commit `133509d`),
+verificada independientemente por el Architect (migración, repositorio, ambos Executors,
+`runStart.ts`, typecheck y 53/55 tests re-corridos) y mergeada a `main` en `fa42d0e` el
+2026-07-25. Feature cerrada; los dos ítems pendientes de la sección 9 (turno real end-to-end en
+contenedor, riesgo de `CODEX_HOME` para logs/sqlite) quedan como primeros pasos antes de usar
+`cli_session` en producción, no como bloqueo de este cierre.
 
 ---
 

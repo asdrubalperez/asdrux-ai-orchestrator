@@ -146,9 +146,9 @@ de desdoblar FEATURE-016 en partes independientes — ver abajo):
   `docs/features/FEATURE-015B-part1-results.md`, `part2-results.md` y `part3-results.md`.
 
 Prerequisito de FEATURE-016 completo: satisfecho. El bloqueo por dependencia de FEATURE-015 queda
-levantado — ver detalle de FEATURE-016 más abajo (aprobada e implementada, pendiente de merge).
+levantado — ver detalle de FEATURE-016 más abajo (✅ Ejecutada).
 
-### 🟡 FEATURE-016 — Modo de autenticación por cuenta personal (OAuth) para Executors
+### ✅ FEATURE-016 — Modo de autenticación por cuenta personal (OAuth) para Executors
 **Se revierte el desdoblamiento anterior en 016A/016B**: asumía que Architect/Functional/Planning/
 QA no tenían el mismo perfil de riesgo que Developer por no tener Bash, y que por eso una parte de
 la Feature podía implementarse sin depender de FEATURE-015. Esa premisa era incorrecta (ver
@@ -171,13 +171,26 @@ referencia histórica de un alcance descartado — ver
 se elimina, pero no representa el alcance vigente). El prerequisito FEATURE-015 (015A+015B) para
 `cli_session` ya está satisfecho.
 
-**Estado (2026-07-25): Aprobada por el owner e implementada** en la rama
-`feature/016-auth-oauth-executors` — tabla `user_agent_config` (migración
-`0008_user_agent_config.sql`), funciones de repositorio, rama `authMode` en ambos Executors, flag
-`--auth-mode` de CLI y resolución de precedencia en `runStart.ts`. Pendiente: validación conjunta
-Architect + owner sobre el diff, y merge a `main` (nunca hecho directamente por el DAIA). La
-invocación end-to-end con una sesión OAuth real dentro de contenedor queda como evidencia
-pendiente — ver sección 8 y 9 del documento de diseño.
+**Estado (2026-07-25): ✅ Ejecutada.** Aprobada por el owner, implementada en la rama
+`feature/016-auth-oauth-executors` (commit `133509d`), verificada de forma independiente por el
+Architect (migración, repositorio, ambos Executors, `runStart.ts`, typecheck y 53/55 tests
+re-corridos, no solo el reporte del DAIA) y mergeada a `main` en `fa42d0e` ("Merge FEATURE-016:
+modo de autenticación por cuenta personal (OAuth) para Executors"). La rama se conserva como
+referencia histórica, mismo criterio que `feature/015a-*`/`feature/015b-*`.
+
+Qué se implementó: tabla `user_agent_config` (migración `0008_user_agent_config.sql`, global +
+override por rol), funciones de repositorio (`resolveAgentConfig` aplica la precedencia), rama
+`authMode` en ambos Executors (mount de solo lectura del caché OAuth dedicado, `CODEX_HOME` +
+`type:"chatgpt"` para Codex, sin `--bare` + `--setting-sources ""` para Claude Code), flag de CLI
+`--auth-mode` y resolución de precedencia (flag > override de rol > global > default) en
+`runStart.ts`.
+
+Dos ítems quedan documentados como pendientes en `docs/features/FEATURE-016-auth-oauth-executors.md`
+(secciones 8 y 9) — no bloquearon este merge, pero son los primeros a resolver antes de usar
+`cli_session` en un run real de producción: (1) todavía no se corrió un turno real end-to-end
+dentro de contenedor con una sesión OAuth real montada como caché; (2) `CODEX_HOME` se monta
+íntegro de solo lectura y Codex también lo usa para logs/sqlite — riesgo de que falle al intentar
+escribir ahí, sin probar todavía con un turno real de Codex en `cli_session`.
 
 ### 🟡 FEATURE-017 (antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases + Release Plan
 Promovido de ⚪ Tentativo a 🟡 Confirmado. El diseño ya existe en el Runbook
