@@ -1,5 +1,5 @@
 import { spawn, execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -46,6 +46,14 @@ const ALLOWED_ENV_PASSTHROUGH_KEYS = [
 
 const DEFAULT_DEVELOPER_CONTAINER_IMAGE = "ai-orchestrator-developer:latest";
 
+// FEATURE-016: ruta donde se monta, de solo lectura, el caché OAuth dedicado del Orquestador
+// dentro del holder cuando authMode === "cli_session". Nunca el HOME personal del operador.
+const OAUTH_CACHE_CONTAINER_PATH = "/isolated/claude-home";
+
+type ClaudeAuth =
+  | { authMode: "api_key"; apiKey: string }
+  | { authMode: "cli_session"; oauthCacheDir: string };
+
 export interface ClaudeCodeExecutorOptions {
   /** Directorio de trabajo del run (el worktree). Todas las invocaciones de esta instancia corren ahí. */
   workingDirectory: string;
@@ -66,6 +74,14 @@ export interface ClaudeCodeExecutorOptions {
   sandbox?: "host" | "container";
   /** Imagen a usar cuando sandbox === "container". Default: ai-orchestrator-developer:latest. */
   containerImage?: string;
+  /**
+   * FEATURE-016: "api_key" (default, sin cambios) inyecta ANTHROPIC_API_KEY como hoy y corre con
+   * `--bare`. "cli_session" monta de solo lectura el caché OAuth dedicado apuntado por
+   * CLAUDE_OAUTH_CACHE_DIR, corre sin `--bare` (deshabilita OAuth de raíz, ver
+   * docs/features/FEATURE-016-auth-oauth-executors.md sección 7.4) y agrega
+   * `--setting-sources ""` para suprimir hooks y auto-discovery de CLAUDE.md.
+   */
+  authMode?: "api_key" | "cli_session";
 }
 
 interface RawCliResult {
@@ -111,17 +127,30 @@ export class ClaudeCodeExecutor implements Executor {
   constructor(public readonly options: ClaudeCodeExecutorOptions) {}
 
   async runPhase(invocation: PhaseInvocation, options: RunPhaseOptions = {}): Promise<PhaseResult> {
+    const authMode = this.options.authMode ?? "api_key";
+
+    if (authMode === "cli_session") {
+      const oauthCacheDir = process.env.CLAUDE_OAUTH_CACHE_DIR;
+      if (!oauthCacheDir || !existsSync(oauthCacheDir)) {
+        throw new Error(
+          "authMode=cli_session requiere sesión OAuth válida; no encontrada o vencida " +
+          "(CLAUDE_OAUTH_CACHE_DIR ausente o el directorio no existe)."
+        );
+      }
+      return this.runRoleIsolated(invocation, { authMode, oauthCacheDir }, options);
+    }
+
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       throw new Error("ANTHROPIC_API_KEY no está definida en el entorno del proceso.");
     }
 
-    return this.runRoleIsolated(invocation, apiKey, options);
+    return this.runRoleIsolated(invocation, { authMode, apiKey }, options);
   }
 
   private async runRoleIsolated(
     invocation: PhaseInvocation,
-    apiKey: string,
+    auth: ClaudeAuth,
     options: RunPhaseOptions
   ): Promise<PhaseResult> {
     const policy = resolveRolePolicy(invocation.agentRole);
@@ -165,18 +194,32 @@ export class ClaudeCodeExecutor implements Executor {
         type: "isolated_inventory",
         data: { role: invocation.agentRole, provider: "claude", tools: [...worker.effectiveTools], nativeTools: [] },
       });
+      // FEATURE-016: "api_key" inyecta ANTHROPIC_API_KEY y corre con `--bare` (default, sin
+      // cambios). "cli_session" nunca inyecta la key: monta de solo lectura el caché OAuth
+      // dedicado y corre SIN `--bare` porque --bare deshabilita OAuth de raíz (confirmado, ver
+      // docs/features/FEATURE-016-auth-oauth-executors.md sección 7.4) — se agrega
+      // `--setting-sources ""` como mitigación parcial (suprime hooks y auto-discovery de
+      // CLAUDE.md; LSP/plugin-sync/prefetch de red quedan activos, riesgo aceptado explícitamente
+      // por el owner, ver sección 9 de esa Feature).
+      const authArgs =
+        auth.authMode === "cli_session"
+          ? ["-e", `CLAUDE_CONFIG_DIR=${OAUTH_CACHE_CONTAINER_PATH}`,
+             "-v", `${auth.oauthCacheDir}:${OAUTH_CACHE_CONTAINER_PATH}:ro`]
+          : ["-e", "ANTHROPIC_API_KEY"];
+      const cliModeArgs = auth.authMode === "cli_session" ? ["--setting-sources", ""] : ["--bare"];
+
       const args = [
         "run", "--rm", "-i", "--read-only",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
         "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
         "--tmpfs", "/holder-empty:rw,noexec,nosuid,size=16m",
         "--workdir", "/holder-empty",
-        "-e", "ANTHROPIC_API_KEY",
+        ...authArgs,
         "-v", `${worker.socketDirectory}:/channel:rw`,
         "-v", `${roleMcpBridgePath()}:/isolated/roleMcpBridge.mjs:ro`,
         "-v", `${configPath}:/isolated/mcp.json:ro`,
         this.options.containerImage ?? DEFAULT_DEVELOPER_CONTAINER_IMAGE,
-        "claude", "-p", "--bare",
+        "claude", "-p", ...cliModeArgs,
         "--system-prompt", invocation.roleInstructions,
         "--tools", isolatedMcpTools.join(","),
         ...isolatedMcpTools.flatMap((tool) => ["--allowedTools", tool]),
@@ -189,8 +232,8 @@ export class ClaudeCodeExecutor implements Executor {
       if (this.options.model) args.push("--model", this.options.model);
       args.push(this.buildPrompt(invocation));
       const raw = await this.execAndCapture("docker", args, undefined, {
-        ...this.buildChildEnv(apiKey),
-        ANTHROPIC_API_KEY: apiKey,
+        ...this.buildChildEnv(auth.authMode === "api_key" ? auth.apiKey : undefined),
+        ...(auth.authMode === "api_key" ? { ANTHROPIC_API_KEY: auth.apiKey } : {}),
       }, options);
       return this.mapToPhaseResult(raw);
     } finally {
@@ -219,7 +262,7 @@ export class ClaudeCodeExecutor implements Executor {
   }
 
   /** FEATURE-006: allowlist explícita — nunca `{ ...process.env }`. Ver H14. */
-  private buildChildEnv(apiKey: string): NodeJS.ProcessEnv {
+  private buildChildEnv(apiKey?: string): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
     for (const key of ALLOWED_ENV_PASSTHROUGH_KEYS) {
       const value = process.env[key];
@@ -227,7 +270,7 @@ export class ClaudeCodeExecutor implements Executor {
         env[key] = value;
       }
     }
-    env.ANTHROPIC_API_KEY = apiKey;
+    if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
     return env;
   }
 

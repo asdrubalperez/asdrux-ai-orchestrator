@@ -17,7 +17,8 @@ import {
   type RunWorktree,
 } from "../isolation/worktree.js";
 import { buildEscalationContext, isAgentRole, parsePipelineDefinitionRow } from "./escalation.js";
-import { executePipelineRun, parseExecutorProvider } from "./commands/runStart.js";
+import { executePipelineRun, parseAuthMode, parseExecutorProvider } from "./commands/runStart.js";
+import type { AgentConfig } from "../db/repository.js";
 
 export type EscalationResponseAction = { abort: true } | { solution: string };
 
@@ -73,7 +74,13 @@ export async function respondToEscalation(params: {
 
   const humanSolution = params.action.solution;
   const runStarted = runStartedPayload(parentDetail.events);
-  const executorProvider = parseExecutorProvider(runStarted.provider);
+  // FEATURE-016: un reintento de escalación reusa exactamente lo que se usó en el run original —
+  // no re-resuelve contra user_agent_config, que pudo haber cambiado desde entonces. Runs previos
+  // a esta Feature no tienen authMode persistido; default api_key (regresión cero).
+  const cliAgentOverride: AgentConfig = {
+    executorProvider: parseExecutorProvider(runStarted.provider),
+    authMode: parseAuthMode(runStarted.authMode ?? "api_key"),
+  };
   const model = runStarted.model ?? undefined;
   const projectRepoRoot = path.resolve(runStarted.repoPath);
 
@@ -137,7 +144,8 @@ export async function respondToEscalation(params: {
       {
         branchName: childWorktree.branchName,
         worktreePath: childWorktree.worktreePath,
-        provider: executorProvider,
+        provider: cliAgentOverride.executorProvider,
+        authMode: cliAgentOverride.authMode,
         model: model ?? null,
         pipeline: `${pipelineSpec.name}@${pipelineSpec.version}`,
         projectId: parentRun.project_id,
@@ -179,13 +187,16 @@ export async function respondToEscalation(params: {
         worktree: childWorktree as RunWorktree,
         pipelineSpec,
         initialContext: retryContext,
-        executorProvider,
+        userId: params.userId,
+        cliAgentOverride,
         model,
       }),
   };
 }
 
-function runStartedPayload(events: unknown[]): { provider: string; model: string | null; repoPath: string } {
+function runStartedPayload(
+  events: unknown[]
+): { provider: string; authMode: string | null; model: string | null; repoPath: string } {
   const event = events.find(
     (item): item is { event_type: string; payload: Record<string, unknown> } =>
       item !== null &&
@@ -204,6 +215,9 @@ function runStartedPayload(events: unknown[]): { provider: string; model: string
   }
   return {
     provider: payload.provider,
+    // FEATURE-016: runs previos a esta Feature no tienen authMode persistido — null, no un valor
+    // inventado; el llamador lo trata como "api_key" (default, regresión cero).
+    authMode: typeof payload.authMode === "string" ? payload.authMode : null,
     model: typeof payload.model === "string" ? payload.model : null,
     repoPath: payload.repoPath,
   };

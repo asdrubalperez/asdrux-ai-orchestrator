@@ -21,9 +21,12 @@ import {
   recordArtifact,
   recordRunConfigVersions,
   recordRunEvent,
+  resolveAgentConfig,
   updateRunCurrentPhase,
   updateRunStatus,
+  type AgentConfig,
   type ArtifactRow,
+  type AuthMode,
   type RunRow,
 } from "../../db/repository.js";
 import { pool } from "../../db/pool.js";
@@ -59,11 +62,22 @@ export async function runStart(args: string[]): Promise<void> {
 
   const pipelineName = getFlag(args, "--pipeline") ?? SINGLE_PHASE_ARCHITECT.name;
   const model = getFlag(args, "--model");
-  const executorProvider = parseExecutorProvider(getFlag(args, "--executor") ?? "claude");
+  // FEATURE-016, Regla 2: si hay CUALQUIER flag de CLI (--executor y/o --auth-mode), ese flag
+  // decide agente Y authMode juntos para toda la invocación — nunca se mezcla con la DB, y nunca
+  // se consulta la DB en absoluto para esta corrida. Sin flags, cada fase resuelve su propia
+  // preferencia vía resolveAgentConfig (override de rol -> global -> default), ver
+  // executePipelineRun.
+  const executorFlag = getFlag(args, "--executor");
+  const authModeFlag = getFlag(args, "--auth-mode");
+  const cliAgentOverride: AgentConfig | null =
+    executorFlag !== undefined || authModeFlag !== undefined
+      ? { executorProvider: parseExecutorProvider(executorFlag ?? "claude"), authMode: parseAuthMode(authModeFlag ?? "api_key") }
+      : null;
 
   if (!casePath) {
     throw new Error(
-      "Uso: npm run cli -- run:start --case <ruta-a-json> [--project <id>] [--pipeline <nombre>] [--model <alias>] [--executor claude|codex]"
+      "Uso: npm run cli -- run:start --case <ruta-a-json> [--project <id>] [--pipeline <nombre>] [--model <alias>] " +
+      "[--executor claude|codex] [--auth-mode api_key|cli_session]"
     );
   }
 
@@ -84,6 +98,12 @@ export async function runStart(args: string[]): Promise<void> {
   const projectRepoRoot = path.resolve(project.repo_path);
   const worktree = await createRunWorktree(projectRepoRoot, runId);
   console.log(`[run:start] worktree creado: ${worktree.worktreePath} (rama ${worktree.branchName})`);
+
+  // Solo para el evento de auditoría run_started: refleja la selección de la primera fase. Cada
+  // fase resuelve la suya propia dentro de executePipelineRun — puede diferir por rol si hay
+  // overrides en user_agent_config (FEATURE-016).
+  const firstPhaseSelection: AgentConfig =
+    cliAgentOverride ?? (await resolveAgentConfig(user.id, pipelineSpec.definition.phases[0].agentRole));
 
   const client = await pool.connect();
   let run: RunRow;
@@ -107,7 +127,8 @@ export async function runStart(args: string[]): Promise<void> {
         branchName: worktree.branchName,
         worktreePath: worktree.worktreePath,
         casePath,
-        provider: executorProvider,
+        provider: firstPhaseSelection.executorProvider,
+        authMode: firstPhaseSelection.authMode,
         model: model ?? null,
         pipeline: `${pipelineSpec.name}@${pipelineSpec.version}`,
         projectId: project.id,
@@ -129,7 +150,8 @@ export async function runStart(args: string[]): Promise<void> {
     worktree,
     pipelineSpec,
     initialContext: businessCase,
-    executorProvider,
+    userId: user.id,
+    cliAgentOverride,
     model,
   });
 }
@@ -140,11 +162,18 @@ export async function executePipelineRun(params: {
   worktree: RunWorktree;
   pipelineSpec: PipelineSpec;
   initialContext: unknown;
-  executorProvider: ExecutorProvider;
+  userId: string;
+  /**
+   * FEATURE-016, Regla 2: si viene seteado (flag de CLI presente), decide agente y authMode para
+   * TODAS las fases de esta corrida, sin consultar la DB. Si es null, cada fase resuelve la suya
+   * propia vía resolveAgentConfig(userId, role) — override de rol -> global -> default.
+   */
+  cliAgentOverride: AgentConfig | null;
   model?: string;
 }): Promise<void> {
-  const { projectRepoRoot, runId, worktree, pipelineSpec, initialContext, executorProvider, model } = params;
-  const executor = createExecutor(executorProvider, worktree.worktreePath, model);
+  const { projectRepoRoot, runId, worktree, pipelineSpec, initialContext, userId, cliAgentOverride, model } = params;
+  const resolveSelection = (role: AgentRole): Promise<AgentConfig> =>
+    cliAgentOverride ? Promise.resolve(cliAgentOverride) : resolveAgentConfig(userId, role);
   const readRole = (agentRole: string) =>
     readFile(path.join(orchestratorRoot, "src", "executor", "roles", `${agentRole}.txt`), "utf8");
 
@@ -161,6 +190,8 @@ export async function executePipelineRun(params: {
       await updateRunCurrentPhase(runId, phase.agentRole);
       const context = previousResult === null ? currentInitialContext : previousResult.outputArtifact;
       const roleInstructions = await readRole(phase.agentRole);
+      const selection = await resolveSelection(phase.agentRole);
+      const executor = buildExecutor(selection, worktree.worktreePath, model);
 
       const invocation: PhaseInvocation = {
         agentRole: phase.agentRole,
@@ -220,9 +251,12 @@ export async function executePipelineRun(params: {
     }
 
     if (pipelineSpec.definition.loop) {
-      const developerExecutor = createDeveloperExecutor(executorProvider, worktree.worktreePath, model);
+      const developerSelection = await resolveSelection("developer");
+      const qaSelection = await resolveSelection("qa");
+      const developerExecutor = buildExecutor(developerSelection, worktree.worktreePath, model, { sandbox: "container" });
+      const qaExecutor = buildExecutor(qaSelection, worktree.worktreePath, model);
       const finalResult = await runDeveloperQaLoop({
-        executor,
+        executor: qaExecutor,
         developerExecutor,
         readRole,
         runId,
@@ -486,18 +520,20 @@ export function parseExecutorProvider(value: string): ExecutorProvider {
   throw new Error(`Executor desconocido: "${value}". Disponibles: claude, codex`);
 }
 
-function createExecutor(provider: ExecutorProvider, workingDirectory: string, model: string | undefined): RunExecutor {
-  if (provider === "codex") {
-    return new CodexExecutor({ workingDirectory, model });
-  }
-
-  return new ClaudeCodeExecutor({ workingDirectory, model });
+export function parseAuthMode(value: string): AuthMode {
+  if (value === "api_key" || value === "cli_session") return value;
+  throw new Error(`authMode desconocido: "${value}". Disponibles: api_key, cli_session`);
 }
 
-function createDeveloperExecutor(provider: ExecutorProvider, workingDirectory: string, model: string | undefined): RunExecutor {
-  if (provider === "codex") {
-    return new CodexExecutor({ workingDirectory, model, sandbox: "container" });
+function buildExecutor(
+  selection: AgentConfig,
+  workingDirectory: string,
+  model: string | undefined,
+  opts: { sandbox?: "host" | "container" } = {}
+): RunExecutor {
+  if (selection.executorProvider === "codex") {
+    return new CodexExecutor({ workingDirectory, model, authMode: selection.authMode, ...opts });
   }
 
-  return new ClaudeCodeExecutor({ workingDirectory, model, sandbox: "container" });
+  return new ClaudeCodeExecutor({ workingDirectory, model, authMode: selection.authMode, ...opts });
 }

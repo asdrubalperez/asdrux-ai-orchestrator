@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 import { pool } from "./pool.js";
-import type { PhaseResult } from "../contracts/executor.js";
+import type { AgentRole, PhaseResult } from "../contracts/executor.js";
 import type { PipelineSpec } from "../pipelines/definitions.js";
 
 export interface PipelineDefinitionRow {
@@ -66,6 +66,26 @@ export interface SessionRow {
   expires_at: string;
   revoked_at: string | null;
 }
+
+export type ExecutorProviderName = "claude" | "codex";
+export type AuthMode = "api_key" | "cli_session";
+
+export interface AgentConfig {
+  executorProvider: ExecutorProviderName;
+  authMode: AuthMode;
+}
+
+export interface UserAgentConfigRow {
+  id: string;
+  user_id: string;
+  role: AgentRole | null;
+  executor_provider: ExecutorProviderName;
+  auth_mode: AuthMode;
+  created_at: string;
+  updated_at: string;
+}
+
+const DEFAULT_AGENT_CONFIG: AgentConfig = { executorProvider: "claude", authMode: "api_key" };
 
 /**
  * Busca o crea la fila de `pipeline_definitions` para un `PipelineSpec` dado. La secuencia de
@@ -211,6 +231,77 @@ export async function getProjectConfigHistory(
     [projectId, configKey]
   );
   return result.rows;
+}
+
+// FEATURE-016: preferencia de agente (claude|codex) + authMode (api_key|cli_session) por usuario,
+// global (role IS NULL) y con override opcional por rol. Sin versionado a diferencia de
+// project_config_versions — ver Scope/Excluido de FEATURE-016 para la justificación.
+function toAgentConfig(row: UserAgentConfigRow): AgentConfig {
+  return { executorProvider: row.executor_provider, authMode: row.auth_mode };
+}
+
+export async function getGlobalAgentConfig(userId: string): Promise<AgentConfig | null> {
+  const result = await pool.query<UserAgentConfigRow>(
+    `select id, user_id, role, executor_provider, auth_mode, created_at, updated_at
+     from user_agent_config
+     where user_id = $1 and role is null`,
+    [userId]
+  );
+  return result.rows[0] ? toAgentConfig(result.rows[0]) : null;
+}
+
+export async function getRoleAgentConfigOverride(userId: string, role: AgentRole): Promise<AgentConfig | null> {
+  const result = await pool.query<UserAgentConfigRow>(
+    `select id, user_id, role, executor_provider, auth_mode, created_at, updated_at
+     from user_agent_config
+     where user_id = $1 and role = $2`,
+    [userId, role]
+  );
+  return result.rows[0] ? toAgentConfig(result.rows[0]) : null;
+}
+
+/**
+ * Regla 2 de FEATURE-016 (sin el flag de CLI, resuelto antes de llamar a esta función):
+ * override de rol -> global -> default (claude + api_key).
+ */
+export async function resolveAgentConfig(userId: string, role: AgentRole): Promise<AgentConfig> {
+  const override = await getRoleAgentConfigOverride(userId, role);
+  if (override) return override;
+  const global = await getGlobalAgentConfig(userId);
+  if (global) return global;
+  return DEFAULT_AGENT_CONFIG;
+}
+
+export async function setGlobalAgentConfig(userId: string, config: AgentConfig): Promise<AgentConfig> {
+  const result = await pool.query<UserAgentConfigRow>(
+    `insert into user_agent_config (user_id, role, executor_provider, auth_mode)
+     values ($1, null, $2, $3)
+     on conflict (user_id) where role is null
+     do update set executor_provider = excluded.executor_provider,
+                   auth_mode = excluded.auth_mode,
+                   updated_at = now()
+     returning id, user_id, role, executor_provider, auth_mode, created_at, updated_at`,
+    [userId, config.executorProvider, config.authMode]
+  );
+  return toAgentConfig(result.rows[0]);
+}
+
+export async function setRoleAgentConfigOverride(
+  userId: string,
+  role: AgentRole,
+  config: AgentConfig
+): Promise<AgentConfig> {
+  const result = await pool.query<UserAgentConfigRow>(
+    `insert into user_agent_config (user_id, role, executor_provider, auth_mode)
+     values ($1, $2, $3, $4)
+     on conflict (user_id, role) where role is not null
+     do update set executor_provider = excluded.executor_provider,
+                   auth_mode = excluded.auth_mode,
+                   updated_at = now()
+     returning id, user_id, role, executor_provider, auth_mode, created_at, updated_at`,
+    [userId, role, config.executorProvider, config.authMode]
+  );
+  return toAgentConfig(result.rows[0]);
 }
 
 export async function recordRunConfigVersions(runId: string, client?: PoolClient): Promise<void> {

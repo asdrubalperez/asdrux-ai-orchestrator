@@ -64,6 +64,14 @@ const DEFAULT_CODEX_DEVELOPER_CONTAINER_IMAGE = "ai-orchestrator-codex-developer
 const DEFAULT_CODEX_QA_HOLDER_IMAGE = "feature015a-codex-pin-candidate:0.145.0";
 const CONTAINER_SCHEMA_PATH = "/schema/phase-result.schema.json";
 
+// FEATURE-016: ruta donde se monta, de solo lectura, el caché OAuth dedicado del Orquestador
+// dentro del holder cuando authMode === "cli_session". CODEX_HOME apunta acá.
+const OAUTH_CACHE_CONTAINER_PATH = "/isolated/codex-home";
+
+type CodexAuth =
+  | { authMode: "api_key"; apiKey: string }
+  | { authMode: "cli_session"; oauthCacheDir: string };
+
 export interface CodexExecutorOptions {
   /** Directorio de trabajo del run (el worktree). Todas las invocaciones de esta instancia corren ahi. */
   workingDirectory: string;
@@ -77,6 +85,14 @@ export interface CodexExecutorOptions {
   sandbox?: "host" | "container";
   /** Imagen a usar cuando sandbox === "container". Default: ai-orchestrator-codex-developer:latest. */
   containerImage?: string;
+  /**
+   * FEATURE-016: "api_key" (default, sin cambios) inyecta CODEX_API_KEY y usa
+   * `type:"apiKey"` en `account/login/start`. "cli_session" monta de solo lectura el caché OAuth
+   * dedicado apuntado por CODEX_OAUTH_CACHE_DIR (vía CODEX_HOME) y usa `type:"chatgpt"`. Codex no
+   * tiene un flag equivalente a `--bare`/`--safe-mode` que bloquee esto (ver
+   * docs/features/FEATURE-016-auth-oauth-executors.md sección 7.3).
+   */
+  authMode?: "api_key" | "cli_session";
 }
 
 interface RawCodexResult {
@@ -124,17 +140,30 @@ export class CodexExecutor implements Executor {
   constructor(public readonly options: CodexExecutorOptions) {}
 
   async runPhase(invocation: PhaseInvocation, options: RunPhaseOptions = {}): Promise<PhaseResult> {
+    const authMode = this.options.authMode ?? "api_key";
+
+    if (authMode === "cli_session") {
+      const oauthCacheDir = process.env.CODEX_OAUTH_CACHE_DIR;
+      if (!oauthCacheDir || !existsSync(oauthCacheDir)) {
+        throw new Error(
+          "authMode=cli_session requiere sesión OAuth válida; no encontrada o vencida " +
+          "(CODEX_OAUTH_CACHE_DIR ausente o el directorio no existe)."
+        );
+      }
+      return this.runRoleIsolated(invocation, { authMode, oauthCacheDir }, options);
+    }
+
     const apiKey = process.env.CODEX_API_KEY;
     if (!apiKey) {
       throw new Error("CODEX_API_KEY no esta definida en el entorno del proceso.");
     }
 
-    return this.runRoleIsolated(invocation, apiKey, options);
+    return this.runRoleIsolated(invocation, { authMode, apiKey }, options);
   }
 
   private async runRoleIsolated(
     invocation: PhaseInvocation,
-    apiKey: string,
+    auth: CodexAuth,
     options: RunPhaseOptions
   ): Promise<PhaseResult> {
     const policy = resolveRolePolicy(invocation.agentRole);
@@ -157,6 +186,17 @@ export class CodexExecutor implements Executor {
       type: "isolated_inventory",
       data: { role: invocation.agentRole, provider: "codex", tools: [...worker.effectiveTools], nativeTools: [] },
     });
+    // FEATURE-016: "api_key" inyecta CODEX_API_KEY (default, sin cambios). "cli_session" nunca
+    // inyecta la key: monta de solo lectura el caché OAuth dedicado y apunta CODEX_HOME ahí —
+    // confirmado que CODEX_HOME es la variable real que Codex usa para localizar auth.json (ver
+    // docs/features/FEATURE-016-auth-oauth-executors.md sección 7.3). Codex no tiene un
+    // equivalente a `--bare`/`--safe-mode` que bloquee esto.
+    const authArgs =
+      auth.authMode === "cli_session"
+        ? ["-e", `CODEX_HOME=${OAUTH_CACHE_CONTAINER_PATH}`,
+           "-v", `${auth.oauthCacheDir}:${OAUTH_CACHE_CONTAINER_PATH}:ro`]
+        : ["-e", "CODEX_API_KEY"];
+
     const dockerArgs = [
       "run", "--rm", "-i", "--read-only",
       "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
@@ -164,14 +204,17 @@ export class CodexExecutor implements Executor {
       "--tmpfs", "/holder-empty:rw,noexec,nosuid,size=16m",
       "--tmpfs", "/home/node/.codex:rw,nosuid,size=64m",
       "--workdir", "/holder-empty",
-      "-e", "CODEX_API_KEY",
+      ...authArgs,
       DEFAULT_CODEX_QA_HOLDER_IMAGE,
       "codex", "--config", "features.shell_tool=false",
       "app-server", "--listen", "stdio://",
     ];
-    const env = { ...this.buildChildEnv(apiKey), CODEX_API_KEY: apiKey };
+    const env =
+      auth.authMode === "api_key"
+        ? { ...this.buildChildEnv(auth.apiKey), CODEX_API_KEY: auth.apiKey }
+        : this.buildChildEnv(undefined);
     try {
-      const output = await this.runRoleCodexAppServer(dockerArgs, env, invocation, policy, worker, options);
+      const output = await this.runRoleCodexAppServer(dockerArgs, env, auth, invocation, policy, worker, options);
       const parsed = validatePhaseResult(parseLastJsonObject(output));
       return { ...parsed, executorMetadata: { provider: "codex", model: this.options.model } };
     } finally {
@@ -182,6 +225,7 @@ export class CodexExecutor implements Executor {
   private runRoleCodexAppServer(
     dockerArgs: string[],
     env: NodeJS.ProcessEnv,
+    auth: CodexAuth,
     invocation: PhaseInvocation,
     policy: ReturnType<typeof resolveRolePolicy>,
     worker: Awaited<ReturnType<typeof startRoleWorker>>,
@@ -223,10 +267,12 @@ export class CodexExecutor implements Executor {
         if (!message.method && message.id === initializeId) {
           if (message.error) { fail(new Error(JSON.stringify(message.error))); return; }
           child.stdin.write(JSON.stringify({ method: "initialized", params: {} }) + "\n");
-          loginRequestId = send("account/login/start", {
-            type: "apiKey",
-            apiKey: env.CODEX_API_KEY,
-          });
+          loginRequestId = send(
+            "account/login/start",
+            auth.authMode === "cli_session"
+              ? { type: "chatgpt" }
+              : { type: "apiKey", apiKey: env.CODEX_API_KEY }
+          );
           return;
         }
         if (!message.method && message.id === loginRequestId) {
@@ -360,7 +406,7 @@ export class CodexExecutor implements Executor {
     ].join("\n");
   }
 
-  private buildChildEnv(apiKey: string): NodeJS.ProcessEnv {
+  private buildChildEnv(apiKey?: string): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
     for (const key of ALLOWED_ENV_PASSTHROUGH_KEYS) {
       const value = process.env[key];
@@ -368,7 +414,7 @@ export class CodexExecutor implements Executor {
         env[key] = value;
       }
     }
-    env.CODEX_API_KEY = apiKey;
+    if (apiKey) env.CODEX_API_KEY = apiKey;
     return env;
   }
 

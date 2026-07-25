@@ -159,6 +159,33 @@ interface PhaseResult {
 
 Mecanismo exacto de invocación headless para Claude Code: **Claude Code CLI** (`claude -p`), no Agent SDK — confirmado empíricamente en los spikes de FEATURE-001 (`docs/features/FEATURE-001-spike-results.md`) y FEATURE-002 (`docs/features/FEATURE-002-spike-results.md`).
 
+### Modo de autenticación y selección de agente (FEATURE-016)
+
+Cada usuario tiene una preferencia persistente de **agente** (`claude` | `codex`) y **authMode**
+(`api_key` | `cli_session`) en la tabla `user_agent_config`, global y con override opcional por
+rol (`architect`/`functional`/`planning`/`developer`/`qa`). Sin ninguna fila configurada, el
+comportamiento es exactamente el default histórico (`claude` + `api_key`) — regresión cero.
+
+Precedencia, en este orden: flag de CLI (`--executor`/`--auth-mode`, uso técnico puntual, nunca
+persiste) > override de `user_agent_config` para ese rol > fila global del usuario > default. Ver
+`src/db/repository.ts` (`resolveAgentConfig`) y `src/cli/commands/runStart.ts`.
+
+`authMode="api_key"` (default) inyecta la key del proveedor como siempre. `authMode="cli_session"`
+monta de solo lectura un caché OAuth dedicado del Orquestador (nunca el `HOME` personal del
+operador) en el contenedor holder — mismo patrón `-v origen:destino:ro` ya usado para
+`roleMcpBridge.mjs`/`mcp.json` — y no inyecta ninguna key. Falla explícito si el caché no existe o
+la sesión está vencida, sin fallback silencioso a `api_key`.
+
+Para Codex, `cli_session` apunta `CODEX_HOME` al caché montado y usa `type:"chatgpt"` en
+`account/login/start` en vez de `type:"apiKey"`. Para Claude Code, `cli_session` corre **sin**
+`--bare` (que deshabilita OAuth/keychain de raíz) y agrega `--setting-sources ""` como mitigación
+parcial — suprime hooks y auto-discovery de `CLAUDE.md`, pero no LSP, plugin sync ni el
+prefetch/bootstrap de red al arranque del CLI. Ese riesgo residual (tráfico de red al host de
+Anthropic no gateado por ninguna tool, LSP/plugin sync corriendo dentro del holder) fue presentado
+en términos concretos y aceptado explícitamente por el owner — ver
+`docs/features/FEATURE-016-auth-oauth-executors.md`, secciones 7.4 y 9, para el detalle completo
+de por qué no hay una alternativa más fina disponible hoy en el CLI de Claude Code.
+
 ## Integration Principles
 
 * Documentation first: no asumir comportamiento de Claude Code / Codex sin validar contra documentación oficial vigente.
