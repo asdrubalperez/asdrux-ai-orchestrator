@@ -105,7 +105,17 @@ export async function cloneRunRepository(params: {
   const worktreePath = path.join(clonesBaseDir, params.runId);
 
   try {
-    await execFileAsync("git", ["clone", "--branch", params.baseRef, "--single-branch", params.repoUrl, worktreePath]);
+    // Confirmado en una corrida real (2026-07-25): sin esto, un repo privado/inexistente-pero-
+    // indistinguible-de-privado deja a `git clone` colgado esperando credenciales interactivas
+    // ("Username for 'https://github.com':") — nunca falla, nunca resuelve, bloquea el request
+    // HTTP para siempre. GIT_TERMINAL_PROMPT=0 hace que git falle al instante en vez de esperar
+    // input que nunca va a llegar (proceso no interactivo, sin terminal real); GIT_ASKPASS=echo
+    // bloquea también cualquier askpass gráfico configurado en el host como vía alternativa.
+    await execFileAsync(
+      "git",
+      ["clone", "--branch", params.baseRef, "--single-branch", params.repoUrl, worktreePath],
+      { env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "echo" } }
+    );
   } catch (err) {
     throw new RunRepoCloneError(
       `No se pudo clonar "${params.repoUrl}" en la rama "${params.baseRef}": ${(err as Error).message}`
@@ -113,6 +123,8 @@ export async function cloneRunRepository(params: {
   }
 
   try {
+    // checkout -b opera enteramente local sobre el clon ya hecho — sin acceso a red, sin riesgo
+    // de prompt de credenciales; no necesita el mismo env.
     await execFileAsync("git", ["checkout", "-b", branchName], { cwd: worktreePath });
   } catch (err) {
     await rm(worktreePath, { recursive: true, force: true });
