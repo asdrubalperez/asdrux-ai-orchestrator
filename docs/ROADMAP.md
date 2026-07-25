@@ -146,7 +146,7 @@ de desdoblar FEATURE-016 en partes independientes — ver abajo):
   `docs/features/FEATURE-015B-part1-results.md`, `part2-results.md` y `part3-results.md`.
 
 Prerequisito de FEATURE-016 completo: satisfecho. El bloqueo por dependencia de FEATURE-015 queda
-levantado; FEATURE-016 no inicia automáticamente y conserva su propio diseño/Approval Gate pendiente.
+levantado — ver detalle de FEATURE-016 más abajo (aprobada e implementada, pendiente de merge).
 
 ### 🟡 FEATURE-016 — Modo de autenticación por cuenta personal (OAuth) para Executors
 **Se revierte el desdoblamiento anterior en 016A/016B**: asumía que Architect/Functional/Planning/
@@ -164,12 +164,20 @@ nuevos por proveedor — agregar un parámetro `authMode` (`"api_key"` | `"cli_s
 opciones ya existentes de `ClaudeCodeExecutor`/`CodexExecutor`, default `"api_key"` sin cambiar
 nada del comportamiento actual. El contrato `Executor` (`src/contracts/executor.ts`) no cambia.
 
-El diseño formal queda en `docs/features/FEATURE-016-auth-oauth-executors.md` (el archivo de
-diseño de 016A generado en una sesión anterior, evaluado y no aprobado, queda como referencia
-histórica de un alcance descartado — ver
+El diseño formal (v2, aprobado) queda en `docs/features/FEATURE-016-auth-oauth-executors.md` (el
+archivo de diseño de 016A generado en una sesión anterior, evaluado y no aprobado, queda como
+referencia histórica de un alcance descartado — ver
 `docs/features/FEATURE-016-auth-oauth-executors-parte-016a-infraestructura-roles-sin-bash.md`, no
-se elimina, pero no representa el alcance vigente). El prerequisito FEATURE-015 (015A+015B) para `cli_session` ya está satisfecho. FEATURE-016 mantiene
-su diseño y Approval Gate pendientes; no implementa `authMode` todavía ni arranca por este cambio.
+se elimina, pero no representa el alcance vigente). El prerequisito FEATURE-015 (015A+015B) para
+`cli_session` ya está satisfecho.
+
+**Estado (2026-07-25): Aprobada por el owner e implementada** en la rama
+`feature/016-auth-oauth-executors` — tabla `user_agent_config` (migración
+`0008_user_agent_config.sql`), funciones de repositorio, rama `authMode` en ambos Executors, flag
+`--auth-mode` de CLI y resolución de precedencia en `runStart.ts`. Pendiente: validación conjunta
+Architect + owner sobre el diff, y merge a `main` (nunca hecho directamente por el DAIA). La
+invocación end-to-end con una sesión OAuth real dentro de contenedor queda como evidencia
+pendiente — ver sección 8 y 9 del documento de diseño.
 
 ### 🟡 FEATURE-017 (antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases + Release Plan
 Promovido de ⚪ Tentativo a 🟡 Confirmado. El diseño ya existe en el Runbook
