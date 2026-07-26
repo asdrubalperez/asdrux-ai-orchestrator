@@ -17,7 +17,7 @@ Functional, Planning, Developer, QA) colaboren entre sí de forma consistente y 
 
 El flujo general, de punta a punta:
 
-`AGENTS.md` → `BOOTSTRAP.md` → Architect (`01`, `02`, Roadmap de Releases si aplica) →
+`AGENTS.md` → `BOOTSTRAP.md` → Architect (`01`, `02`, Roadmap de Releases) →
 `06-DELIVERY-WORKFLOW.md` (Functional → Planning → Developer → QA → Release, repetido por cada
 Feature del release activo) → cierre de release → release siguiente o fin del proyecto.
 
@@ -45,7 +45,7 @@ producto se persisten en `project_config_versions` por `project_id` + `config_ke
 | Documento | Propósito | Dueño |
 |---|---|---|
 | `01-PROJECT-BRIEF-TEMPLATE.md` | Molde del primer entregable del Architect: contexto, chequeo declarativo, evaluación preliminar | Architect |
-| `02-ARCHITECTURE-TEMPLATE.md` | Molde del segundo entregable del Architect: arquitectura técnica, riesgo, Roadmap de Releases (condicional) | Architect |
+| `02-ARCHITECTURE-TEMPLATE.md` | Molde del segundo entregable del Architect: arquitectura técnica, riesgo, Roadmap de Releases | Architect |
 | `03-AI-CONSTITUTION.md` | Reglas de comportamiento, autoridad de decisión, escalamiento, Ownership de Artefactos | — (rige a los cinco roles) |
 | `04-TESTING-POLICY.md` | Reglas de testing que Planning aplica al diseñar el Test Plan de cada Feature | Planning |
 | `05-CODING-STANDARDS.md` | Estándares de código que Developer aplica directamente | Developer |

@@ -56,11 +56,10 @@ El business case completo (nuevo o ya en curso) se entrega a Architect, quien si
 definido en:
 
 * `01-PROJECT-BRIEF-TEMPLATE.md` — Chequeo Declarativo (gate duro) y resto del Project Brief
-* `02-ARCHITECTURE-TEMPLATE.md` — incluyendo el Roadmap de Releases (sección 0) si el alcance es
-  demasiado amplio para un único release
+* `02-ARCHITECTURE-TEMPLATE.md` — incluyendo el Roadmap de Releases (sección 0), siempre presente
 
-Este Bootstrap termina cuando Architect entrega Project Brief y Architecture completos (y, si
-corresponde, el Roadmap de Releases ya aprobado por el humano) — desde ahí, el ciclo lo rige
+Este Bootstrap termina cuando Architect entrega Project Brief y Architecture completos, y el
+Roadmap de Releases ya aprobado por el humano — desde ahí, el ciclo lo rige
 `06-DELIVERY-WORKFLOW.md` desde su Stage 1 (Functional).
 
 ---

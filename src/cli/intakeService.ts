@@ -146,6 +146,11 @@ export async function startPendingRun(params: { runId: string; userId: string })
     return failPendingRunTechnically(run.id, "El caso de negocio no tiene Repositorio persistido.");
   }
 
+  if (!run.project_id) {
+    throw new Error(`El run ${run.id} no tiene project_id persistido.`);
+  }
+  const projectId = run.project_id;
+
   let worktree;
   try {
     worktree = await cloneRunRepository({ runId: run.id, repoUrl: repositorio, baseRef: ramaBase });
@@ -190,6 +195,7 @@ export async function startPendingRun(params: { runId: string; userId: string })
     execute: () =>
       executePipelineRun({
         runId: run.id,
+        projectId,
         worktree,
         pipelineSpec,
         initialContext: run.business_case,

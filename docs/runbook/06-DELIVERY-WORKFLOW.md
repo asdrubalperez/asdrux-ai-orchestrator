@@ -35,8 +35,7 @@ Dueño del entregable: **Functional**
 Objetivo: comprender el release activo dentro del Project Brief y la Architecture ya vigentes —
 no se vuelve a discutir el proyecto completo.
 
-Functional debe, para **todas las Features del release activo** (o del proyecto completo, si no
-existe Roadmap de Releases):
+Functional debe, para **todas las Features del release activo**:
 
 * entender la necesidad funcional de cada Feature
 * identificar su alcance dentro de lo ya definido en Architecture
@@ -267,14 +266,13 @@ si corresponde.
 ## Cierre del Release y Release Siguiente
 
 Al cerrar Stage 7 para el release activo, se consulta el Roadmap de Releases de Architect
-(`02-ARCHITECTURE-TEMPLATE.md`, sección 0):
+(`02-ARCHITECTURE-TEMPLATE.md`, sección 0) — siempre existe, con un mínimo de un release:
 
-* **Si no existe Roadmap de Releases** (el proyecto siempre fue un único release): el proyecto
-  queda cerrado en este punto.
-* **Si existe y hay un release siguiente**: se escala a Architect, quien a su vez escala al
-  humano para dar curso (mismo criterio que la aprobación inicial del Roadmap) — no se asume
-  continuidad automática entre releases.
-* **Si existe y no hay más releases pendientes**: el proyecto queda cerrado.
+* **Si el release recién cerrado era el último del roadmap**: el proyecto queda cerrado en este
+  punto.
+* **Si hay un release siguiente**: se escala a Architect, quien a su vez escala al humano para dar
+  curso (mismo criterio que la aprobación inicial del Roadmap) — no se asume continuidad
+  automática entre releases.
 
 ---
 

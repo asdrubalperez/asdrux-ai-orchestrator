@@ -1,4 +1,5 @@
 import type { RunRow } from "../db/repository.js";
+import { isRoadmapApprovalPayload } from "../cli/escalation.js";
 
 export type TimelineNodeId = "user" | "architect" | "functional" | "planning" | "developer" | "qa";
 export type TimelineNodeStatus =
@@ -32,6 +33,16 @@ export interface RunDetailViewInput {
   artifacts: ArtifactViewRow[];
 }
 
+export interface ReleaseRoadmapView {
+  releases: Array<{ id: string; nombre: string; alcanceResumen: string; estado: string }>;
+  activeReleaseId: string;
+}
+
+/** FEATURE-018: valida la forma de project_config_versions.value antes de exponerlo al frontend. */
+export function toReleaseRoadmapView(value: unknown): ReleaseRoadmapView | null {
+  return isRoadmapApprovalPayload(value) ? value : null;
+}
+
 export interface TimelineNode {
   id: TimelineNodeId;
   label: string;
@@ -57,6 +68,13 @@ export interface RunViewModel {
     outputArtifact: unknown;
     motive: "repeated" | "exhausted" | "user_cancel_requested" | null;
   };
+  /**
+   * FEATURE-018: roadmap vigente del proyecto (project_config_versions, config_key =
+   * "release_roadmap"), null si el proyecto no tiene ninguno aprobado todavía. Se recibe ya
+   * resuelto en vez de consultarse acá adentro — buildRunViewModel se mantiene puro y síncrono
+   * (mismo criterio que su test suite actual, sobre objetos literales sin DB).
+   */
+  releaseRoadmap: ReleaseRoadmapView | null;
 }
 
 const AGENT_NODES: Array<{ id: Exclude<TimelineNodeId, "user">; label: string }> = [
@@ -68,13 +86,17 @@ const AGENT_NODES: Array<{ id: Exclude<TimelineNodeId, "user">; label: string }>
 ];
 const TIMELINE_NODE_ORDER: TimelineNodeId[] = ["user", "architect", "functional", "planning", "developer", "qa"];
 
-export function buildRunViewModel(detail: RunDetailViewInput): RunViewModel {
+export function buildRunViewModel(
+  detail: RunDetailViewInput,
+  releaseRoadmap: ReleaseRoadmapView | null = null
+): RunViewModel {
   const timeline = buildTimeline(detail.run, detail.events);
   return {
     run: detail.run,
     timeline,
     narrative: buildNarrative(detail.events),
     escalation: buildEscalationBanner(detail.run, detail.events, detail.artifacts),
+    releaseRoadmap,
   };
 }
 

@@ -169,11 +169,11 @@ La autoridad de decisión sigue este orden, de mayor a menor:
    escala en vez de reintentar indefinidamente); el agotamiento del propio circuito de
    escalamiento con reinicio (tope de 3 pasadas, o detección de hallazgo repetido sin resolver —
    ver `06-DELIVERY-WORKFLOW.md`, Stage 3); la aprobación del Roadmap de Releases que Architect
-   propone cuando el alcance es demasiado amplio para un único release, y de cada release
-   siguiente al completarse el anterior (ver `02-ARCHITECTURE-TEMPLATE.md`, sección 0); y el
-   riesgo de que un release resulte demasiado grande, detectado por Planning al organizar el
-   Release Plan (ver `06-DELIVERY-WORKFLOW.md`, Stage 2). No es el default ante cualquier
-   ambigüedad — eso es exactamente la burocracia que este producto existe para eliminar.
+   siempre propone (mínimo un release, ver `02-ARCHITECTURE-TEMPLATE.md`, sección 0), y de cada
+   release siguiente al completarse el anterior; y el riesgo de que un release resulte demasiado
+   grande, detectado por Planning al organizar el Release Plan (ver `06-DELIVERY-WORKFLOW.md`,
+   Stage 2). No es el default ante cualquier ambigüedad — eso es exactamente la burocracia que
+   este producto existe para eliminar.
 
 ---
 
@@ -195,7 +195,7 @@ escribirlo o modificarlo.
 
 Dueños por artefacto:
 
-* Project Brief, Architecture, Roadmap de Releases (cuando aplica) → Architect
+* Project Brief, Architecture, Roadmap de Releases → Architect
 * Descomposición funcional / Features → Functional
 * Release Plan (secuencia del release + enfoque técnico y Test Plan de cada Feature) → Planning
 * Código implementado → Developer
