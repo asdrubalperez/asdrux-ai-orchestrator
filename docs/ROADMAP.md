@@ -44,7 +44,7 @@
   `sin_iniciar` en `runs`, mapeo directo al proveedor sin tools, clonado real y aislado del repo
   del caso de negocio, cancelación real reusando el escalamiento de FEATURE-013C, timeouts finales
   por rol. Aprobada por el owner, validada técnicamente por el DAIA y mergeada a `main` (commit
-  `eed5e88` implementación principal, `MERGE_COMMIT_PLACEHOLDER` merge). Diseño y evidencia en
+  `eed5e88` implementación principal, `14693c8` merge). Diseño y evidencia en
   `docs/features/FEATURE-017-Capa-de-UI-Disparo-intake-de-caso-de-negocio-asistido-por-IA.md`.
 
 **🟡 Confirmado**
@@ -357,7 +357,7 @@ funcionalmente independiente.
 **Estado (2026-07-25): ✅ Ejecutada.** Validada técnicamente por el DAIA (chequeo de cancelación
 pre-fase, decisión de fijar `pipeline_definition_id` en la confirmación en vez del arranque),
 aprobada por el owner, implementada en la rama `feature/017-ui-disparo-intake` (commit `eed5e88`,
-implementación principal) y mergeada a `main` en `MERGE_COMMIT_PLACEHOLDER`
+implementación principal) y mergeada a `main` en `14693c8`
 ("Merge FEATURE-017: intake de caso de negocio asistido por IA"). La rama se conserva como
 referencia histórica, mismo criterio que `feature/016-*`.
 

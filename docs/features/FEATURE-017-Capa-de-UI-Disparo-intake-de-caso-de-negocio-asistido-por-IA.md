@@ -22,7 +22,7 @@ Versión de plantilla usada: v2.1 (`docs/playbook/07-FEATURE-TEMPLATE.md`)
 - **Owner**: asdru
 - **Status**: ✅ Ejecutada. Aprobada por el owner, implementada en la rama
   `feature/017-ui-disparo-intake` (commit `eed5e88`, implementación principal) y mergeada a `main`
-  en `MERGE_COMMIT_PLACEHOLDER`. Ver "Estado de la implementación" al final de este documento.
+  en `14693c8`. Ver "Estado de la implementación" al final de este documento.
 - **Priority**: Confirmada — es el próximo incremento de trabajo real (ver `docs/ROADMAP.md`)
 
 ---
@@ -475,7 +475,7 @@ llevarlas al owner para el Go final.
 **Aprobación final de merge a `main` (2026-07-25):** tras las 6 rondas de correcciones sobre
 hallazgos reales (ver "Estado de la implementación" más abajo — pipeline default, clonado real del
 repo, SSH, timeouts finales por rol, Badge de estado), el owner aprobó explícitamente el merge de
-`feature/017-ui-disparo-intake` a `main`. Mergeado en el commit `MERGE_COMMIT_PLACEHOLDER`. La rama
+`feature/017-ui-disparo-intake` a `main`. Mergeado en el commit `14693c8`. La rama
 se conserva como referencia histórica, mismo criterio que `feature/016-*`.
 
 **Corrección post-Go (detectada al iniciar la implementación):** la sección 4 enumeraba solo 12
