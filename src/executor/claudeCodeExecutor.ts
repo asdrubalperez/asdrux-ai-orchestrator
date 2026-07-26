@@ -355,17 +355,20 @@ export class ClaudeCodeExecutor implements Executor {
     const parsed = this.parseRoleConvention(raw.result);
     const model = this.dominantModel(raw.modelUsage);
 
-    // COMANDO_TEST es un campo propio del rol Planning (FEATURE-005), ajeno al contrato genérico
-    // de PhaseResult. Cuando está presente, se adjunta junto al texto de ARTEFACTO en vez de
-    // agregar un campo nuevo al contrato — los demás roles siguen recibiendo outputArtifact como
-    // string plano, sin cambios (backward-compatible con FEATURE-001/002/003/004).
-    // ROADMAP (FEATURE-018) sigue el mismo precedente: campo propio del rol Architect, bolteado a
-    // outputArtifact solo cuando está presente, sin tocar el contrato de PhaseResult.
-    const outputArtifact = parsed.comandoTest
-      ? { text: parsed.artefacto, comandoTest: parsed.comandoTest }
-      : parsed.roadmap
-        ? { text: parsed.artefacto, roadmap: parsed.roadmap }
-        : parsed.artefacto;
+    // COMANDO_TEST (rol Planning, FEATURE-005), ROADMAP (rol Architect, FEATURE-018), FEATURES
+    // (rol Functional, FEATURE-019), RELEASE_PLAN y RELEASE_COMPLETO (rol Planning, FEATURE-019)
+    // son campos propios de un rol puntual, ajenos al contrato genérico de PhaseResult. Cuando
+    // alguno está presente, se adjunta junto al texto de ARTEFACTO en vez de agregar un campo nuevo
+    // al contrato — los demás roles/casos siguen recibiendo outputArtifact como string plano, sin
+    // cambios (backward-compatible con FEATURE-001/002/003/004).
+    const extras: Record<string, string> = {};
+    if (parsed.comandoTest) extras.comandoTest = parsed.comandoTest;
+    if (parsed.roadmap) extras.roadmap = parsed.roadmap;
+    if (parsed.features) extras.features = parsed.features;
+    if (parsed.releasePlan) extras.releasePlan = parsed.releasePlan;
+    if (parsed.releaseCompleto) extras.releaseCompleto = parsed.releaseCompleto;
+    const outputArtifact =
+      Object.keys(extras).length > 0 ? { text: parsed.artefacto, ...extras } : parsed.artefacto;
 
     return {
       status: parsed.status,
@@ -379,11 +382,12 @@ export class ClaudeCodeExecutor implements Executor {
   /**
    * Parsea la convención de texto ESTADO/RESUMEN/ARTEFACTO/RAZON_ESCALAMIENTO (+ COMANDO_TEST
    * opcional, usado solo por el rol Planning; + ROADMAP opcional, usado solo por el rol Architect,
-   * FEATURE-018) usada en roleInstructions — el mismo mecanismo validado en FEATURE-001/002 (H2: la
-   * CLI no devuelve PhaseResult estructurado nativamente; --json-schema queda pendiente de adoptar
-   * hasta verificarlo contra documentación oficial, ver 02-ARCHITECTURE.md). El regex de extracción
-   * por etiqueta es genérico — agregar una etiqueta nueva no afecta el parseo de las existentes,
-   * sin importar su posición en el texto.
+   * FEATURE-018; + FEATURES opcional, usado solo por el rol Functional, y RELEASE_COMPLETO
+   * opcional, usado solo por el rol Planning, ambos FEATURE-019) usada en roleInstructions — el
+   * mismo mecanismo validado en FEATURE-001/002 (H2: la CLI no devuelve PhaseResult estructurado
+   * nativamente; --json-schema queda pendiente de adoptar hasta verificarlo contra documentación
+   * oficial, ver 02-ARCHITECTURE.md). El regex de extracción por etiqueta es genérico — agregar una
+   * etiqueta nueva no afecta el parseo de las existentes, sin importar su posición en el texto.
    */
   private parseRoleConvention(text: string): {
     status: PhaseStatus;
@@ -392,6 +396,9 @@ export class ClaudeCodeExecutor implements Executor {
     razonEscalamiento: string | null;
     comandoTest: string | null;
     roadmap: string | null;
+    features: string | null;
+    releasePlan: string | null;
+    releaseCompleto: string | null;
   } {
     // Defensa adicional (FEATURE-005, H12): modelos más económicos (ej. haiku) no siempre
     // respetan "texto plano sin Markdown" al pie de la letra — envuelven las etiquetas en
@@ -411,6 +418,9 @@ export class ClaudeCodeExecutor implements Executor {
     const razon = extract("RAZON_ESCALAMIENTO");
     const comandoTest = extract("COMANDO_TEST");
     const roadmap = extract("ROADMAP");
+    const features = extract("FEATURES");
+    const releasePlan = extract("RELEASE_PLAN");
+    const releaseCompleto = extract("RELEASE_COMPLETO");
 
     const status: PhaseStatus =
       estado === "escalated" ? "escalated" : estado === "rejected" ? "rejected" : "completed";
@@ -420,6 +430,9 @@ export class ClaudeCodeExecutor implements Executor {
       resumen,
       artefacto: artefactoRaw && artefactoRaw !== "null" ? artefactoRaw : null,
       razonEscalamiento: razon && razon !== "null" ? razon : null,
+      features: features && features !== "null" ? features : null,
+      releasePlan: releasePlan && releasePlan !== "null" ? releasePlan : null,
+      releaseCompleto: releaseCompleto && releaseCompleto !== "null" ? releaseCompleto : null,
       comandoTest: comandoTest && comandoTest !== "null" ? comandoTest : null,
       roadmap: roadmap && roadmap !== "null" ? roadmap : null,
     };

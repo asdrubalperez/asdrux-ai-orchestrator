@@ -26,6 +26,11 @@ export async function runRespond(args: string[]): Promise<void> {
     return;
   }
 
+  if (result.kind === "project_closed") {
+    console.log(`[run:respond] proyecto cerrado — no quedan releases pendientes en el roadmap.`);
+    return;
+  }
+
   console.log(`[run:respond] run hijo=${result.childRunId}; ejecución iniciada.`);
   await result.execute();
 }

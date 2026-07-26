@@ -228,7 +228,7 @@ de implementar. Al cerrar esta parte, actualizar `docs/ROADMAP.md`: mover FEATUR
 > el espacio (placeholder `ReleasePlanPanel`, sin datos reales) en FEATURE-013.
 
 Este ítem es distinto de "Approval Model por Release" (ya existente en el Roadmap, sobre el rigor
-de aprobación Modo A/Auto) — no fusionarlos ni confundirlos.
+de aprobación Modo Manual/Auto) — no fusionarlos ni confundirlos.
 
 ---
 

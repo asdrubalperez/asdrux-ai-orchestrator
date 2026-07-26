@@ -193,50 +193,55 @@ commitea en esa sub-rama, nunca directo en la rama principal.
 
 ## Modos de operación (Nivel de Rigor del Approval Model, ver `03-AI-CONSTITUTION.md`)
 
-Hoy, fijo — decidido por Architect al configurar el producto (o, hasta que la parametrización de
-modelos esté disponible, fijado por quienes operan el Orquestador como producto). A futuro,
-parametrizable — ver ítem Tentativo del Roadmap.
+Persistido por proyecto (FEATURE-019: `project_config_versions`, `config_key = "approval_mode"`,
+versionado, default Modo Manual si el proyecto no tiene ningún valor configurado todavía). A
+futuro, exponer un cambio de modo real desde la UI — ver ítem Tentativo del Roadmap.
 
-**Modo A (default hoy)**: el Orquestador automatiza todo hasta el push de la sub-rama de la
-Feature. Antes de mergear esa sub-rama a la rama principal del producto, un humano revisa.
+**Modo Manual (default, antes llamado "Modo A")**: el Orquestador automatiza todo hasta el push de
+la sub-rama de la Feature. Antes de mergear esa sub-rama a la rama base del release, escala para
+que un humano apruebe (mismo mecanismo de escalamiento que el resto del Runbook — artifact
+atribuido al rol Developer, dueño real del código a mergear).
 
-**Modo Auto**: el Orquestador también ejecuta el merge a la rama principal automáticamente, sin
+**Modo Auto**: el Orquestador también ejecuta el merge a la rama base automáticamente, sin
 revisión humana intermedia. El único punto que sigue siendo siempre humano, en cualquier modo, es
 la promoción de la rama principal a producción real (deploy), por la Regla 9 de `03`.
 
 Pasos obligatorios, en orden, sin saltar ni combinar:
 
 1. Commit del trabajo en la sub-rama de la Feature, incluyendo Lecciones Aprendidas (ver Stage 7).
-2. Push de la sub-rama.
-3. Según el modo vigente: esperar revisión humana (Modo A) o proceder directo (Modo Auto).
-4. Checkout a la rama principal del producto.
-5. Merge de la sub-rama hacia la rama principal — sin dejar merges pendientes acumulados de más
-   de una Feature a la vez.
-6. Push de la rama principal.
+2. Push de la sub-rama — siempre, en cualquier modo.
+3. Según el modo vigente: escalar para revisión humana (Modo Manual) o proceder directo (Modo
+   Auto).
+4. Merge de la sub-rama hacia la rama base del release — sin dejar merges pendientes acumulados de
+   más de una Feature a la vez.
+5. Push de la rama base actualizada.
 
 La promoción de la rama principal a producción real es un paso **separado y siempre humano**,
-fuera de esta secuencia — no ocurre como consecuencia automática del paso 6.
+fuera de esta secuencia — no ocurre como consecuencia automática del paso 5.
 
 Evitar: deploy implícito, producción sin autorización, cambios silenciosos.
 
-Entregable esperado: release entendible y controlado, con historial de la rama principal que
-refleja fielmente el orden real de merges.
+Entregable esperado: release entendible y controlado, con historial de la rama base que refleja
+fielmente el orden real de merges.
 
 ---
 
 ## Ciclo de Features dentro de un Release
 
-Al completar el paso 6 de la secuencia de branching para una Feature, Developer consulta el
-Release Plan de Planning (Stage 2):
+Al completar QA la validación de una Feature (Stage 5) y resolverse el merge de su sub-rama según
+el modo vigente (Stage 6), el pipeline continúa automáticamente a Planning (FEATURE-019) — no es
+Developer quien decide si sigue, esa decisión es propiedad exclusiva de Planning (Regla 10 de `03`,
+Ownership de Artefactos: el Release Plan y su estado de avance son suyos):
 
-* **Si hay una Feature siguiente en el Release Plan**: el ciclo vuelve a Stage 4 con esa Feature
-  siguiente — no se repiten Stage 1 ni Stage 2 completos, porque Functional y Planning ya
-  trabajaron sobre todas las Features del release al principio.
-* **Si el release está completo**: recién ahí se pasa a Stage 7 para cerrar ese release.
+* **Si hay una Feature siguiente en el Release Plan**: Planning se la asigna directamente al
+  circuito Developer↔QA (Stage 4 → 5 → 6) — no se repiten Stage 1 ni Stage 2 completos, porque
+  Functional y Planning ya trabajaron sobre todas las Features del release al principio.
+* **Si el release está completo**: Planning lo declara y escala para aprobación humana — recién
+  aprobado eso se pasa a Stage 7 para cerrar ese release.
 
-Este ciclo se repite Stage 4 → 5 → 6 → (consulta) tantas veces como Features tenga el Release Plan,
-o hasta que algo lo interrumpa (escalamiento, tope de reintentos agotado, o instrucción humana
-explícita).
+Este ciclo se repite Stage 4 → 5 → 6 → Planning tantas veces como Features tenga el Release Plan, o
+hasta que algo lo interrumpa (escalamiento, tope de reintentos agotado — por Feature, no acumulado
+a nivel de release —, o instrucción humana explícita).
 
 ---
 

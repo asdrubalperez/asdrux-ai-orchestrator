@@ -380,14 +380,14 @@ servidor), de forma similar a como ya se pide autenticación de cuenta personal 
 No diseñado todavía — Discovery pendiente.
 
 ### ⚪ Approval Model por Release
-Feature 09 (`06-DELIVERY-WORKFLOW.md`, Stage 6) ya diseñó la v1: Modo A (default — automático
+Feature 09 (`06-DELIVERY-WORKFLOW.md`, Stage 6) ya diseñó la v1: Modo Manual (default — automático
 hasta el push de cada Feature, humano revisa antes del merge a la rama principal) y Modo Auto
 (también el merge es automático; solo el deploy a producción requiere humano, sin excepción, por
 la Regla 9 de `03-AI-CONSTITUTION.md`).
 
-Lo que queda Tentativo: exponer el rigor (Modo A / Modo Auto) como configuración parametrizable
-real para el usuario final — hoy es fijo, decidido por quienes operan el Orquestador. Aplica
-cuando el Orquestador opere sobre proyectos externos.
+Lo que queda Tentativo: exponer el rigor (Modo Manual / Modo Auto) como configuración
+parametrizable real para el usuario final — hoy es fijo, decidido por quienes operan el
+Orquestador. Aplica cuando el Orquestador opere sobre proyectos externos.
 
 ### ⚪ Concurrencia de runs simultáneos
 H9 (FEATURE-003): solo se probaron invocaciones secuenciales; comportamiento bajo múltiples runs
@@ -403,7 +403,7 @@ portan a Codex.
 ### ⚪ Creación real de PR vía API de GitHub / merge automático
 Hoy el flujo termina en rama lista, sin apertura de PR ni merge automatizado a `main`. La política
 que este código futuro debería seguir ya quedó diseñada en Feature 09 (`06-DELIVERY-WORKFLOW.md`,
-Stage 6, Modo A / Modo Auto) — este ítem es la implementación real, todavía sin código.
+Stage 6, Modo Manual / Modo Auto) — este ítem es la implementación real, todavía sin código.
 
 ### ⚪ Deployment Strategy y separación dev/staging/prod
 Sin diseñar.

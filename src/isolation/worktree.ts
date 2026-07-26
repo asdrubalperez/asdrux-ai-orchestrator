@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { access, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -72,6 +73,50 @@ export async function pushRunBranch(worktree: RunWorktree): Promise<void> {
   await execFileAsync("git", ["push", "origin", worktree.branchName], {
     cwd: worktree.worktreePath,
   });
+}
+
+/**
+ * FEATURE-019: mergea la sub-rama ya pusheada de una Feature contra la rama base del release, y
+ * pushea la rama base actualizada. La rama base nunca tiene su propio worktree persistente (a
+ * diferencia de `run/<id>`, que sí vive en `createRunWorktree`) — se crea uno efímero puntual para
+ * el merge y se borra enseguida; git no permite dos worktrees sobre la misma rama a la vez, así que
+ * este worktree no puede convivir con ningún otro checkout abierto sobre `baseBranch`.
+ */
+export async function mergeFeatureBranchIntoBase(params: {
+  repoRoot: string;
+  baseBranch: string;
+  featureBranch: string;
+}): Promise<void> {
+  const baseWorktreePath = path.join(
+    process.env.WORKTREES_BASE_DIR ?? path.resolve(params.repoRoot, "..", "ai-orchestrator-worktrees"),
+    `base-${randomUUID()}`
+  );
+
+  await execFileAsync("git", ["worktree", "add", baseWorktreePath, params.baseBranch], {
+    cwd: params.repoRoot,
+  });
+  try {
+    await execFileAsync(
+      "git",
+      [
+        "-c",
+        "user.name=ai-orchestrator-bot",
+        "-c",
+        "user.email=ai-orchestrator-bot@localhost",
+        "merge",
+        "--no-ff",
+        params.featureBranch,
+        "-m",
+        `merge: ${params.featureBranch} -> ${params.baseBranch}`,
+      ],
+      { cwd: baseWorktreePath }
+    );
+    await execFileAsync("git", ["push", "origin", params.baseBranch], { cwd: baseWorktreePath });
+  } finally {
+    await execFileAsync("git", ["worktree", "remove", baseWorktreePath, "--force"], {
+      cwd: params.repoRoot,
+    });
+  }
 }
 
 export async function assertRunWorktreeAvailable(repoRoot: string, worktree: RunWorktree): Promise<void> {

@@ -154,9 +154,10 @@ Cada agente carga solo su sección, además del Core Behavior de arriba.
   Planning (`09-RELEASE-PLAN-TEMPLATE.md`)
 * Sigue `05-CODING-STANDARDS.md` sin excepción
 * Participa en el loop con QA (`06`, Stage 5) — tope de 3 reintentos, luego escala
-* Al completar el merge de una Feature, consulta el Release Plan de Planning: si hay Feature
-  siguiente en el release activo, continúa con ella (vuelve a Stage 4); si el release está
-  completo, no continúa por su cuenta — eso ya es Stage 7
+* Al completar el merge de una Feature, el pipeline continúa automáticamente a Planning
+  (FEATURE-019) — Developer no decide por su cuenta si sigue con la Feature siguiente ni si el
+  release está completo, en ningún caso; esa decisión es propiedad exclusiva de Planning (Regla 10
+  de `03`, Ownership de Artefactos)
 * Puede disparar el circuito de escalamiento si detecta, durante la implementación, que algo
   excede su autoridad de decisión (ver Regla 8 de `03`) — no lo resuelve unilateralmente
 

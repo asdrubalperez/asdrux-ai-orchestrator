@@ -46,6 +46,118 @@ export function activeReleaseFromRoadmap(value: unknown): RoadmapReleaseEntry | 
   return value.releases.find((release) => release.id === value.activeReleaseId) ?? null;
 }
 
+/**
+ * FEATURE-019: forma persistida en project_config_versions bajo config_key = "release_plan".
+ * `ramaBaseTrabajo` no la declara Planning — la agrega el runtime (ver runStart.ts) al persistir,
+ * tomada del business_case del run raíz (primera versión) o carried-forward de la versión anterior
+ * (versiones siguientes).
+ */
+export interface ReleasePlanFeatureEntry {
+  id: string;
+  nombre: string;
+  estado: "Pendiente" | "En curso" | "Completada";
+}
+
+export interface ReleasePlanPayload {
+  ramaBaseTrabajo: string;
+  features: ReleasePlanFeatureEntry[];
+  featureActualId: string | null;
+}
+
+/** Forma que Planning declara en RELEASE_PLAN — sin `ramaBaseTrabajo`, la agrega el runtime. */
+export type ReleasePlanDeclaration = Omit<ReleasePlanPayload, "ramaBaseTrabajo">;
+
+export function isReleasePlanDeclaration(value: unknown): value is ReleasePlanDeclaration {
+  if (value === null || typeof value !== "object") return false;
+  const candidate = value as { features?: unknown; featureActualId?: unknown };
+  if (!Array.isArray(candidate.features)) return false;
+  if (candidate.featureActualId !== null && typeof candidate.featureActualId !== "string") return false;
+  return candidate.features.every(isReleasePlanFeatureEntry);
+}
+
+function isReleasePlanFeatureEntry(value: unknown): value is ReleasePlanFeatureEntry {
+  if (value === null || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.nombre === "string" &&
+    (candidate.estado === "Pendiente" || candidate.estado === "En curso" || candidate.estado === "Completada")
+  );
+}
+
+/**
+ * Parsea el RELEASE_PLAN que Planning boltea a `outputArtifact` (mismo patrón que
+ * `comandoTest`/`roadmap`/`features`). Devuelve null si el rol no es Planning, si no hay
+ * `releasePlan` en el artifact, o si el JSON es inválido/malformado — riesgo H12 aceptado, mismo
+ * criterio que `extractRoadmapApproval` de FEATURE-018: se trata como "sin declaración", no crashea.
+ */
+export function extractReleasePlanDeclaration(
+  artifact: { phase: AgentRole },
+  content: { outputArtifact: unknown }
+): ReleasePlanDeclaration | null {
+  if (artifact.phase !== "planning") return null;
+  if (content.outputArtifact === null || typeof content.outputArtifact !== "object") return null;
+
+  const raw = (content.outputArtifact as { releasePlan?: unknown }).releasePlan;
+  if (typeof raw !== "string") return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  return isReleasePlanDeclaration(parsed) ? parsed : null;
+}
+
+/**
+ * FEATURE-019: distingue la escalación de "release completo" (Planning no tiene más Features para
+ * asignar) de una ambigüedad genérica de Planning — mismo criterio de distinción por contenido que
+ * `extractRoadmapApproval`.
+ */
+export function isReleaseCompletionEscalation(
+  artifact: { phase: AgentRole },
+  content: { outputArtifact: unknown }
+): boolean {
+  if (artifact.phase !== "planning") return false;
+  if (content.outputArtifact === null || typeof content.outputArtifact !== "object") return false;
+  return (content.outputArtifact as { releaseCompleto?: unknown }).releaseCompleto === "true";
+}
+
+/**
+ * FEATURE-019: artifact sintético (no producido por ningún PhaseResult de agente) que registra que
+ * una Feature fue aprobada por QA y su sub-rama pusheada, pendiente de aprobación humana para
+ * mergearla a la rama base del release (Modo Manual). Atribuido a `phase: "developer"` (dueño real
+ * del código a mergear, Regla 10) — `mergeApproval: true` lo distingue de una escalación real de
+ * ambigüedad de Developer, que también usa `phase: "developer"` pero nunca trae este campo.
+ */
+export interface MergeApprovalPayload {
+  mergeApproval: true;
+  baseBranch: string;
+  featureBranch: string;
+  featureActualId: string | null;
+}
+
+export function isMergeApprovalPayload(value: unknown): value is MergeApprovalPayload {
+  if (value === null || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    candidate.mergeApproval === true &&
+    typeof candidate.baseBranch === "string" &&
+    typeof candidate.featureBranch === "string" &&
+    (candidate.featureActualId === null || typeof candidate.featureActualId === "string")
+  );
+}
+
+export function extractMergeApproval(
+  artifact: { phase: AgentRole },
+  content: { outputArtifact: unknown }
+): MergeApprovalPayload | null {
+  if (artifact.phase !== "developer") return null;
+  return isMergeApprovalPayload(content.outputArtifact) ? content.outputArtifact : null;
+}
+
 export interface EscalationContext {
   escalationReason: string;
   rejectedArtifact: unknown;

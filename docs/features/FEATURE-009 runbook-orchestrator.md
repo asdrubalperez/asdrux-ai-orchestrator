@@ -57,9 +57,10 @@ propio Roadmap, no se repite acá).
 - **Concepto de Release**: conjunto acotado de Features que se implementan y mergean
   secuencialmente. Si el business case es muy amplio, Architect propone un Roadmap de Releases
   (siempre empezando por MVP) y escala al humano una sola vez al inicio — no por Feature.
-- **Branching**: rama principal del producto + sub-rama por Feature. Modo A (default): automático
-  hasta el push, humano revisa antes de mergear a la rama principal. Modo Auto: también el merge
-  es automático. El deploy a producción real es siempre humano, en cualquier modo, sin excepción.
+- **Branching**: rama principal del producto + sub-rama por Feature. Modo Manual (default):
+  automático hasta el push, humano revisa antes de mergear a la rama principal. Modo Auto: también
+  el merge es automático. El deploy a producción real es siempre humano, en cualquier modo, sin
+  excepción.
 - **Release Plan como artefacto único**: lo que iban a ser "Plan de Implementación", "Test Plan" y
   "secuencia de Features" como tres conceptos sueltos se fusionaron en un solo archivo
   (`09-RELEASE-PLAN-TEMPLATE.md`), dueño Planning — evita la ambigüedad entre "el plan de la
@@ -75,7 +76,7 @@ propio Roadmap, no se repite acá).
   tabla `projects` para modelar múltiples productos gestionados — no a un problema de "archivos vs
   base de datos" en general.
 - **El Roadmap ya tenía un ítem ("Approval Model por Release") que se solapaba con el diseño de
-  Modo A/Modo Auto de esta Feature** — se actualizó el ítem existente en vez de crear uno
+  Modo Manual/Modo Auto de esta Feature** — se actualizó el ítem existente en vez de crear uno
   duplicado.
 - **Feature 10 se redefinió al cierre de esta sesión**: dejó de ser "UI mínima de solo lectura"
   (eso quedó como ítem de Roadmap "Capa de UI — Run en curso", Confirmado, todavía sin número de
