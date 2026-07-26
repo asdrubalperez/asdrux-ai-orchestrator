@@ -33,6 +33,7 @@ import { apiUrl } from "./lib/api";
 import { queryClient } from "./lib/queryClient";
 import { CasesList } from "./intake/CasesList";
 import { DisparoScreen } from "./intake/DisparoScreen";
+import { statusLabel as runStatusLabel, statusVariant as runStatusVariant } from "./intake/statusDisplay";
 import "./styles.css";
 
 type TimelineStatus =
@@ -427,7 +428,7 @@ function ErrorState() {
 function RunOverview({ run, runId }: { run: RunViewModel; runId: string }) {
   return (
     <section className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
-      <Metric label="Estado" value={run.run.status} />
+      <StatusMetric label="Estado" status={run.run.status} />
       <Metric label="Fase actual" value={run.run.current_phase ?? "sin fase"} />
       <Metric label="Eventos" value={String(run.narrative.length)} />
       <ConnectionPanel runId={runId} />
@@ -441,6 +442,17 @@ function Metric({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg border border-zinc-200 bg-white p-4">
       <CardLabel>{label}</CardLabel>
       <p className="mt-3 text-sm text-zinc-600">{value}</p>
+    </div>
+  );
+}
+
+function StatusMetric({ label, status }: { label: string; status: string }) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-4">
+      <CardLabel>{label}</CardLabel>
+      <div className="mt-3">
+        <Badge variant={runStatusVariant(status)}>{runStatusLabel(status)}</Badge>
+      </div>
     </div>
   );
 }

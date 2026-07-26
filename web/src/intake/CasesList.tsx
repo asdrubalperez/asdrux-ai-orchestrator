@@ -15,20 +15,8 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { apiUrl } from "../lib/api";
 import { queryClient } from "../lib/queryClient";
+import { statusLabel, statusVariant } from "./statusDisplay";
 import type { RunCaseSummary } from "./types";
-
-function statusVariant(status: string): React.ComponentProps<typeof Badge>["variant"] {
-  if (status === "completed") return "success";
-  if (status === "running" || status === "retrying") return "secondary";
-  if (status === "escalated") return "warning";
-  if (status === "failed" || status === "aborted") return "destructive";
-  return "outline";
-}
-
-function statusLabel(status: string): string {
-  if (status === "sin_iniciar") return "Sin iniciar";
-  return status;
-}
 
 export function CasesList(props: { onOpenRun: (runId: string) => void; onNewCase: () => void }) {
   const query = useQuery({
