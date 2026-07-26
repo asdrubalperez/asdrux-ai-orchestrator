@@ -46,6 +46,25 @@ type RunExecutor = ClaudeCodeExecutor | CodexExecutor;
 const MAX_ESCALATION_ATTEMPTS = 3;
 
 /**
+ * Hallazgo de una corrida real (2026-07-25): Developer, trabajando sobre un repo real (build de
+ * TypeScript + tests reales), superó los 300s hardcodeados y terminó en
+ * "Executor timeout tras 300000ms" con el run marcado failed. Se deja configurable por variable de
+ * entorno, mismo patrón que RUN_CLONES_BASE_DIR/CLAUDE_OAUTH_CACHE_DIR — default sin cambios
+ * (300000ms) hasta confirmar con el owner el valor final, calibrado con datos reales de duración
+ * por fase (ver phaseDurationMs más abajo). Architect/Functional/Planning (180s) quedan sin tocar
+ * — no hay evidencia de que necesiten cambiar.
+ */
+function parsePositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const DEVELOPER_TIMEOUT_MS = parsePositiveIntEnv("DEVELOPER_TIMEOUT_MS", 300_000);
+const QA_TIMEOUT_MS = parsePositiveIntEnv("QA_TIMEOUT_MS", 300_000);
+
+/**
  * FEATURE-017, sección 7.4: señal interna para cortar el pipeline en el próximo punto de corte
  * natural cuando un run fue forzado a `escalated`/`aborted` desde afuera (Cancelar por usuario) —
  * distinta de un PhaseResult, porque acá no hay ningún resultado de fase que reportar: el run ya
@@ -227,6 +246,16 @@ export async function executePipelineRun(params: {
   const readRole = (agentRole: string) =>
     readFile(path.join(orchestratorRoot, "src", "executor", "roles", `${agentRole}.txt`), "utf8");
 
+  // Hallazgo de una corrida real (2026-07-25): sin datos reales de cuánto tarda cada fase, calibrar
+  // timeouts es pura estimación. Se registra la duración real (phase_started -> phase_finished, o
+  // hasta el error si la fase revienta) para poder ajustar DEVELOPER_TIMEOUT_MS/QA_TIMEOUT_MS con
+  // evidencia. `phaseTiming` vive fuera del try para que el catch de abajo también pueda leerlo si
+  // la fase en curso al momento del error fue la que hizo timeout.
+  const phaseTiming: { agentRole: AgentRole | null; startedAt: number | null } = {
+    agentRole: null,
+    startedAt: null,
+  };
+
   try {
     let previousResult: PhaseResult | null = null;
     let phaseIndex = 0;
@@ -251,9 +280,12 @@ export async function executePipelineRun(params: {
         permissions: phase.permissions,
       };
 
+      phaseTiming.agentRole = invocation.agentRole;
+      phaseTiming.startedAt = Date.now();
       await recordRunEvent(runId, "phase_started", { agentRole: invocation.agentRole });
       const result = await executor.runPhase(invocation, { timeoutMs: 180_000 });
-      await recordRunEvent(runId, "phase_finished", { agentRole: invocation.agentRole, result });
+      const durationMs = Date.now() - phaseTiming.startedAt;
+      await recordRunEvent(runId, "phase_finished", { agentRole: invocation.agentRole, result, durationMs });
       const artifact = await recordArtifact({
         runId,
         phase: invocation.agentRole,
@@ -313,6 +345,7 @@ export async function executePipelineRun(params: {
         runId,
         planningResult: previousResult as PhaseResult,
         maxAttempts: pipelineSpec.definition.loop.maxAttempts,
+        phaseTiming,
       });
 
       const approved = finalResult.status === "completed";
@@ -334,13 +367,14 @@ export async function executePipelineRun(params: {
     }
 
     const message = err instanceof Error ? err.message : String(err);
+    const durationMs = phaseTiming.startedAt ? Date.now() - phaseTiming.startedAt : null;
     const failure: PhaseResult = {
       status: "failed",
       outputArtifact: null,
       summary: `Error inesperado durante la ejecución del run: ${message}`,
       escalationReason: null,
     };
-    await recordRunEvent(runId, "run_error", { message });
+    await recordRunEvent(runId, "run_error", { message, agentRole: phaseTiming.agentRole, durationMs });
     await finishRun(projectRepoRoot, runId, worktree, failure, { pushAndClean: false, cleanupStrategy });
     throw err;
   }
@@ -426,8 +460,10 @@ export async function runDeveloperQaLoop(params: {
   runId: string;
   planningResult: PhaseResult;
   maxAttempts: number;
+  /** Compartido con executePipelineRun — ver el comentario en su declaración. */
+  phaseTiming: { agentRole: AgentRole | null; startedAt: number | null };
 }): Promise<PhaseResult> {
-  const { executor, developerExecutor, readRole, runId, planningResult, maxAttempts } = params;
+  const { executor, developerExecutor, readRole, runId, planningResult, maxAttempts, phaseTiming } = params;
   const testExecutor = new TestExecutor();
   const testCommand = extractTestCommand(planningResult.outputArtifact);
   console.log(`[run:start] COMANDO_TEST declarado por Planning: ${testCommand}`);
@@ -458,9 +494,17 @@ export async function runDeveloperQaLoop(params: {
       permissions: { filesystem: "workspace-write", writableRoots: [developerExecutor.options.workingDirectory] },
     };
 
+    phaseTiming.agentRole = "developer";
+    phaseTiming.startedAt = Date.now();
     await recordRunEvent(runId, "phase_started", { agentRole: "developer", attempt });
-    const developerResult = await developerExecutor.runPhase(developerInvocation, { timeoutMs: 300_000 });
-    await recordRunEvent(runId, "phase_finished", { agentRole: "developer", attempt, result: developerResult });
+    const developerResult = await developerExecutor.runPhase(developerInvocation, { timeoutMs: DEVELOPER_TIMEOUT_MS });
+    const developerDurationMs = Date.now() - phaseTiming.startedAt;
+    await recordRunEvent(runId, "phase_finished", {
+      agentRole: "developer",
+      attempt,
+      result: developerResult,
+      durationMs: developerDurationMs,
+    });
     await recordArtifact({
       runId,
       phase: "developer",
@@ -496,9 +540,12 @@ export async function runDeveloperQaLoop(params: {
       permissions: { filesystem: "read-only" },
     };
 
+    phaseTiming.agentRole = "qa";
+    phaseTiming.startedAt = Date.now();
     await recordRunEvent(runId, "phase_started", { agentRole: "qa", attempt });
-    const qaResult = await executor.runPhase(qaInvocation, { timeoutMs: 300_000 });
-    await recordRunEvent(runId, "phase_finished", { agentRole: "qa", attempt, result: qaResult });
+    const qaResult = await executor.runPhase(qaInvocation, { timeoutMs: QA_TIMEOUT_MS });
+    const qaDurationMs = Date.now() - phaseTiming.startedAt;
+    await recordRunEvent(runId, "phase_finished", { agentRole: "qa", attempt, result: qaResult, durationMs: qaDurationMs });
     await recordArtifact({
       runId,
       phase: "qa",

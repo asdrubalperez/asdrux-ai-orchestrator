@@ -559,6 +559,37 @@ end-to-end de la sección 8, ahora con el pipeline completo y el clonado real de
    sin errores; `npm test` completo (incluye los 4 tests nuevos de `normalizeGitCloneUrl`);
    `vite build` sin errores.
 
+### Ronda 4 — investigación (SSE) + instrumentación de timeouts (2026-07-25)
+
+**Investigación, no confirmada por reproducción en vivo (sin acceso a VPS/browser real desde este
+sandbox):** durante un run real, la Bitácora narrativa y el estado no se actualizaron en vivo tras
+un timeout de Developer (`failed` recién apareció al renavegar). Backend (`sse.ts`, trigger de
+`migrations/0006`) y frontend (`useRunStream`/`useRunQuery` en `main.tsx`) se revisaron a fondo sin
+encontrar una causa obvia en el camino feliz. **Hipótesis con mayor probabilidad**: `src/db/pool.ts`
+crea el `Pool` sin `keepAlive: true` — la conexión dedicada de `LISTEN` (`startRunEventsListener()`)
+puede quedar muerta en silencio tras un tramo largo sin actividad (ej. los ~300s que Developer
+estuvo bloqueado, coincidente con el timeout), sin que `client.on("error")` llegue a dispararse ni
+`scheduleReconnect()` a correr — hasta el próximo restart del proceso. **Pendiente**: reproducción
+real con DevTools (Preserve log desde el arranque de la conexión a `/runs/:id/stream`) para
+confirmar si el evento llega y la UI no reacciona (bug de frontend) o si nunca llega (confirma la
+hipótesis de backend). Si se confirma, el fix propuesto es `keepAlive: true` +
+`keepAliveInitialDelayMillis` en el `Pool`, más un heartbeat de aplicación (`SELECT 1` cada 30-60s)
+sobre el `listenClient` que dispare `scheduleReconnect()` si falla. **No implementado todavía** —
+requiere esa confirmación primero.
+
+**Instrumentación de timeouts (`src/cli/commands/runStart.ts`), confirmada e implementada:**
+- **Duración real por fase**: `phaseTiming` (compartido entre `executePipelineRun` y
+  `runDeveloperQaLoop`) registra `startedAt` antes de cada invocación y calcula `durationMs` al
+  terminar (o al momento del error, en el evento `run_error`) — visible en `run_events` sin tocar
+  el contrato de `Executor`.
+- **Timeouts configurables**: `DEVELOPER_TIMEOUT_MS`/`QA_TIMEOUT_MS`, mismo patrón que
+  `RUN_CLONES_BASE_DIR`/`CLAUDE_OAUTH_CACHE_DIR`. **Default sin cambios (300000ms)** — el mecanismo
+  queda listo, pero el valor final (rango sugerido 600000-900000ms) queda pendiente de confirmar
+  con datos reales de duración por fase antes de subirlo. Architect/Functional/Planning (180s) sin
+  tocar.
+- Verificación: `tsc --noEmit` + `tsc -p web/tsconfig.json --noEmit` sin errores; `npm test`
+  completo — 65 pass / 2 skip / 0 fail; `vite build` sin errores.
+
 ---
 
 # Design Principle
