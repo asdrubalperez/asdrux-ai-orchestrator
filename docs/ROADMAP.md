@@ -383,8 +383,9 @@ Diseño y evidencia completos:
 
 ### ⚪ Capa de UI — Historial/admin
 Listado de runs propios o del equipo (si admin), con estado/dueño/fase/tiempo transcurrido — dato
-que ya existe en `runs`/`run_events`, sin necesidad de ningún mecanismo nuevo de intake. Sigue
-`[Pendiente]` en `02-ARCHITECTURE.md`. Sin diseñar todavía. Mejoras puntuales ya identificadas para
+que ya existe en `runs`/`run_events`, sin necesidad de ningún mecanismo nuevo de intake. Mencionada
+en `02-ARCHITECTURE.md` (Frontend Principles) como fuera del alcance de FEATURE-017 — sin diseño
+propio todavía. Mejoras puntuales ya identificadas para
 cuando se diseñe (surgidas durante las pruebas reales de FEATURE-017):
 - La lista de "mis casos" hoy muestra el Run ID (UUID) como identificador visible — debería mostrar
   el título tentativo del caso (derivado del caso de negocio mapeado, ej. de la sección "Visión" o
