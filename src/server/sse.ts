@@ -2,8 +2,16 @@ import type { Response } from "express";
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { pool } from "../db/pool.js";
-import { getRunDetailForUser, getRunEventsAfterForUser } from "../db/repository.js";
-import { buildRunViewModel } from "./runView.js";
+import { getCurrentProjectConfig, getRunDetailForUser, getRunEventsAfterForUser } from "../db/repository.js";
+import { buildRunViewModel, toReleaseRoadmapView } from "./runView.js";
+
+/** FEATURE-018: mismo criterio que resolveReleaseRoadmap en app.ts (no importado desde acá para no
+ * crear un import circular app.ts <-> sse.ts). */
+async function resolveReleaseRoadmap(projectId: string | null) {
+  if (!projectId) return null;
+  const config = await getCurrentProjectConfig(projectId, "release_roadmap");
+  return toReleaseRoadmapView(config?.value ?? null);
+}
 
 interface SseClient {
   id: string;
@@ -46,7 +54,7 @@ export async function openRunEventsStream(params: {
   };
   addClient(client);
 
-  writeEvent(params.response, "snapshot", buildRunViewModel(detail));
+  writeEvent(params.response, "snapshot", buildRunViewModel(detail, await resolveReleaseRoadmap(detail.run.project_id)));
   await replayEvents(client);
 
   const heartbeat = setInterval(() => {
@@ -92,7 +100,11 @@ async function handleNotification(payload: string | undefined): Promise<void> {
         client.response.end();
         return;
       }
-      writeEvent(client.response, "snapshot", buildRunViewModel(detail));
+      writeEvent(
+        client.response,
+        "snapshot",
+        buildRunViewModel(detail, await resolveReleaseRoadmap(detail.run.project_id))
+      );
       await replayEvents(client);
     })
   );

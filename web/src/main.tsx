@@ -76,6 +76,10 @@ interface RunViewModel {
     outputArtifact: unknown;
     motive: "repeated" | "exhausted" | "user_cancel_requested" | null;
   };
+  releaseRoadmap: {
+    releases: Array<{ id: string; nombre: string; alcanceResumen: string; estado: string }>;
+    activeReleaseId: string;
+  } | null;
 }
 
 interface CurrentUser {
@@ -265,7 +269,7 @@ function RunDashboard(props: {
                   <Timeline nodes={run.timeline} />
                   <Narrative entries={run.narrative} />
                 </div>
-                <ReleasePlanPanel />
+                <ReleasePlanPanel releaseRoadmap={run.releaseRoadmap} />
               </div>
             </>
           ) : null}
@@ -716,28 +720,51 @@ function ConnectionPanel({ runId }: { runId: string }) {
   );
 }
 
-function ReleasePlanPanel() {
+function ReleasePlanPanel({ releaseRoadmap }: { releaseRoadmap: RunViewModel["releaseRoadmap"] }) {
+  if (!releaseRoadmap) {
+    return (
+      <section className="h-full rounded-lg border border-zinc-200 bg-white p-4">
+        <CardLabel>Release Plan</CardLabel>
+        <p className="mt-2 text-sm text-zinc-600">
+          Todavía no hay un Roadmap de Releases aprobado para este proyecto.
+        </p>
+      </section>
+    );
+  }
+
   return (
     <section className="h-full rounded-lg border border-zinc-200 bg-white p-4">
       <CardLabel>Release Plan</CardLabel>
-      <p className="mt-2 text-sm text-zinc-600">
-        Disponible cuando el release activo tenga un plan generado por Planning. Funcionalidad en diseño.
-      </p>
       <div className="mt-4 space-y-3 text-sm">
-        <ReleasePlanItem status="done" label="Roadmap validado" />
-        <ReleasePlanItem status="pending" label="Release activo pendiente" />
-        <ReleasePlanItem status="pending" label="Features del release" />
+        {releaseRoadmap.releases.map((release) => (
+          <ReleasePlanItem
+            key={release.id}
+            status={release.estado}
+            label={release.nombre}
+            isActive={release.id === releaseRoadmap.activeReleaseId}
+          />
+        ))}
       </div>
     </section>
   );
 }
 
-function ReleasePlanItem({ status, label }: { status: "done" | "pending"; label: string }) {
-  const Icon = status === "done" ? CheckCircle2 : Circle;
+function ReleasePlanItem({
+  status,
+  label,
+  isActive,
+}: {
+  status: string;
+  label: string;
+  isActive: boolean;
+}) {
+  const done = status === "Completado";
+  const Icon = done ? CheckCircle2 : Circle;
   return (
     <div className="flex items-center gap-2 text-zinc-700">
-      <Icon className={`h-4 w-4 ${status === "done" ? "text-emerald-600" : "text-zinc-400"}`} />
+      <Icon className={`h-4 w-4 ${done ? "text-emerald-600" : "text-zinc-400"}`} />
       <span>{label}</span>
+      <Badge variant={isActive ? "success" : "secondary"}>{isActive ? "Activo" : status}</Badge>
     </div>
   );
 }

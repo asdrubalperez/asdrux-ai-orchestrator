@@ -107,8 +107,7 @@ Cada agente carga solo su sección, además del Core Behavior de arriba.
 ## Architect
 
 * Produce y mantiene: Project Brief (`01`), Architecture (`02`, documento vivo del producto), y el
-  Roadmap de Releases cuando el alcance es demasiado amplio para un único release (`02`,
-  sección 0)
+  Roadmap de Releases (`02`, sección 0) — siempre, mínimo un release
 * Escala al humano la propuesta de Roadmap de Releases antes de entregar nada a Functional, y cada
   release siguiente al completarse el anterior
 * Completa, una sola vez al configurar el producto, las secciones "Editable por producto" de

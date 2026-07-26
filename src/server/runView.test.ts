@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { RunRow } from "../db/repository.js";
-import { buildRunViewModel, buildTimeline, type RunEventRow } from "./runView.js";
+import { buildRunViewModel, buildTimeline, toReleaseRoadmapView, type RunEventRow } from "./runView.js";
 
 const baseRun: RunRow = {
   id: "11111111-1111-1111-1111-111111111111",
@@ -127,6 +127,35 @@ test("FEATURE-017: cancelación por usuario mid-fase usa el agentRole registrado
   assert.equal(view.escalation.motive, "user_cancel_requested");
   assert.equal(view.escalation.agentRole, "planning");
   assert.equal(view.escalation.isEscalated, true);
+});
+
+test("FEATURE-018: releaseRoadmap es null por default, sin necesidad de DB en el test", () => {
+  const view = buildRunViewModel({
+    run: { ...baseRun, status: "running" },
+    events: [event(1, "run_started", {})],
+    artifacts: [],
+  });
+
+  assert.equal(view.releaseRoadmap, null);
+});
+
+test("FEATURE-018: releaseRoadmap refleja el valor ya resuelto que se le pasa", () => {
+  const roadmap = {
+    releases: [{ id: "r1", nombre: "MVP", alcanceResumen: "Alcance mínimo.", estado: "Activo" }],
+    activeReleaseId: "r1",
+  };
+  const view = buildRunViewModel(
+    { run: { ...baseRun, status: "running" }, events: [event(1, "run_started", {})], artifacts: [] },
+    roadmap
+  );
+
+  assert.deepEqual(view.releaseRoadmap, roadmap);
+});
+
+test("FEATURE-018: toReleaseRoadmapView rechaza valores que no tienen la forma esperada", () => {
+  assert.equal(toReleaseRoadmapView(null), null);
+  assert.equal(toReleaseRoadmapView({ foo: "bar" }), null);
+  assert.equal(toReleaseRoadmapView("texto plano"), null);
 });
 
 function event(id: number, eventType: string, payload: unknown): RunEventRow {

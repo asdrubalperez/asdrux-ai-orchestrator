@@ -18,6 +18,7 @@ import {
   ensurePipelineDefinition,
   finalizeRun,
   findUserById,
+  getCurrentProjectConfig,
   getProjectForUser,
   getRunStatus,
   recordArtifact,
@@ -37,7 +38,7 @@ import { PIPELINES, SINGLE_PHASE_ARCHITECT } from "../../pipelines/definitions.j
 import type { PipelineSpec } from "../../pipelines/definitions.js";
 import { extractTestCommand } from "../../pipelines/extractTestCommand.js";
 import { TestExecutor, parseTestCommand } from "../../testing/testExecutor.js";
-import { artifactsAreEquivalent, buildEscalationContext } from "../escalation.js";
+import { activeReleaseFromRoadmap, artifactsAreEquivalent, buildEscalationContext } from "../escalation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const orchestratorRoot = path.resolve(__dirname, "..", "..", "..");
@@ -210,6 +211,7 @@ export async function runStart(args: string[]): Promise<void> {
   await executePipelineRun({
     projectRepoRoot,
     runId: run.id,
+    projectId: project.id,
     worktree,
     pipelineSpec,
     initialContext: businessCase,
@@ -228,6 +230,12 @@ export async function executePipelineRun(params: {
    */
   projectRepoRoot?: string;
   runId: string;
+  /**
+   * FEATURE-018: requerido para que la fase Planning reciba el release activo vigente
+   * (project_config_versions, config_key = "release_roadmap") como parte de su contexto de
+   * invocación — ver 7.3 del documento de la Feature.
+   */
+  projectId: string;
   worktree: RunWorktree;
   pipelineSpec: PipelineSpec;
   initialContext: unknown;
@@ -250,6 +258,7 @@ export async function executePipelineRun(params: {
   const {
     projectRepoRoot,
     runId,
+    projectId,
     worktree,
     pipelineSpec,
     initialContext,
@@ -285,7 +294,9 @@ export async function executePipelineRun(params: {
       const phase = pipelineSpec.definition.phases[phaseIndex];
       await haltIfCancelledExternally(runId);
       await updateRunCurrentPhase(runId, phase.agentRole);
-      const context = previousResult === null ? currentInitialContext : previousResult.outputArtifact;
+      const baseContext = previousResult === null ? currentInitialContext : previousResult.outputArtifact;
+      const context =
+        phase.agentRole === "planning" ? await withActiveReleaseContext(projectId, baseContext) : baseContext;
       const roleInstructions = await readRole(phase.agentRole);
       const selection = await resolveSelection(phase.agentRole);
       const executor = buildExecutor(selection, worktree.worktreePath, model);
@@ -461,6 +472,20 @@ function artifactContentForResult(result: PhaseResult): Record<string, unknown> 
     content.escalationReason = result.escalationReason;
   }
   return content;
+}
+
+/**
+ * FEATURE-018, sección 7.3: Planning siempre opera dentro del release activo vigente al momento de
+ * su invocación (Regla Funcional 5) — inyectado acá, no asumido por el propio rol. `activeRelease`
+ * viaja `null` cuando no hay ningún roadmap aprobado todavía para el proyecto (caso defendido por
+ * planning.txt: escala en vez de asumir un release implícito).
+ */
+async function withActiveReleaseContext(projectId: string, functionalArtifact: unknown): Promise<unknown> {
+  const roadmap = await getCurrentProjectConfig(projectId, "release_roadmap");
+  return {
+    functionalArtifact,
+    activeRelease: activeReleaseFromRoadmap(roadmap?.value ?? null),
+  };
 }
 
 function outputArtifactOf(artifact: ArtifactRow): unknown {

@@ -32,13 +32,12 @@ fijada: no se pregunta en rondas sueltas, se consolida y se vuelve al humano una
 
 ---
 
-## 0. Roadmap de Releases (condicional)
+## 0. Roadmap de Releases (siempre presente, mínimo un release)
 
-Solo aplica cuando el alcance del business case (`01-PROJECT-BRIEF-TEMPLATE.md`) es demasiado
-amplio para completarse en un único release. Si el alcance ya viene acotado a uno solo, esta
-sección queda **No Aplica** y el resto del documento funciona igual que si no existiera.
-
-Cuando aplica:
+Architect siempre declara un Roadmap de Releases, con un mínimo de un release (MVP) marcado como
+activo — incluso cuando todo el alcance del business case (`01-PROJECT-BRIEF-TEMPLATE.md`) cabe en
+ese único release (FEATURE-018: simplificación de diseño acordada con el owner, elimina la
+condicionalidad que existía antes de esa Feature).
 
 * Architect propone una secuencia de releases, siempre empezando por un MVP.
 * Antes de entregar nada a Functional, Architect escala esta propuesta al humano (ver Regla 8,
@@ -135,8 +134,7 @@ Antes de marcar esta Architecture como lista para Functional, el Architect verif
 - [ ] Los Componentes Técnicos (sección 2) reflejan lo mencionado en el Análisis Técnico
       (sección 1) — no hay componentes mencionados en un lado y ausentes en el otro
 - [ ] No quedan datos genuinamente declarativos pendientes de consolidar hacia el humano
-- [ ] Si el Roadmap de Releases (sección 0) aplica, el release activo está identificado sin
-      ambigüedad, y la propuesta de secuencia ya fue escalada al humano antes de entregar a
-      Functional
+- [ ] El Roadmap de Releases (sección 0) declara un release activo identificado sin ambigüedad, y
+      la propuesta ya fue escalada al humano antes de entregar a Functional
 
 Si algo de esto falla, el Architect corrige antes de entregar.

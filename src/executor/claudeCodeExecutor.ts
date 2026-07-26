@@ -359,9 +359,13 @@ export class ClaudeCodeExecutor implements Executor {
     // de PhaseResult. Cuando está presente, se adjunta junto al texto de ARTEFACTO en vez de
     // agregar un campo nuevo al contrato — los demás roles siguen recibiendo outputArtifact como
     // string plano, sin cambios (backward-compatible con FEATURE-001/002/003/004).
+    // ROADMAP (FEATURE-018) sigue el mismo precedente: campo propio del rol Architect, bolteado a
+    // outputArtifact solo cuando está presente, sin tocar el contrato de PhaseResult.
     const outputArtifact = parsed.comandoTest
       ? { text: parsed.artefacto, comandoTest: parsed.comandoTest }
-      : parsed.artefacto;
+      : parsed.roadmap
+        ? { text: parsed.artefacto, roadmap: parsed.roadmap }
+        : parsed.artefacto;
 
     return {
       status: parsed.status,
@@ -374,10 +378,12 @@ export class ClaudeCodeExecutor implements Executor {
 
   /**
    * Parsea la convención de texto ESTADO/RESUMEN/ARTEFACTO/RAZON_ESCALAMIENTO (+ COMANDO_TEST
-   * opcional, usado solo por el rol Planning) usada en roleInstructions — el mismo mecanismo
-   * validado en FEATURE-001/002 (H2: la CLI no devuelve PhaseResult estructurado nativamente;
-   * --json-schema queda pendiente de adoptar hasta verificarlo contra documentación oficial, ver
-   * 02-ARCHITECTURE.md).
+   * opcional, usado solo por el rol Planning; + ROADMAP opcional, usado solo por el rol Architect,
+   * FEATURE-018) usada en roleInstructions — el mismo mecanismo validado en FEATURE-001/002 (H2: la
+   * CLI no devuelve PhaseResult estructurado nativamente; --json-schema queda pendiente de adoptar
+   * hasta verificarlo contra documentación oficial, ver 02-ARCHITECTURE.md). El regex de extracción
+   * por etiqueta es genérico — agregar una etiqueta nueva no afecta el parseo de las existentes,
+   * sin importar su posición en el texto.
    */
   private parseRoleConvention(text: string): {
     status: PhaseStatus;
@@ -385,6 +391,7 @@ export class ClaudeCodeExecutor implements Executor {
     artefacto: unknown;
     razonEscalamiento: string | null;
     comandoTest: string | null;
+    roadmap: string | null;
   } {
     // Defensa adicional (FEATURE-005, H12): modelos más económicos (ej. haiku) no siempre
     // respetan "texto plano sin Markdown" al pie de la letra — envuelven las etiquetas en
@@ -403,6 +410,7 @@ export class ClaudeCodeExecutor implements Executor {
     const artefactoRaw = extract("ARTEFACTO");
     const razon = extract("RAZON_ESCALAMIENTO");
     const comandoTest = extract("COMANDO_TEST");
+    const roadmap = extract("ROADMAP");
 
     const status: PhaseStatus =
       estado === "escalated" ? "escalated" : estado === "rejected" ? "rejected" : "completed";
@@ -413,6 +421,7 @@ export class ClaudeCodeExecutor implements Executor {
       artefacto: artefactoRaw && artefactoRaw !== "null" ? artefactoRaw : null,
       razonEscalamiento: razon && razon !== "null" ? razon : null,
       comandoTest: comandoTest && comandoTest !== "null" ? comandoTest : null,
+      roadmap: roadmap && roadmap !== "null" ? roadmap : null,
     };
   }
 

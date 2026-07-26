@@ -9,6 +9,7 @@ import {
   recordRunConfigVersions,
   recordRunEvent,
   resolveEscalatedRunStatus,
+  setProjectConfig,
 } from "../db/repository.js";
 import {
   assertRunWorktreeAvailable,
@@ -16,7 +17,13 @@ import {
   createRunWorktree,
   type RunWorktree,
 } from "../isolation/worktree.js";
-import { buildEscalationContext, isAgentRole, parsePipelineDefinitionRow } from "./escalation.js";
+import {
+  buildEscalationContext,
+  isAgentRole,
+  isRoadmapApprovalPayload,
+  parsePipelineDefinitionRow,
+  type RoadmapApprovalPayload,
+} from "./escalation.js";
 import { executePipelineRun, parseAuthMode, parseExecutorProvider } from "./commands/runStart.js";
 import type { AgentConfig } from "../db/repository.js";
 
@@ -72,7 +79,7 @@ export async function respondToEscalation(params: {
     }
   }
 
-  const humanSolution = params.action.solution;
+  const rawSolution = params.action.solution;
   const runStarted = runStartedPayload(parentDetail.events);
   // FEATURE-016: un reintento de escalación reusa exactamente lo que se usó en el run original —
   // no re-resuelve contra user_agent_config, que pudo haber cambiado desde entonces. Runs previos
@@ -104,9 +111,19 @@ export async function respondToEscalation(params: {
   if (!parentRun.project_id) {
     throw new Error(`El run ${params.parentRunId} no tiene project_id persistido.`);
   }
+  const projectId = parentRun.project_id;
 
   const escalationArtifact = latestEscalationArtifact(parentDetail.artifacts);
   const escalationContent = escalationArtifactContent(escalationArtifact);
+  // FEATURE-018, sección 7.2: no hace falta un campo ni un tipo de acción nuevo para distinguir una
+  // escalación de "aprobación de roadmap" de una escalación genérica — la señal ya está en el
+  // propio artifact (ROADMAP con contenido, bolteado a outputArtifact igual que COMANDO_TEST). Si
+  // el JSON viene malformado (riesgo H12 aceptado, no resuelto con código — ver sección 7.5 del
+  // documento de la Feature), se trata como si no hubiera roadmap: comportamiento genérico actual,
+  // sin persistir nada nuevo.
+  const roadmapApproval = extractRoadmapApproval(escalationArtifact, escalationContent);
+
+  const humanSolution = roadmapApproval ? buildRoadmapApprovalHumanSolution(rawSolution) : rawSolution;
   const retryContext = buildEscalationContext({
     escalationReason: escalationContent.escalationReason,
     rejectedArtifact: escalationContent.outputArtifact,
@@ -123,6 +140,20 @@ export async function respondToEscalation(params: {
     if (!updated) {
       await client.query("rollback");
       return { kind: "conflict" };
+    }
+
+    if (roadmapApproval) {
+      // Misma transacción que crea el child run (más abajo): si algo falla a mitad de camino, el
+      // rollback del catch deshace ambas escrituras, no solo una — atomicidad real (ver 7.1/7.2 del
+      // documento de la Feature).
+      await setProjectConfig({
+        projectId,
+        configKey: "release_roadmap",
+        value: roadmapApproval,
+        changedByUserId: params.userId,
+        changedInRunId: params.parentRunId,
+        client,
+      });
     }
 
     childWorktree = await createRunWorktree(projectRepoRoot, childRunId, parentWorktree.branchName);
@@ -184,6 +215,7 @@ export async function respondToEscalation(params: {
       executePipelineRun({
         projectRepoRoot,
         runId: childRunId,
+        projectId,
         worktree: childWorktree as RunWorktree,
         pipelineSpec,
         initialContext: retryContext,
@@ -245,4 +277,41 @@ function escalationArtifactContent(artifact: { id: string; content: unknown }): 
     outputArtifact: content.outputArtifact,
     escalationReason: typeof content.escalationReason === "string" ? content.escalationReason : null,
   };
+}
+
+/**
+ * FEATURE-018, sección 7.2: distingue una escalación de "aprobación de roadmap" de una escalación
+ * genérica sin campo/tipo de acción nuevo — solo Architect declara ROADMAP, y solo lo declara con
+ * contenido cuando completó su análisis (nunca junto con una ambigüedad genérica sin resolver, por
+ * construcción del contrato de architect.txt). Devuelve null tanto si no aplica (rol distinto,
+ * ROADMAP ausente) como si el contenido no es JSON válido con la forma esperada — mismo tratamiento
+ * que "sin roadmap", riesgo aceptado de H12 (ver 7.5 del documento de la Feature).
+ */
+export function extractRoadmapApproval(
+  artifact: { phase: AgentRole },
+  content: { outputArtifact: unknown }
+): RoadmapApprovalPayload | null {
+  if (artifact.phase !== "architect") return null;
+  if (content.outputArtifact === null || typeof content.outputArtifact !== "object") return null;
+
+  const raw = (content.outputArtifact as { roadmap?: unknown }).roadmap;
+  if (typeof raw !== "string") return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  return isRoadmapApprovalPayload(parsed) ? parsed : null;
+}
+
+function buildRoadmapApprovalHumanSolution(rawSolution: string): string {
+  return [
+    "El Roadmap de Releases propuesto fue aprobado por el humano.",
+    `Comentario del humano: "${rawSolution}".`,
+    "No vuelvas a proponer el roadmap ni a escalar por este motivo — continuá tu fase declarando",
+    "ESTADO: completed, usando el mismo ARTEFACTO y ROADMAP ya propuestos.",
+  ].join(" ");
 }

@@ -285,39 +285,65 @@ export async function setProjectConfig(params: {
   changedByUserId?: string;
   changedInRunId?: string;
   changeReason?: string;
+  /**
+   * FEATURE-018: cuando se pasa, la escritura participa de la transacción del llamador (mismo
+   * patrón que getCurrentProjectConfigs/createRun) — no abre ni cierra su propia transacción.
+   * Necesario para que la aprobación de un Roadmap de Releases (respondService.ts) persista la
+   * nueva versión y cree el child run en una única transacción atómica real.
+   */
+  client?: PoolClient;
 }): Promise<ProjectConfigVersionRow> {
+  if (params.client) {
+    return writeProjectConfigVersion(params.client, params);
+  }
+
   const client = await pool.connect();
   try {
     await client.query("begin");
-    await client.query(
-      `update project_config_versions
-       set valid_to = now()
-       where project_id = $1 and config_key = $2 and valid_to is null`,
-      [params.projectId, params.configKey]
-    );
-    const inserted = await client.query<ProjectConfigVersionRow>(
-      `insert into project_config_versions (
-         project_id, config_key, value, changed_by_user_id, changed_in_run_id, change_reason
-       )
-       values ($1, $2, $3, $4, $5, $6)
-       returning id, project_id, config_key, value, valid_from, valid_to`,
-      [
-        params.projectId,
-        params.configKey,
-        params.value,
-        params.changedByUserId ?? null,
-        params.changedInRunId ?? null,
-        params.changeReason ?? null,
-      ]
-    );
+    const result = await writeProjectConfigVersion(client, params);
     await client.query("commit");
-    return inserted.rows[0];
+    return result;
   } catch (err) {
     await client.query("rollback");
     throw err;
   } finally {
     client.release();
   }
+}
+
+async function writeProjectConfigVersion(
+  client: PoolClient,
+  params: {
+    projectId: string;
+    configKey: string;
+    value: unknown;
+    changedByUserId?: string;
+    changedInRunId?: string;
+    changeReason?: string;
+  }
+): Promise<ProjectConfigVersionRow> {
+  await client.query(
+    `update project_config_versions
+     set valid_to = now()
+     where project_id = $1 and config_key = $2 and valid_to is null`,
+    [params.projectId, params.configKey]
+  );
+  const inserted = await client.query<ProjectConfigVersionRow>(
+    `insert into project_config_versions (
+       project_id, config_key, value, changed_by_user_id, changed_in_run_id, change_reason
+     )
+     values ($1, $2, $3, $4, $5, $6)
+     returning id, project_id, config_key, value, valid_from, valid_to`,
+    [
+      params.projectId,
+      params.configKey,
+      params.value,
+      params.changedByUserId ?? null,
+      params.changedInRunId ?? null,
+      params.changeReason ?? null,
+    ]
+  );
+  return inserted.rows[0];
 }
 
 export async function getProjectConfigHistory(

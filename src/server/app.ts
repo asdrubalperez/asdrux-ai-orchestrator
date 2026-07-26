@@ -15,7 +15,7 @@ import {
   WEB_SESSION_TTL_MS,
   type AuthenticatedRequest,
 } from "../auth/webSession.js";
-import { getRunDetailForUser } from "../db/repository.js";
+import { getCurrentProjectConfig, getRunDetailForUser } from "../db/repository.js";
 import {
   EscalationRunNotFoundError,
   respondToEscalation,
@@ -30,7 +30,7 @@ import {
   startPendingRun,
 } from "../cli/intakeService.js";
 import type { BusinessCaseValues } from "../intake/mapBusinessCase.js";
-import { buildRunViewModel } from "./runView.js";
+import { buildRunViewModel, toReleaseRoadmapView } from "./runView.js";
 import { openRunEventsStream } from "./sse.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -122,7 +122,8 @@ export function createApp(config: ServerConfig): express.Express {
         res.status(404).json({ error: "run_not_found" });
         return;
       }
-      res.json(buildRunViewModel(detail));
+      const releaseRoadmap = await resolveReleaseRoadmap(detail.run.project_id);
+      res.json(buildRunViewModel(detail, releaseRoadmap));
     } catch (err) {
       next(err);
     }
@@ -425,4 +426,15 @@ function parseLastEventId(value: string | undefined): number {
   if (!value) return 0;
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+}
+
+/**
+ * FEATURE-018: resuelve el roadmap vigente del proyecto de un run para exponerlo al frontend
+ * (ReleasePlanPanel). `projectId` null (runs legados sin proyecto vinculado) resuelve a null sin
+ * consultar nada.
+ */
+async function resolveReleaseRoadmap(projectId: string | null) {
+  if (!projectId) return null;
+  const config = await getCurrentProjectConfig(projectId, "release_roadmap");
+  return toReleaseRoadmapView(config?.value ?? null);
 }

@@ -1,6 +1,51 @@
 import type { AgentRole, PhaseInvocation } from "../contracts/executor.js";
 import type { PipelineSpec } from "../pipelines/definitions.js";
 
+/**
+ * FEATURE-018: forma persistida en project_config_versions bajo config_key = "release_roadmap".
+ * Vive acá (no en respondService.ts/runStart.ts) porque ambos módulos la necesitan y se importan
+ * mutuamente (runStart.executePipelineRun es llamado desde respondService, que a su vez llama a
+ * runStart) — este módulo ya es una dependencia compartida de los dos.
+ */
+export interface RoadmapReleaseEntry {
+  id: string;
+  nombre: string;
+  alcanceResumen: string;
+  estado: "Activo" | "Pendiente" | "Completado";
+}
+
+export interface RoadmapApprovalPayload {
+  releases: RoadmapReleaseEntry[];
+  activeReleaseId: string;
+}
+
+export function isRoadmapApprovalPayload(value: unknown): value is RoadmapApprovalPayload {
+  if (value === null || typeof value !== "object") return false;
+  const candidate = value as { releases?: unknown; activeReleaseId?: unknown };
+  if (typeof candidate.activeReleaseId !== "string" || !Array.isArray(candidate.releases) || candidate.releases.length === 0) {
+    return false;
+  }
+  if (!candidate.releases.every(isRoadmapReleaseEntry)) return false;
+  return candidate.releases.some((release) => release.id === candidate.activeReleaseId);
+}
+
+function isRoadmapReleaseEntry(value: unknown): value is RoadmapReleaseEntry {
+  if (value === null || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.nombre === "string" &&
+    typeof candidate.alcanceResumen === "string" &&
+    (candidate.estado === "Activo" || candidate.estado === "Pendiente" || candidate.estado === "Completado")
+  );
+}
+
+/** El release marcado como activo dentro de un roadmap ya persistido, o null si no hay ninguno. */
+export function activeReleaseFromRoadmap(value: unknown): RoadmapReleaseEntry | null {
+  if (!isRoadmapApprovalPayload(value)) return null;
+  return value.releases.find((release) => release.id === value.activeReleaseId) ?? null;
+}
+
 export interface EscalationContext {
   escalationReason: string;
   rejectedArtifact: unknown;
