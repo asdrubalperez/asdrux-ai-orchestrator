@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Calendar,
@@ -29,6 +29,11 @@ import {
   DialogTitle,
 } from "./components/ui/dialog";
 import { Input } from "./components/ui/input";
+import { apiUrl } from "./lib/api";
+import { queryClient } from "./lib/queryClient";
+import { CasesList } from "./intake/CasesList";
+import { DisparoScreen } from "./intake/DisparoScreen";
+import { statusLabel as runStatusLabel, statusVariant as runStatusVariant } from "./intake/statusDisplay";
 import "./styles.css";
 
 type TimelineStatus =
@@ -69,7 +74,7 @@ interface RunViewModel {
     agentRole: string | null;
     reason: string | null;
     outputArtifact: unknown;
-    motive: "repeated" | "exhausted" | null;
+    motive: "repeated" | "exhausted" | "user_cancel_requested" | null;
   };
 }
 
@@ -77,8 +82,6 @@ interface CurrentUser {
   id: string;
   handle: string;
 }
-
-const queryClient = new QueryClient();
 
 function App() {
   return (
@@ -88,10 +91,22 @@ function App() {
   );
 }
 
+type AppView = "cases" | "intake" | "run";
+
 function AppInner() {
   const [runId, setRunId] = React.useState(() => new URLSearchParams(window.location.search).get("run") ?? "");
   const [activeRunId, setActiveRunId] = React.useState(runId);
+  const [view, setView] = React.useState<AppView>(runId ? "run" : "cases");
   const auth = useCurrentUser();
+
+  const openRun = React.useCallback((value: string) => {
+    setRunId(value);
+    setActiveRunId(value);
+    setView("run");
+    const url = new URL(window.location.href);
+    url.searchParams.set("run", value);
+    window.history.replaceState(null, "", url);
+  }, []);
 
   return (
     <>
@@ -101,18 +116,69 @@ function AppInner() {
           Validando sesión...
         </main>
       ) : auth.user ? (
-        <RunDashboard
-          runId={activeRunId}
-          draftRunId={runId}
-          user={auth.user}
-          onDraftChange={setRunId}
-          onOpenRun={setActiveRunId}
-          onLogout={auth.logout}
-        />
+        <main className="min-h-screen bg-zinc-50 text-zinc-950">
+          <AppNav view={view} user={auth.user} onNavigate={setView} onLogout={auth.logout} />
+          {view === "cases" ? (
+            <CasesList onOpenRun={openRun} onNewCase={() => setView("intake")} />
+          ) : view === "intake" ? (
+            <DisparoScreen onConfirmed={() => setView("cases")} />
+          ) : (
+            <RunDashboard
+              runId={activeRunId}
+              draftRunId={runId}
+              user={auth.user}
+              onDraftChange={setRunId}
+              onOpenRun={openRun}
+              onLogout={auth.logout}
+              hideHeader
+            />
+          )}
+        </main>
       ) : (
         <LoginView onLogin={auth.refresh} />
       )}
     </>
+  );
+}
+
+function AppNav(props: {
+  view: AppView;
+  user: CurrentUser;
+  onNavigate: (view: AppView) => void;
+  onLogout: () => Promise<void>;
+}) {
+  return (
+    <header className="border-b border-zinc-200 bg-white">
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
+        <div className="flex items-center gap-2">
+          <Button
+            variant={props.view === "cases" ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => props.onNavigate("cases")}
+          >
+            Mis casos
+          </Button>
+          <Button
+            variant={props.view === "intake" ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => props.onNavigate("intake")}
+          >
+            Nuevo caso
+          </Button>
+        </div>
+        <Button
+          data-testid="logout-button"
+          variant="outline"
+          size="sm"
+          aria-label="Salir"
+          title={`Salir (${props.user.handle})`}
+          onClick={() => void props.onLogout()}
+        >
+          <LogOut className="h-4 w-4" />
+          {props.user.handle}
+        </Button>
+      </div>
+    </header>
   );
 }
 
@@ -123,6 +189,7 @@ function RunDashboard(props: {
   onDraftChange: (value: string) => void;
   onOpenRun: (value: string) => void;
   onLogout: () => Promise<void>;
+  hideHeader?: boolean;
 }) {
   const query = useRunQuery(props.runId);
   useRunStream(props.runId, query.refresh);
@@ -141,44 +208,46 @@ function RunDashboard(props: {
 
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
-      <header className="border-b border-zinc-200 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">FEATURE-013A</p>
-            <h1 className="text-2xl font-semibold tracking-normal">Run en curso</h1>
-          </div>
-          <div className="flex w-full flex-col gap-3 lg:w-auto lg:flex-row lg:items-center">
-            <form
-              className="flex w-full gap-2 lg:w-[34rem]"
-              onSubmit={(event) => {
-                event.preventDefault();
-                openRun(props.draftRunId.trim());
-              }}
-            >
-              <Input
-                className="min-w-0 flex-1"
-                placeholder="Run ID"
-                value={props.draftRunId}
-                onChange={(event) => props.onDraftChange(event.target.value)}
-              />
-              <Button>
-                <Search className="h-4 w-4" />
-                Abrir
+      {props.hideHeader ? null : (
+        <header className="border-b border-zinc-200 bg-white">
+          <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">FEATURE-013A</p>
+              <h1 className="text-2xl font-semibold tracking-normal">Run en curso</h1>
+            </div>
+            <div className="flex w-full flex-col gap-3 lg:w-auto lg:flex-row lg:items-center">
+              <form
+                className="flex w-full gap-2 lg:w-[34rem]"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  openRun(props.draftRunId.trim());
+                }}
+              >
+                <Input
+                  className="min-w-0 flex-1"
+                  placeholder="Run ID"
+                  value={props.draftRunId}
+                  onChange={(event) => props.onDraftChange(event.target.value)}
+                />
+                <Button>
+                  <Search className="h-4 w-4" />
+                  Abrir
+                </Button>
+              </form>
+              <Button
+                data-testid="logout-button"
+                variant="outline"
+                aria-label="Salir"
+                title={`Salir (${props.user.handle})`}
+                onClick={() => void props.onLogout()}
+              >
+                <LogOut className="h-4 w-4" />
+                {props.user.handle}
               </Button>
-            </form>
-            <Button
-              data-testid="logout-button"
-              variant="outline"
-              aria-label="Salir"
-              title={`Salir (${props.user.handle})`}
-              onClick={() => void props.onLogout()}
-            >
-              <LogOut className="h-4 w-4" />
-              {props.user.handle}
-            </Button>
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
+      )}
 
       <div className="mx-auto max-w-7xl space-y-4 px-4 py-5 sm:px-6 lg:px-8">
         <section className="space-y-4">
@@ -359,7 +428,7 @@ function ErrorState() {
 function RunOverview({ run, runId }: { run: RunViewModel; runId: string }) {
   return (
     <section className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
-      <Metric label="Estado" value={run.run.status} />
+      <StatusMetric label="Estado" status={run.run.status} />
       <Metric label="Fase actual" value={run.run.current_phase ?? "sin fase"} />
       <Metric label="Eventos" value={String(run.narrative.length)} />
       <ConnectionPanel runId={runId} />
@@ -373,6 +442,17 @@ function Metric({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg border border-zinc-200 bg-white p-4">
       <CardLabel>{label}</CardLabel>
       <p className="mt-3 text-sm text-zinc-600">{value}</p>
+    </div>
+  );
+}
+
+function StatusMetric({ label, status }: { label: string; status: string }) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-4">
+      <CardLabel>{label}</CardLabel>
+      <div className="mt-3">
+        <Badge variant={runStatusVariant(status)}>{runStatusLabel(status)}</Badge>
+      </div>
     </div>
   );
 }
@@ -541,6 +621,7 @@ function EscalationResponseDialog({
 function escalationMotiveText(motive: RunViewModel["escalation"]["motive"], agentRole: string | null) {
   if (motive === "repeated") return "Se repitió el mismo resultado — se necesita tu validación.";
   if (motive === "exhausted") return "Se agotaron los 3 reintentos internos — se necesita tu validación.";
+  if (motive === "user_cancel_requested") return "Cancelaste este run — se está deteniendo en el próximo punto de corte.";
   return `${agentRole ?? "Un agente"} requiere intervención humana.`;
 }
 
@@ -747,12 +828,6 @@ function statusVariant(status: TimelineStatus): React.ComponentProps<typeof Badg
 
 function statusLabel(status: TimelineStatus) {
   return status.replaceAll("_", " ");
-}
-
-function apiUrl(path: string): string {
-  const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-  if (!baseUrl) return path;
-  return new URL(path, baseUrl).toString();
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

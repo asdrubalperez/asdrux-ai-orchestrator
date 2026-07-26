@@ -55,7 +55,7 @@ export interface RunViewModel {
     agentRole: string | null;
     reason: string | null;
     outputArtifact: unknown;
-    motive: "repeated" | "exhausted" | null;
+    motive: "repeated" | "exhausted" | "user_cancel_requested" | null;
   };
 }
 
@@ -145,14 +145,22 @@ function buildEscalationBanner(run: RunRow, events: RunEventRow[], artifacts: Ar
     return { isEscalated: false, agentRole: null, reason: null, outputArtifact: null, motive: null };
   }
 
-  const agentRole = latestEscalatedAgentRole(events);
+  const motive = latestTerminalEscalationMotive(events);
+  // FEATURE-017: si el usuario canceló mientras una fase seguía en curso, no hay ningún
+  // phase_finished con status "escalated" que latestEscalatedAgentRole pueda encontrar — el
+  // agentRole activo en ese momento se registró explícitamente en el propio evento de
+  // cancelación forzada (ver src/cli/intakeService.ts, cancelRun).
+  const agentRole =
+    motive === "user_cancel_requested"
+      ? (latestForcedUserEscalationAgentRole(events) ?? latestEscalatedAgentRole(events))
+      : latestEscalatedAgentRole(events);
   const artifact = [...artifacts].reverse().find((item) => item.kind === "escalation");
   return {
     isEscalated: true,
     agentRole,
     reason: escalationReasonFromArtifact(artifact?.content) ?? latestEscalationReasonFromEvents(events),
     outputArtifact: outputArtifactFromEscalationArtifact(artifact?.content),
-    motive: latestTerminalEscalationMotive(events),
+    motive,
   };
 }
 
@@ -184,6 +192,14 @@ function narrativeText(event: RunEventRow): string {
       return "El usuario respondió el escalamiento.";
     case "escalation_aborted":
       return "El usuario abortó el escalamiento.";
+    case "escalation_forced_by_user":
+      return "El usuario canceló el run.";
+    case "run_halted_external_cancel":
+      return "El pipeline se detuvo en el próximo punto de corte tras la cancelación.";
+    case "intake_confirmed":
+      return "Se confirmó el caso de negocio mapeado.";
+    case "repo_clone_failed":
+      return runRepoCloneFailedMessage(payload);
     case "run_error":
       return runErrorMessage(payload);
     case "test_executed":
@@ -242,10 +258,23 @@ function outputArtifactFromEscalationArtifact(content: unknown): unknown {
   return isRecord(content) && "outputArtifact" in content ? content.outputArtifact : null;
 }
 
-function latestTerminalEscalationMotive(events: RunEventRow[]): "repeated" | "exhausted" | null {
+function latestTerminalEscalationMotive(
+  events: RunEventRow[]
+): "repeated" | "exhausted" | "user_cancel_requested" | null {
   for (let i = events.length - 1; i >= 0; i--) {
     if (events[i].event_type === "escalation_repeated_detected") return "repeated";
     if (events[i].event_type === "escalation_exhausted") return "exhausted";
+    if (events[i].event_type === "escalation_forced_by_user") return "user_cancel_requested";
+  }
+  return null;
+}
+
+function latestForcedUserEscalationAgentRole(events: RunEventRow[]): string | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.event_type === "escalation_forced_by_user") {
+      return isRecord(event.payload) && typeof event.payload.agentRole === "string" ? event.payload.agentRole : null;
+    }
   }
   return null;
 }
@@ -265,6 +294,13 @@ function latestEscalationReasonFromEvents(events: RunEventRow[]): string | null 
 function runErrorMessage(payload: unknown): string {
   if (isRecord(payload) && typeof payload.message === "string") return `Error del run: ${payload.message}`;
   return "El run registró un error.";
+}
+
+function runRepoCloneFailedMessage(payload: unknown): string {
+  if (isRecord(payload) && typeof payload.message === "string") {
+    return `Corte técnico antes de invocar al Architect: ${payload.message}`;
+  }
+  return "Corte técnico: no se pudo preparar el repositorio del caso.";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

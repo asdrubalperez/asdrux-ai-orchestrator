@@ -235,7 +235,7 @@ export class ClaudeCodeExecutor implements Executor {
         ...this.buildChildEnv(auth.authMode === "api_key" ? auth.apiKey : undefined),
         ...(auth.authMode === "api_key" ? { ANTHROPIC_API_KEY: auth.apiKey } : {}),
       }, options);
-      return this.mapToPhaseResult(raw);
+      return this.mapToPhaseResult(raw, auth.authMode);
     } finally {
       await worker.close();
       await rm(temporary, { recursive: true, force: true });
@@ -341,14 +341,14 @@ export class ClaudeCodeExecutor implements Executor {
     });
   }
 
-  private mapToPhaseResult(raw: RawCliResult): PhaseResult {
+  private mapToPhaseResult(raw: RawCliResult, authMode: "api_key" | "cli_session"): PhaseResult {
     if (raw.is_error) {
       return {
         status: "failed",
         outputArtifact: null,
         summary: raw.result,
         escalationReason: null,
-        executorMetadata: { provider: "claude-code-cli" },
+        executorMetadata: { provider: "claude-code-cli", authMode },
       };
     }
 
@@ -368,7 +368,7 @@ export class ClaudeCodeExecutor implements Executor {
       outputArtifact,
       summary: parsed.resumen,
       escalationReason: parsed.razonEscalamiento,
-      executorMetadata: { provider: "claude-code-cli", model },
+      executorMetadata: { provider: "claude-code-cli", model, authMode },
     };
   }
 

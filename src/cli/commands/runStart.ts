@@ -9,6 +9,7 @@ import {
   commitAllChanges,
   createRunWorktree,
   pushRunBranch,
+  removeRunClone,
   removeRunWorktree,
   type RunWorktree,
 } from "../../isolation/worktree.js";
@@ -18,6 +19,7 @@ import {
   finalizeRun,
   findUserById,
   getProjectForUser,
+  getRunStatus,
   recordArtifact,
   recordRunConfigVersions,
   recordRunEvent,
@@ -42,6 +44,67 @@ const orchestratorRoot = path.resolve(__dirname, "..", "..", "..");
 export type ExecutorProvider = "claude" | "codex";
 type RunExecutor = ClaudeCodeExecutor | CodexExecutor;
 const MAX_ESCALATION_ATTEMPTS = 3;
+
+/**
+ * Hallazgo de una corrida real (2026-07-25): Developer, trabajando sobre un repo real (build de
+ * TypeScript + tests reales), superó los 300s hardcodeados y terminó en
+ * "Executor timeout tras 300000ms" con el run marcado failed. Timeouts finales fijados por el
+ * owner (2026-07-25), una variable propia por rol (no compartida) — ver
+ * docs/features/FEATURE-017-*.md, sección 7 (tabla de timeouts) para la justificación completa,
+ * incluida la anticipación de FEATURE-018 (Architect diseñando release roadmaps, Functional
+ * generando varias features por release).
+ */
+function parsePositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const ARCHITECT_TIMEOUT_MS = parsePositiveIntEnv("ARCHITECT_TIMEOUT_MS", 600_000);
+const FUNCTIONAL_TIMEOUT_MS = parsePositiveIntEnv("FUNCTIONAL_TIMEOUT_MS", 600_000);
+const PLANNING_TIMEOUT_MS = parsePositiveIntEnv("PLANNING_TIMEOUT_MS", 600_000);
+const DEVELOPER_TIMEOUT_MS = parsePositiveIntEnv("DEVELOPER_TIMEOUT_MS", 900_000);
+const QA_TIMEOUT_MS = parsePositiveIntEnv("QA_TIMEOUT_MS", 900_000);
+
+const LINEAR_PHASE_TIMEOUT_MS: Partial<Record<AgentRole, number>> = {
+  architect: ARCHITECT_TIMEOUT_MS,
+  functional: FUNCTIONAL_TIMEOUT_MS,
+  planning: PLANNING_TIMEOUT_MS,
+};
+
+function timeoutForLinearPhase(agentRole: AgentRole): number {
+  const timeout = LINEAR_PHASE_TIMEOUT_MS[agentRole];
+  if (timeout === undefined) {
+    throw new Error(`No hay timeout configurado para la fase lineal "${agentRole}".`);
+  }
+  return timeout;
+}
+
+/**
+ * FEATURE-017, sección 7.4: señal interna para cortar el pipeline en el próximo punto de corte
+ * natural cuando un run fue forzado a `escalated`/`aborted` desde afuera (Cancelar por usuario) —
+ * distinta de un PhaseResult, porque acá no hay ningún resultado de fase que reportar: el run ya
+ * fue finalizado por forceUserEscalation + respondToEscalation antes de que este chequeo corra.
+ */
+class RunCancelledExternallyError extends Error {}
+
+/**
+ * FEATURE-017: el manejo de escalamiento por AGENTE (handleLinearEscalation, más abajo) es
+ * reactivo — reacciona al PhaseResult que la propia invocación devuelve al terminar, no consulta
+ * `runs.status`. No existía ningún guard previo a arrancar una fase; este es código nuevo,
+ * llamado antes de cada fase en el while de executePipelineRun y en cada iteración de
+ * runDeveloperQaLoop.
+ */
+async function haltIfCancelledExternally(runId: string): Promise<void> {
+  const status = await getRunStatus(runId);
+  if (status === "escalated" || status === "aborted") {
+    await recordRunEvent(runId, "run_halted_external_cancel", { status });
+    throw new RunCancelledExternallyError(
+      `Run ${runId} cancelado externamente (status=${status}) — pipeline detenido antes de la siguiente fase.`
+    );
+  }
+}
 
 export async function runStart(args: string[]): Promise<void> {
   const casePath = getFlag(args, "--case");
@@ -157,7 +220,13 @@ export async function runStart(args: string[]): Promise<void> {
 }
 
 export async function executePipelineRun(params: {
-  projectRepoRoot: string;
+  /**
+   * Requerido solo cuando cleanupStrategy es "shared-worktree" (default) — es el repo compartido
+   * del que `worktree` es un `git worktree add` linkeado, usado por `removeRunWorktree` al
+   * finalizar. Los runs con `cleanupStrategy: "standalone-clone"` (FEATURE-017) no tienen ningún
+   * repo compartido: `worktree.worktreePath` es un clon completo e independiente.
+   */
+  projectRepoRoot?: string;
   runId: string;
   worktree: RunWorktree;
   pipelineSpec: PipelineSpec;
@@ -170,12 +239,39 @@ export async function executePipelineRun(params: {
    */
   cliAgentOverride: AgentConfig | null;
   model?: string;
+  /**
+   * FEATURE-017: "shared-worktree" (default, sin cambios) — `worktree` es un `git worktree add`
+   * sobre `projectRepoRoot`, limpiado con `removeRunWorktree`. "standalone-clone" — `worktree` es
+   * un clon aislado propio del run (repo/rama del caso de negocio), limpiado con `removeRunClone`,
+   * sin ningún repoRoot compartido de por medio.
+   */
+  cleanupStrategy?: "shared-worktree" | "standalone-clone";
 }): Promise<void> {
-  const { projectRepoRoot, runId, worktree, pipelineSpec, initialContext, userId, cliAgentOverride, model } = params;
+  const {
+    projectRepoRoot,
+    runId,
+    worktree,
+    pipelineSpec,
+    initialContext,
+    userId,
+    cliAgentOverride,
+    model,
+    cleanupStrategy = "shared-worktree",
+  } = params;
   const resolveSelection = (role: AgentRole): Promise<AgentConfig> =>
     cliAgentOverride ? Promise.resolve(cliAgentOverride) : resolveAgentConfig(userId, role);
   const readRole = (agentRole: string) =>
     readFile(path.join(orchestratorRoot, "src", "executor", "roles", `${agentRole}.txt`), "utf8");
+
+  // Hallazgo de una corrida real (2026-07-25): sin datos reales de cuánto tarda cada fase, calibrar
+  // timeouts es pura estimación. Se registra la duración real (phase_started -> phase_finished, o
+  // hasta el error si la fase revienta) para poder ajustar DEVELOPER_TIMEOUT_MS/QA_TIMEOUT_MS con
+  // evidencia. `phaseTiming` vive fuera del try para que el catch de abajo también pueda leerlo si
+  // la fase en curso al momento del error fue la que hizo timeout.
+  const phaseTiming: { agentRole: AgentRole | null; startedAt: number | null } = {
+    agentRole: null,
+    startedAt: null,
+  };
 
   try {
     let previousResult: PhaseResult | null = null;
@@ -187,6 +283,7 @@ export async function executePipelineRun(params: {
 
     while (phaseIndex < pipelineSpec.definition.phases.length) {
       const phase = pipelineSpec.definition.phases[phaseIndex];
+      await haltIfCancelledExternally(runId);
       await updateRunCurrentPhase(runId, phase.agentRole);
       const context = previousResult === null ? currentInitialContext : previousResult.outputArtifact;
       const roleInstructions = await readRole(phase.agentRole);
@@ -200,9 +297,12 @@ export async function executePipelineRun(params: {
         permissions: phase.permissions,
       };
 
+      phaseTiming.agentRole = invocation.agentRole;
+      phaseTiming.startedAt = Date.now();
       await recordRunEvent(runId, "phase_started", { agentRole: invocation.agentRole });
-      const result = await executor.runPhase(invocation, { timeoutMs: 180_000 });
-      await recordRunEvent(runId, "phase_finished", { agentRole: invocation.agentRole, result });
+      const result = await executor.runPhase(invocation, { timeoutMs: timeoutForLinearPhase(phase.agentRole) });
+      const durationMs = Date.now() - phaseTiming.startedAt;
+      await recordRunEvent(runId, "phase_finished", { agentRole: invocation.agentRole, result, durationMs });
       const artifact = await recordArtifact({
         runId,
         phase: invocation.agentRole,
@@ -241,12 +341,12 @@ export async function executePipelineRun(params: {
         }
 
         console.log(`[run:start] fase "${phase.agentRole}" terminó con status "${result.status}" — pipeline detenido.`);
-        await finishRun(projectRepoRoot, runId, worktree, result, { pushAndClean: false });
+        await finishRun(projectRepoRoot, runId, worktree, result, { pushAndClean: false, cleanupStrategy });
         return;
       }
 
       console.log(`[run:start] fase "${phase.agentRole}" terminó con status "${result.status}" — pipeline detenido.`);
-      await finishRun(projectRepoRoot, runId, worktree, result, { pushAndClean: false });
+      await finishRun(projectRepoRoot, runId, worktree, result, { pushAndClean: false, cleanupStrategy });
       return;
     }
 
@@ -262,24 +362,37 @@ export async function executePipelineRun(params: {
         runId,
         planningResult: previousResult as PhaseResult,
         maxAttempts: pipelineSpec.definition.loop.maxAttempts,
+        phaseTiming,
       });
 
       const approved = finalResult.status === "completed";
-      await finishRun(projectRepoRoot, runId, worktree, finalResult, { pushAndClean: approved });
+      await finishRun(projectRepoRoot, runId, worktree, finalResult, { pushAndClean: approved, cleanupStrategy });
       return;
     }
 
-    await finishRun(projectRepoRoot, runId, worktree, previousResult as PhaseResult, { pushAndClean: false });
+    await finishRun(projectRepoRoot, runId, worktree, previousResult as PhaseResult, {
+      pushAndClean: false,
+      cleanupStrategy,
+    });
   } catch (err) {
+    if (err instanceof RunCancelledExternallyError) {
+      // El run ya fue finalizado (aborted) por forceUserEscalation + respondToEscalation antes de
+      // que este chequeo corriera — no llamar finishRun/finalizeRun acá, o se sobreescribiría ese
+      // status ya correcto.
+      console.log(`[run:start] ${err.message}`);
+      return;
+    }
+
     const message = err instanceof Error ? err.message : String(err);
+    const durationMs = phaseTiming.startedAt ? Date.now() - phaseTiming.startedAt : null;
     const failure: PhaseResult = {
       status: "failed",
       outputArtifact: null,
       summary: `Error inesperado durante la ejecución del run: ${message}`,
       escalationReason: null,
     };
-    await recordRunEvent(runId, "run_error", { message });
-    await finishRun(projectRepoRoot, runId, worktree, failure, { pushAndClean: false });
+    await recordRunEvent(runId, "run_error", { message, agentRole: phaseTiming.agentRole, durationMs });
+    await finishRun(projectRepoRoot, runId, worktree, failure, { pushAndClean: false, cleanupStrategy });
     throw err;
   }
 }
@@ -364,8 +477,10 @@ export async function runDeveloperQaLoop(params: {
   runId: string;
   planningResult: PhaseResult;
   maxAttempts: number;
+  /** Compartido con executePipelineRun — ver el comentario en su declaración. */
+  phaseTiming: { agentRole: AgentRole | null; startedAt: number | null };
 }): Promise<PhaseResult> {
-  const { executor, developerExecutor, readRole, runId, planningResult, maxAttempts } = params;
+  const { executor, developerExecutor, readRole, runId, planningResult, maxAttempts, phaseTiming } = params;
   const testExecutor = new TestExecutor();
   const testCommand = extractTestCommand(planningResult.outputArtifact);
   console.log(`[run:start] COMANDO_TEST declarado por Planning: ${testCommand}`);
@@ -377,6 +492,7 @@ export async function runDeveloperQaLoop(params: {
   let lastQaResult: PhaseResult | null = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await haltIfCancelledExternally(runId);
     await updateRunCurrentPhase(runId, "developer");
 
     const developerContext =
@@ -395,9 +511,17 @@ export async function runDeveloperQaLoop(params: {
       permissions: { filesystem: "workspace-write", writableRoots: [developerExecutor.options.workingDirectory] },
     };
 
+    phaseTiming.agentRole = "developer";
+    phaseTiming.startedAt = Date.now();
     await recordRunEvent(runId, "phase_started", { agentRole: "developer", attempt });
-    const developerResult = await developerExecutor.runPhase(developerInvocation, { timeoutMs: 300_000 });
-    await recordRunEvent(runId, "phase_finished", { agentRole: "developer", attempt, result: developerResult });
+    const developerResult = await developerExecutor.runPhase(developerInvocation, { timeoutMs: DEVELOPER_TIMEOUT_MS });
+    const developerDurationMs = Date.now() - phaseTiming.startedAt;
+    await recordRunEvent(runId, "phase_finished", {
+      agentRole: "developer",
+      attempt,
+      result: developerResult,
+      durationMs: developerDurationMs,
+    });
     await recordArtifact({
       runId,
       phase: "developer",
@@ -412,6 +536,7 @@ export async function runDeveloperQaLoop(params: {
       return developerResult;
     }
 
+    await haltIfCancelledExternally(runId);
     await updateRunCurrentPhase(runId, "qa");
 
     // FEATURE-006 (resuelve H14): el TestExecutor —no el agente QA— corre el comando de test,
@@ -432,9 +557,12 @@ export async function runDeveloperQaLoop(params: {
       permissions: { filesystem: "read-only" },
     };
 
+    phaseTiming.agentRole = "qa";
+    phaseTiming.startedAt = Date.now();
     await recordRunEvent(runId, "phase_started", { agentRole: "qa", attempt });
-    const qaResult = await executor.runPhase(qaInvocation, { timeoutMs: 300_000 });
-    await recordRunEvent(runId, "phase_finished", { agentRole: "qa", attempt, result: qaResult });
+    const qaResult = await executor.runPhase(qaInvocation, { timeoutMs: QA_TIMEOUT_MS });
+    const qaDurationMs = Date.now() - phaseTiming.startedAt;
+    await recordRunEvent(runId, "phase_finished", { agentRole: "qa", attempt, result: qaResult, durationMs: qaDurationMs });
     await recordArtifact({
       runId,
       phase: "qa",
@@ -481,11 +609,11 @@ export async function runDeveloperQaLoop(params: {
 }
 
 async function finishRun(
-  repoRoot: string,
+  repoRoot: string | undefined,
   runId: string,
   worktree: RunWorktree,
   finalResult: PhaseResult,
-  opts: { pushAndClean: boolean }
+  opts: { pushAndClean: boolean; cleanupStrategy: "shared-worktree" | "standalone-clone" }
 ): Promise<void> {
   await finalizeRun(runId, finalResult);
 
@@ -498,7 +626,14 @@ async function finishRun(
     await recordRunEvent(runId, "run_pushed", { branchName: worktree.branchName });
     console.log(`[run:start] push real de la rama "${worktree.branchName}" a origin.`);
 
-    await removeRunWorktree(repoRoot, worktree);
+    if (opts.cleanupStrategy === "standalone-clone") {
+      await removeRunClone(worktree);
+    } else {
+      if (!repoRoot) {
+        throw new Error("finishRun: cleanupStrategy 'shared-worktree' requiere projectRepoRoot.");
+      }
+      await removeRunWorktree(repoRoot, worktree);
+    }
     await recordRunEvent(runId, "worktree_cleaned", { worktreePath: worktree.worktreePath });
     console.log(`[run:start] worktree limpiado tras aprobación.`);
   } else {

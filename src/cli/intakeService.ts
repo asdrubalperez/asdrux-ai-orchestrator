@@ -1,0 +1,233 @@
+import { randomUUID } from "node:crypto";
+import {
+  createRunPendingStart,
+  ensurePipelineDefinition,
+  finalizeRun,
+  forceUserEscalation,
+  getIntakeFieldDefinitions,
+  getPipelineDefinitionById,
+  getProjectForUser,
+  getRunDetailForUser,
+  listRunsForUser,
+  promoteRunToRunning,
+  recordRunConfigVersions,
+  recordRunEvent,
+  resolveAgentConfig,
+  type RunRow,
+} from "../db/repository.js";
+import { cloneRunRepository, removeRunClone, RunRepoCloneError } from "../isolation/worktree.js";
+import { FULL_PIPELINE, PIPELINES } from "../pipelines/definitions.js";
+import { parsePipelineDefinitionRow } from "./escalation.js";
+import { executePipelineRun } from "./commands/runStart.js";
+import { mapBusinessCase, type BusinessCaseValues } from "../intake/mapBusinessCase.js";
+import { respondToEscalation } from "./respondService.js";
+
+export async function getIntakeFields() {
+  return getIntakeFieldDefinitions();
+}
+
+export async function mapIntakeText(params: { inputText: string; previousValues?: BusinessCaseValues }) {
+  const fields = await getIntakeFieldDefinitions();
+  const values = await mapBusinessCase({
+    inputText: params.inputText,
+    fields,
+    previousValues: params.previousValues,
+  });
+  return { fields, values };
+}
+
+export class IntakeProjectNotFoundError extends Error {}
+
+/**
+ * FEATURE-017, Regla 6 / sección 7.2: confirmar el mapeo persiste el run en `sin_iniciar`, con
+ * `pipeline_definition_id` ya resuelto en este momento (no en el arranque) — decisión DAIA
+ * verificada contra el repo real. Sin worktree, sin branch, sin invocación al Architect todavía.
+ */
+export async function confirmIntake(params: {
+  userId: string;
+  projectId?: string;
+  pipelineName?: string;
+  businessCase: BusinessCaseValues;
+}): Promise<RunRow> {
+  const project = await getProjectForUser(params.userId, params.projectId);
+  if (!project) {
+    throw new IntakeProjectNotFoundError("No existe un proyecto disponible para el usuario actual.");
+  }
+
+  // FEATURE-017, hallazgo de la prueba end-to-end del owner (2026-07-25): el default anterior,
+  // SINGLE_PHASE_ARCHITECT, solo tiene la fase Architect — los runs creados desde la UI
+  // terminaban "completed" tras esa única fase, sin Functional/Planning/Developer/QA. Default
+  // correcto: el pipeline real de 5 fases + loop Developer↔QA.
+  const pipelineName = params.pipelineName ?? FULL_PIPELINE.name;
+  const pipelineSpec = PIPELINES[pipelineName];
+  if (!pipelineSpec) {
+    throw new Error(`Pipeline desconocido: "${pipelineName}".`);
+  }
+
+  const pipelineDefinition = await ensurePipelineDefinition(pipelineSpec);
+  const runId = randomUUID();
+
+  const run = await createRunPendingStart({
+    id: runId,
+    pipelineDefinitionId: pipelineDefinition.id,
+    ownerId: params.userId,
+    projectId: project.id,
+    businessCase: params.businessCase,
+  });
+
+  await recordRunEvent(run.id, "intake_confirmed", { businessCase: params.businessCase, projectId: project.id });
+  return run;
+}
+
+export async function listMyCases(userId: string): Promise<RunRow[]> {
+  return listRunsForUser(userId);
+}
+
+export type StartPendingRunResult =
+  | { kind: "not_found" }
+  | { kind: "conflict" }
+  | { kind: "repo_clone_failed"; message: string }
+  | { kind: "started"; run: RunRow; execute: () => Promise<void> };
+
+function isBusinessCaseValues(value: unknown): value is BusinessCaseValues {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  return Object.values(value as Record<string, unknown>).every((v) => v === null || typeof v === "string");
+}
+
+/** Corte técnico explícito antes de invocar al Architect — nunca se le pasa a un agente un
+ * problema de infraestructura para que lo note él (decisión del owner, 2026-07-25). */
+async function failPendingRunTechnically(
+  runId: string,
+  message: string
+): Promise<{ kind: "repo_clone_failed"; message: string }> {
+  await finalizeRun(runId, {
+    status: "failed",
+    outputArtifact: null,
+    summary: `Corte técnico antes de invocar al Architect: ${message}`,
+    escalationReason: null,
+  });
+  await recordRunEvent(runId, "repo_clone_failed", { message });
+  return { kind: "repo_clone_failed", message };
+}
+
+/**
+ * FEATURE-017, Regla 7: Iniciar transiciona `sin_iniciar -> running` y dispara exactamente el
+ * mismo flujo que hoy ejecuta runStart.ts (primera invocación al Architect con el caso mapeado
+ * como initialContext).
+ *
+ * Hallazgo de la prueba end-to-end del owner (2026-07-25): el Repositorio/Rama Base del caso de
+ * negocio no eran el repo de trabajo real — el pipeline seguía usando el repo ya clonado del
+ * proyecto (`project.repo_path`), ignorando por completo lo que el usuario escribió en el intake.
+ * Ahora `business_case.repositorio`/`rama_base_trabajo` SON el repo de trabajo real: cada caso
+ * clona su propia copia aislada (`cloneRunRepository`, sin compartir working tree entre casos,
+ * incluso si dos casos apuntan al mismo repo/rama). Si el clonado o el checkout de rama fallan, el
+ * run se corta técnicamente (`failPendingRunTechnically`) antes de invocar al Architect.
+ */
+export async function startPendingRun(params: { runId: string; userId: string }): Promise<StartPendingRunResult> {
+  const detail = await getRunDetailForUser(params.runId, params.userId);
+  if (!detail) return { kind: "not_found" };
+
+  const run = detail.run;
+  if (run.status !== "sin_iniciar") return { kind: "conflict" };
+
+  const pipelineDefinition = await getPipelineDefinitionById(run.pipeline_definition_id);
+  if (!pipelineDefinition) {
+    throw new Error(`No existe pipeline_definition_id ${run.pipeline_definition_id} para el run ${run.id}.`);
+  }
+  const pipelineSpec = parsePipelineDefinitionRow(pipelineDefinition);
+  const firstPhase = pipelineSpec.definition.phases[0].agentRole;
+
+  const businessCase = isBusinessCaseValues(run.business_case) ? run.business_case : {};
+  const repositorio = businessCase.repositorio?.trim();
+  // FEATURE-017, Regla 4: Rama Base de Trabajo tiene default "main" si el usuario no indica nada.
+  const ramaBase = businessCase.rama_base_trabajo?.trim() || "main";
+
+  if (!repositorio) {
+    return failPendingRunTechnically(run.id, "El caso de negocio no tiene Repositorio persistido.");
+  }
+
+  let worktree;
+  try {
+    worktree = await cloneRunRepository({ runId: run.id, repoUrl: repositorio, baseRef: ramaBase });
+  } catch (err) {
+    if (err instanceof RunRepoCloneError) {
+      return failPendingRunTechnically(run.id, err.message);
+    }
+    throw err;
+  }
+
+  const promoted = await promoteRunToRunning({
+    runId: run.id,
+    firstPhase,
+    branchName: worktree.branchName,
+    worktreePath: worktree.worktreePath,
+  });
+
+  if (!promoted) {
+    // Carrera: el run dejó de estar en sin_iniciar entre el chequeo de arriba y la promoción
+    // (ej. otra pestaña ya lo inició). El clon recién creado no debe quedar huérfano.
+    await removeRunClone(worktree);
+    return { kind: "conflict" };
+  }
+
+  const agentSelection = await resolveAgentConfig(params.userId, firstPhase);
+  await recordRunConfigVersions(run.id);
+  await recordRunEvent(run.id, "run_started", {
+    branchName: worktree.branchName,
+    worktreePath: worktree.worktreePath,
+    provider: agentSelection.executorProvider,
+    authMode: agentSelection.authMode,
+    model: null,
+    pipeline: `${pipelineSpec.name}@${pipelineSpec.version}`,
+    projectId: run.project_id,
+    repoPath: repositorio,
+    baseRef: ramaBase,
+  });
+
+  return {
+    kind: "started",
+    run: promoted,
+    execute: () =>
+      executePipelineRun({
+        runId: run.id,
+        worktree,
+        pipelineSpec,
+        initialContext: run.business_case,
+        userId: params.userId,
+        cliAgentOverride: null,
+        cleanupStrategy: "standalone-clone",
+      }),
+  };
+}
+
+export type CancelRunResult = { kind: "not_found" } | { kind: "conflict" } | { kind: "aborted" };
+
+/**
+ * FEATURE-017, Regla 8 / sección 7.4: reusa el mecanismo de escalamiento de FEATURE-013C. Fuerza
+ * `running -> escalated` (forceUserEscalation, transición nueva) y de inmediato invoca
+ * respondToEscalation({ abort: true }) — cero código nuevo para esa segunda mitad. La cancelación
+ * se aplica recién en el próximo punto de corte natural del pipeline (ver runStart.ts,
+ * haltIfCancelledExternally), no interrumpe una invocación de Executor realmente en curso.
+ */
+export async function cancelRun(params: { runId: string; userId: string }): Promise<CancelRunResult> {
+  const detail = await getRunDetailForUser(params.runId, params.userId);
+  if (!detail) return { kind: "not_found" };
+  if (detail.run.status !== "running") return { kind: "conflict" };
+
+  const escalated = await forceUserEscalation(params.runId, params.userId);
+  if (!escalated) return { kind: "conflict" };
+
+  await recordRunEvent(params.runId, "escalation_forced_by_user", {
+    reason: "user_cancel_requested",
+    agentRole: escalated.current_phase,
+  });
+
+  const result = await respondToEscalation({
+    parentRunId: params.runId,
+    userId: params.userId,
+    action: { abort: true },
+  });
+
+  if (result.kind === "conflict") return { kind: "conflict" };
+  return { kind: "aborted" };
+}

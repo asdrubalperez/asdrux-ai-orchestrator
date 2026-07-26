@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { access } from "node:fs/promises";
+import { access, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -76,4 +77,87 @@ export async function pushRunBranch(worktree: RunWorktree): Promise<void> {
 export async function assertRunWorktreeAvailable(repoRoot: string, worktree: RunWorktree): Promise<void> {
   await access(worktree.worktreePath);
   await execFileAsync("git", ["rev-parse", "--verify", worktree.branchName], { cwd: repoRoot });
+}
+
+/**
+ * FEATURE-017, hallazgo de la prueba end-to-end del owner (2026-07-25): el repositorio/rama que
+ * el usuario escribe en el intake pasa a ser el repo de trabajo real (antes era solo texto de
+ * contexto para el Architect, ignorado por el pipeline real). Cada caso clona su propia copia
+ * aislada — nunca un `git worktree add` sobre un repo de proyecto ya clonado y compartido, a
+ * diferencia de `createRunWorktree` — porque dos casos pueden apuntar al mismo repo/rama y no
+ * deben compartir working tree. Si el clonado o el checkout de la rama fallan (repo inexistente,
+ * rama inexistente, sin permisos), se corta acá — antes de invocar al Architect — con un error
+ * explícito de infraestructura, nunca un problema de negocio para que el agente lo note.
+ *
+ * Credencial git: ninguna nueva — se asume la misma configuración ambiente de git del host/VPS
+ * que ya usa `pushRunBranch` para push a `origin` (SSH agent / credential helper ya configurado).
+ * No se introduce manejo de tokens/API keys de git en esta función.
+ */
+export class RunRepoCloneError extends Error {}
+
+// FEATURE-017, hallazgo de una corrida real (2026-07-25): el usuario suele escribir el repo en
+// el intake como URL https (la forma que copia del navegador), pero la VPS solo tiene configurada
+// una clave SSH — https siempre termina pidiendo credenciales interactivas (o colgado, ver el fix
+// de GIT_TERMINAL_PROMPT más abajo). Se normaliza a SSH antes de clonar para reusar esa clave ya
+// configurada. Si la URL ya viene en formato SSH (o apunta a otro host), se deja tal cual — solo
+// se resuelve GitHub por ahora, no hace falta generalizar a otros hosts para esta Feature.
+export function normalizeGitCloneUrl(repoUrl: string): string {
+  const httpsGithubMatch = repoUrl
+    .trim()
+    .match(/^https:\/\/github\.com\/([^/]+)\/([^/]+?)(\.git)?\/?$/i);
+  if (!httpsGithubMatch) return repoUrl.trim();
+
+  const [, owner, repo] = httpsGithubMatch;
+  return `git@github.com:${owner}/${repo}.git`;
+}
+
+export async function cloneRunRepository(params: {
+  runId: string;
+  repoUrl: string;
+  baseRef: string;
+}): Promise<RunWorktree> {
+  const branchName = `run/${params.runId}`;
+  const clonesBaseDir = process.env.RUN_CLONES_BASE_DIR ?? path.resolve(os.homedir(), "ai-orchestrator-case-clones");
+  const worktreePath = path.join(clonesBaseDir, params.runId);
+  const cloneUrl = normalizeGitCloneUrl(params.repoUrl);
+
+  try {
+    // Confirmado en una corrida real (2026-07-25): sin esto, un repo privado/inexistente-pero-
+    // indistinguible-de-privado deja a `git clone` colgado esperando credenciales interactivas
+    // ("Username for 'https://github.com':") — nunca falla, nunca resuelve, bloquea el request
+    // HTTP para siempre. GIT_TERMINAL_PROMPT=0 hace que git falle al instante en vez de esperar
+    // input que nunca va a llegar (proceso no interactivo, sin terminal real); GIT_ASKPASS=echo
+    // bloquea también cualquier askpass gráfico configurado en el host como vía alternativa.
+    await execFileAsync(
+      "git",
+      ["clone", "--branch", params.baseRef, "--single-branch", cloneUrl, worktreePath],
+      { env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "echo" } }
+    );
+  } catch (err) {
+    throw new RunRepoCloneError(
+      `No se pudo clonar "${cloneUrl}" en la rama "${params.baseRef}": ${(err as Error).message}`
+    );
+  }
+
+  try {
+    // checkout -b opera enteramente local sobre el clon ya hecho — sin acceso a red, sin riesgo
+    // de prompt de credenciales; no necesita el mismo env.
+    await execFileAsync("git", ["checkout", "-b", branchName], { cwd: worktreePath });
+  } catch (err) {
+    await rm(worktreePath, { recursive: true, force: true });
+    throw new RunRepoCloneError(
+      `Clon de "${params.repoUrl}" exitoso, pero no se pudo crear la rama "${branchName}": ${(err as Error).message}`
+    );
+  }
+
+  return { branchName, worktreePath };
+}
+
+/**
+ * Contraparte de `removeRunWorktree` para clones aislados (no worktrees linkeados a un repo
+ * compartido) — no hay `git worktree remove`/`git branch -D` que correr contra ningún repoRoot,
+ * el clon completo es del run.
+ */
+export async function removeRunClone(worktree: RunWorktree): Promise<void> {
+  await rm(worktree.worktreePath, { recursive: true, force: true });
 }

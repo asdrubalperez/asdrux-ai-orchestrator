@@ -216,7 +216,10 @@ export class CodexExecutor implements Executor {
     try {
       const output = await this.runRoleCodexAppServer(dockerArgs, env, auth, invocation, policy, worker, options);
       const parsed = validatePhaseResult(parseLastJsonObject(output));
-      return { ...parsed, executorMetadata: { provider: "codex", model: this.options.model } };
+      return {
+        ...parsed,
+        executorMetadata: { provider: "codex", model: this.options.model, authMode: auth.authMode },
+      };
     } finally {
       await worker.close();
     }

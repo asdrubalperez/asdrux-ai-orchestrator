@@ -40,9 +40,14 @@
   el owner, verificada independientemente por el Architect y mergeada a `main` (commits `133509d`
   implementación, `fa42d0e` merge). Diseño y evidencia en
   `docs/features/FEATURE-016-auth-oauth-executors.md`.
+- FEATURE-017 — Capa de UI — Disparo (intake de caso de negocio asistido por IA): estado nuevo
+  `sin_iniciar` en `runs`, mapeo directo al proveedor sin tools, clonado real y aislado del repo
+  del caso de negocio, cancelación real reusando el escalamiento de FEATURE-013C, timeouts finales
+  por rol. Aprobada por el owner, validada técnicamente por el DAIA y mergeada a `main` (commit
+  `eed5e88` implementación principal, `MERGE_COMMIT_PLACEHOLDER` merge). Diseño y evidencia en
+  `docs/features/FEATURE-017-Capa-de-UI-Disparo-intake-de-caso-de-negocio-asistido-por-IA.md`.
 
 **🟡 Confirmado**
-- FEATURE-017 — Capa de UI — Disparo (intake de caso de negocio asistido por IA, en diseño)
 - FEATURE-018 (antes FEATURE-017, antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases (Architect) +
   Release Plan (Planning): conectar el diseño ya escrito en el Runbook
   (`docs/runbook/02-ARCHITECTURE-TEMPLATE.md` sección 0, y
@@ -66,6 +71,11 @@
   alertas fuera de cuando se está mirando activamente)
 - Limpieza de persistencia de codigo versionado: `artifacts.commit_ref` existe en schema pero no se
   puebla nunca; los commits reales quedan hoy solo en `run_events`.
+- Credenciales git por usuario para el Orquestador — hoy el clonado de repos (FEATURE-017) usa una
+  única identidad git fija a nivel de servidor. Para que cualquier usuario pueda usar sus propios
+  repos privados sin intervención manual, hace falta un mecanismo de autorización por usuario
+  (patrón tipo GitHub App/OAuth, similar en espíritu al `authMode` de FEATURE-016 pero para acceso
+  a repos, no a modelos de IA). No diseñado todavía.
 
 ---
 
@@ -268,6 +278,23 @@ la misma pantalla de Disparo de la UI:
   "Approval Model por Release", para cuando el Orquestador opere sobre proyectos externos).
 - El mismo toggle "misma configuración para todos los agentes" vs "una configuración por agente"
   aplica a los tres puntos — proveedor, modelo y credenciales — no solo a proveedor/modelo.
+- El paso de mapeo del intake (FEATURE-017, `mapBusinessCase.ts`) hoy usa una llamada directa fija
+  (Claude Haiku + API key, sin pasar por `authMode`/`resolveAgentConfig`) — decisión explícita del
+  owner de que, a futuro, este paso también debe respetar la misma configuración de agente/authMode
+  que el resto de los roles, no quedar como excepción fija. Pendiente de diseño técnico (el mapeo no
+  usa Executor/holder-worker hoy, por no necesitar tools — ver FEATURE-017 Regla 5 y Risks).
+
+### ⚪ Credenciales git por usuario para el Orquestador
+Hoy el clonado de repos (FEATURE-017, `cloneRunRepository`) usa una única identidad git fija a
+nivel de servidor — la clave SSH del usuario del sistema que corre el proceso del Orquestador.
+Funciona porque hoy hay un solo usuario real (el owner) trabajando sobre sus propios repos. Para
+que cualquier otro usuario pueda usar sus propios repos privados sin intervención manual (agregar
+deploy keys a mano, repo por repo), hace falta un mecanismo de autenticación por usuario — la misma
+idea que ya resolvió FEATURE-016 para los modelos de IA (`authMode`: API key vs OAuth, por usuario),
+pero aplicada al acceso a Git: cada usuario debería poder autenticar su propia cuenta de GitHub
+(patrón tipo GitHub App, o al menos una clave SSH/token por usuario en vez de una fija del
+servidor), de forma similar a como ya se pide autenticación de cuenta personal para Claude/Codex.
+No diseñado todavía — Discovery pendiente.
 
 ### ⚪ Approval Model por Release
 Feature 09 (`06-DELIVERY-WORKFLOW.md`, Stage 6) ya diseñó la v1: Modo A (default — automático
@@ -314,21 +341,57 @@ Documentos de resultados:
 - `docs/features/Feature-013-interfaz-ui-parte-013b-implementation-results.md`
 - `docs/features/Feature-013-interfaz-ui-parte-013c-implementation-results.md`
 
-Disparo e Historial/admin quedan fuera de esta Feature, ver ítem Tentativo "Capa de UI" abajo.
+Disparo (FEATURE-017, ✅ Ejecutada) e Historial/admin quedan fuera de esta Feature — Historial/admin
+sigue Tentativo, ver su detalle más abajo.
 
-### 🟡 FEATURE-017 — Capa de UI — Disparo
-Pantalla para crear un run nuevo: el usuario pega texto o carga un archivo con el relevamiento
-del caso de negocio, el Orquestador lo mapea (sin inventar, sin diálogo con el usuario) contra
-una estructura de campos predeterminados y parametrizables, más Repositorio y Rama Base de
-Trabajo (ambos siempre requeridos, Rama Base con default `main`). El usuario confirma o edita en
-un modal con % de completitud antes de poder iniciar el run. Sigue `[Pendiente]` en
-`02-ARCHITECTURE.md`. Separada de Historial/admin por ser funcionalmente independiente — en
-diseño, ver `docs/features/` cuando exista el documento.
+### ✅ FEATURE-017 — Capa de UI — Disparo (intake de caso de negocio asistido por IA)
+Pantalla para crear un run nuevo: el usuario pega texto o carga un archivo con el relevamiento del
+caso de negocio, el Orquestador lo mapea (sin inventar, sin diálogo con el usuario) contra una
+estructura de 12 campos predeterminados, más Repositorio y Rama Base de Trabajo (ambos siempre
+requeridos, Rama Base con default `main`). El usuario confirma o edita en un modal con % de
+completitud antes de poder iniciar el run. Introduce, por primera vez en el proyecto, un estado
+previo al arranque de un run (`sin_iniciar`) y una cancelación real desde la lista "mis casos",
+reusando el mecanismo de escalamiento de FEATURE-013C. Separada de Historial/admin por ser
+funcionalmente independiente.
+
+**Estado (2026-07-25): ✅ Ejecutada.** Validada técnicamente por el DAIA (chequeo de cancelación
+pre-fase, decisión de fijar `pipeline_definition_id` en la confirmación en vez del arranque),
+aprobada por el owner, implementada en la rama `feature/017-ui-disparo-intake` (commit `eed5e88`,
+implementación principal) y mergeada a `main` en `MERGE_COMMIT_PLACEHOLDER`
+("Merge FEATURE-017: intake de caso de negocio asistido por IA"). La rama se conserva como
+referencia histórica, mismo criterio que `feature/016-*`.
+
+Qué se implementó: migraciones `0009_intake_field_definitions.sql` (12 campos, seed) y
+`0010_runs_sin_iniciar.sql` (`runs.business_case`); mapeo directo al proveedor sin tools
+(`src/intake/mapBusinessCase.ts`, Claude Haiku + API key fija — ver ítem Tentativo "Selección de
+proveedor/modelo/credenciales por rol" para la excepción pendiente de resolver); orquestación en
+`src/cli/intakeService.ts` (confirmar/iniciar/cancelar); clonado real y aislado del repositorio del
+caso de negocio (`cloneRunRepository`/`removeRunClone`, normalización HTTPS→SSH para GitHub — ver
+ítem Tentativo "Credenciales git por usuario para el Orquestador" para la limitación conocida y
+aceptada); chequeo de cancelación pre-fase (`haltIfCancelledExternally`) en `runStart.ts`; timeouts
+finales por rol (`ARCHITECT_TIMEOUT_MS`/`FUNCTIONAL_TIMEOUT_MS`/`PLANNING_TIMEOUT_MS` en 600000ms,
+`DEVELOPER_TIMEOUT_MS`/`QA_TIMEOUT_MS` en 900000ms, subidos de 300000ms tras una corrida real y una
+investigación de timeouts de mercado) y registro de duración real por fase (`durationMs`);
+frontend `web/src/intake/` (Disparo, ReviewModal, CasesList), sin router, con `Badge` de color
+compartido para el estado (`statusDisplay.ts`, reusado también en la pantalla de detalle de
+FEATURE-013A).
+
+Mejoras identificadas para cuando se diseñe Historial/admin, ver detalle de esa Feature abajo.
+
+Diseño y evidencia completos:
+`docs/features/FEATURE-017-Capa-de-UI-Disparo-intake-de-caso-de-negocio-asistido-por-IA.md`.
 
 ### ⚪ Capa de UI — Historial/admin
 Listado de runs propios o del equipo (si admin), con estado/dueño/fase/tiempo transcurrido — dato
 que ya existe en `runs`/`run_events`, sin necesidad de ningún mecanismo nuevo de intake. Sigue
-`[Pendiente]` en `02-ARCHITECTURE.md`. Sin diseñar todavía.
+`[Pendiente]` en `02-ARCHITECTURE.md`. Sin diseñar todavía. Mejoras puntuales ya identificadas para
+cuando se diseñe (surgidas durante las pruebas reales de FEATURE-017):
+- La lista de "mis casos" hoy muestra el Run ID (UUID) como identificador visible — debería mostrar
+  el título tentativo del caso (derivado del caso de negocio mapeado, ej. de la sección "Visión" o
+  un campo de título dedicado a agregar), con el Run ID como dato secundario/técnico.
+- El error de `repo_clone_failed` (corte técnico antes del Architect, FEATURE-017 sección 7.4) se
+  muestra hoy como texto plano en rojo pegado arriba de la lista — debería mostrarse en un modal o
+  componente de error más prolijo, consistente con el resto de la UI.
 
 ### ⚪ Notificación Slack/webhook complementaria
 Evaluada en la misma sesión que "Run en curso" como alternativa de monitoreo — se descartó como

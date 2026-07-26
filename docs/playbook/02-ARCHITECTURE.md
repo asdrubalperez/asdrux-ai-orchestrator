@@ -66,12 +66,24 @@ Decisión explícita — evitar mezcla de estilos: los agentes nunca se autoconv
 
 ## Frontend Stack
 
-**[Pendiente]** — no definido en el handoff. A decidir antes de iniciar la capa UI (Milestone posterior al primer incremento del Orquestador).
+Resuelto de hecho por FEATURE-013 (implementado, no formalizado en este documento hasta
+FEATURE-017): **React 19 + Vite + TanStack Query + Radix UI**, con Tailwind CSS para estilos
+(`class-variance-authority`/`tailwind-merge` para variantes de componentes) y `lucide-react` para
+iconografía. Vive en `web/` (hermano de `src/`), servido por Vite en dev con proxy a `/runs`,
+`/health`, `/auth`, `/intake` hacia el backend Express. No hay router (react-router ni ningún
+otro): la navegación entre vistas es un `useState` a nivel de app (`web/src/main.tsx`) más el query
+param `?run=<id>` para deep-linking a un run puntual — no hay carpetas de "screens"/"routes"
+formales. Consumo de datos vía `fetch` nativo con `credentials: "include"` (cookie de sesión),
+nunca axios; SSE nativo (`EventSource`) para el stream de eventos de un run.
 
 ## Frontend Principles
 
 * Sin lógica de negocio — la UI únicamente refleja estado emitido por el Orquestador.
-* Tres pantallas: disparo (casos de negocio listos con un click), run en curso (avatar por agente + estado en vivo + narrativa curada + banner de validación al escalar), historial/admin (runs propios o del equipo si admin, con estado/dueño/fase/tiempo transcurrido).
+* Pantallas: disparo/intake (caso de negocio en texto libre, mapeado por IA — FEATURE-017), mis
+  casos (lista mínima filtrada por owner_id, con Iniciar/Cancelar/Visualizar según estado —
+  FEATURE-017), run en curso (avatar por agente + estado en vivo + narrativa curada + banner de
+  validación al escalar — FEATURE-013). Historial/admin completo (equipo, filtros, vista de
+  administrador) queda fuera de este incremento — ver FEATURE-017, Scope/Excluido.
 * Consumo de eventos vía SSE: snapshot inicial + stream de deltas.
 
 ---
@@ -150,9 +162,10 @@ interface PhaseResult {
   outputArtifact: unknown;
   summary: string;             // narrativa curada, no el log crudo de herramienta
   escalationReason: string | null;
-  executorMetadata?: {         // qué proveedor/modelo ejecutó realmente la fase (ver ADR sección 9)
+  executorMetadata?: {         // qué proveedor/modelo/authMode ejecutó realmente la fase (ver ADR sección 9)
     provider: string;
     model?: string;
+    authMode?: "api_key" | "cli_session"; // FEATURE-017: auditable después vía run_events, sin esto no había forma de confirmarlo
   };
 }
 ```
@@ -276,10 +289,11 @@ interface PhaseResult {
   executorMetadata?: {
     provider: string;
     model?: string;
+    authMode?: "api_key" | "cli_session";
   };
 }
 ```
-Aprobado explícitamente por el owner el 2026-07-16 (03-AI-CONSTITUTION.md, regla 2 — respeto por la arquitectura aprobada).
+Aprobado explícitamente por el owner el 2026-07-16 (03-AI-CONSTITUTION.md, regla 2 — respeto por la arquitectura aprobada). Campo `authMode` sumado en FEATURE-017 (2026-07-25): hallazgo de la prueba end-to-end del owner — no había forma de auditar después con qué authMode corrió una invocación real (ni logs ni metadata lo registraban).
 
 ## Nota: recomendación de `--json-schema` (hallazgo H2) no adoptada todavía
 **Motivo**: el spike de FEATURE-001 observó que la respuesta cruda de Claude Code CLI en `--output-format json` no viene en el shape de `PhaseResult` de forma nativa — es texto libre dentro de un campo `result`, mapeado en el spike mediante una convención de formato pedida por prompt. El `--help` del CLI instalado (v2.1.211) muestra un flag `--json-schema` que permitiría forzar salida estructurada validada contra un schema. Esta recomendación **no fue adoptada en el contrato ni en el Executor real** — queda pendiente verificarla contra la documentación oficial vigente del proveedor antes de comprometerse a usarla como mecanismo de mapeo de `PhaseResult`, en línea con el principio "Documentation first" de la sección 6 (Integration Principles).

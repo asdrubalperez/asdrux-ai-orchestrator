@@ -21,6 +21,15 @@ import {
   respondToEscalation,
   type EscalationResponseAction,
 } from "../cli/respondService.js";
+import {
+  cancelRun,
+  confirmIntake,
+  IntakeProjectNotFoundError,
+  listMyCases,
+  mapIntakeText,
+  startPendingRun,
+} from "../cli/intakeService.js";
+import type { BusinessCaseValues } from "../intake/mapBusinessCase.js";
 import { buildRunViewModel } from "./runView.js";
 import { openRunEventsStream } from "./sse.js";
 
@@ -164,6 +173,125 @@ export function createApp(config: ServerConfig): express.Express {
     }
   });
 
+  // FEATURE-017: mapeo de texto libre a los 12 campos del intake — llamada directa al proveedor,
+  // sin tools (ver src/intake/mapBusinessCase.ts). requireSession por costo/abuso; requireAllowedOrigin
+  // por ser un POST con efecto (llamada real al proveedor), mismo criterio que /runs/:id/respond.
+  app.post("/intake/map", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+
+      const body = intakeMapBody(req.body);
+      if (!body) {
+        res.status(400).json({ error: "invalid_intake_map_body" });
+        return;
+      }
+
+      const result = await mapIntakeText(body);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // FEATURE-017, Regla 6: confirmar el mapeo persiste el run en `sin_iniciar` — sin worktree, sin
+  // branch, sin invocación al Architect todavía.
+  app.post("/runs", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+
+      const body = confirmIntakeBody(req.body);
+      if (!body) {
+        res.status(400).json({ error: "invalid_confirm_body" });
+        return;
+      }
+
+      const run = await confirmIntake({ userId: req.user?.id ?? "", businessCase: body.businessCase });
+      res.status(201).json({ run });
+    } catch (err) {
+      if (err instanceof IntakeProjectNotFoundError) {
+        res.status(409).json({ error: "no_project_available" });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  // FEATURE-017, Regla 9: exclusivamente "mis casos" — filtrado por owner_id del usuario
+  // autenticado, sin excepción.
+  app.get("/runs", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const runs = await listMyCases(req.user?.id ?? "");
+      res.json({ runs });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // FEATURE-017, Regla 7: Iniciar transiciona sin_iniciar -> running y dispara el pipeline real.
+  app.post("/runs/:id/start", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+
+      const runId = stringParam(req.params.id);
+      if (!runId) {
+        res.status(400).json({ error: "invalid_run_id" });
+        return;
+      }
+
+      const result = await startPendingRun({ runId, userId: req.user?.id ?? "" });
+      if (result.kind === "not_found") {
+        res.status(404).json({ error: "run_not_found" });
+        return;
+      }
+      if (result.kind === "conflict") {
+        res.status(409).json({ error: "run_not_pending_start" });
+        return;
+      }
+      if (result.kind === "repo_clone_failed") {
+        // FEATURE-017: corte técnico explícito — el run ya quedó en status="failed" con el
+        // motivo persistido en run_events (repo_clone_failed), no se invocó al Architect.
+        res.status(422).json({ error: "repo_clone_failed", message: result.message });
+        return;
+      }
+
+      res.status(202).json({ run: result.run });
+      void result.execute().catch((err) => {
+        console.error(`[server] background pipeline execution failed for run ${runId}`, err);
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // FEATURE-017, Regla 8: Cancelar reusa respondToEscalation({ abort: true }) tras forzar
+  // running -> escalated. No interrumpe una invocación de Executor realmente en curso — se aplica
+  // en el próximo punto de corte natural del pipeline (ver runStart.ts, haltIfCancelledExternally).
+  app.post("/runs/:id/cancel", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+
+      const runId = stringParam(req.params.id);
+      if (!runId) {
+        res.status(400).json({ error: "invalid_run_id" });
+        return;
+      }
+
+      const result = await cancelRun({ runId, userId: req.user?.id ?? "" });
+      if (result.kind === "not_found") {
+        res.status(404).json({ error: "run_not_found" });
+        return;
+      }
+      if (result.kind === "conflict") {
+        res.status(409).json({ error: "run_not_running" });
+        return;
+      }
+
+      res.status(202).json({ status: "aborted" });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   app.get("/runs/:id/stream", requireSession, async (req: AuthenticatedRequest, res, next) => {
     try {
       const runId = stringParam(req.params.id);
@@ -253,6 +381,26 @@ function loginBody(body: unknown): { handle: string | null; password: string | n
     handle: typeof record.handle === "string" ? record.handle : null,
     password: typeof record.password === "string" ? record.password : null,
   };
+}
+
+function intakeMapBody(body: unknown): { inputText: string; previousValues?: BusinessCaseValues } | null {
+  if (body === null || typeof body !== "object") return null;
+  const record = body as Record<string, unknown>;
+  if (typeof record.inputText !== "string" || record.inputText.trim().length === 0) return null;
+  const previousValues = isBusinessCaseValues(record.previousValues) ? record.previousValues : undefined;
+  return { inputText: record.inputText, previousValues };
+}
+
+function confirmIntakeBody(body: unknown): { businessCase: BusinessCaseValues } | null {
+  if (body === null || typeof body !== "object") return null;
+  const record = body as Record<string, unknown>;
+  if (!isBusinessCaseValues(record.businessCase)) return null;
+  return { businessCase: record.businessCase };
+}
+
+function isBusinessCaseValues(value: unknown): value is BusinessCaseValues {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  return Object.values(value as Record<string, unknown>).every((v) => v === null || typeof v === "string");
 }
 
 function respondBody(body: unknown): EscalationResponseAction | null {

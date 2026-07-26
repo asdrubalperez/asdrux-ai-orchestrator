@@ -13,6 +13,7 @@ const baseRun: RunRow = {
   branch_name: "run/test",
   worktree_path: "/tmp/run",
   originated_from_run_id: null,
+  business_case: null,
   created_at: "2026-07-20T10:00:00.000Z",
   updated_at: "2026-07-20T10:00:00.000Z",
 };
@@ -110,6 +111,22 @@ test("usa summary de phase_finished como bitacora narrativa y muestra escalamien
     motive: "exhausted",
   });
   assert.equal(view.timeline.find((node) => node.id === "planning")?.status, "escalado");
+});
+
+test("FEATURE-017: cancelación por usuario mid-fase usa el agentRole registrado en el evento forzado", () => {
+  const view = buildRunViewModel({
+    run: { ...baseRun, status: "escalated", current_phase: "planning" },
+    events: [
+      event(1, "run_started", {}),
+      event(2, "phase_started", { agentRole: "planning" }),
+      event(3, "escalation_forced_by_user", { reason: "user_cancel_requested", agentRole: "planning" }),
+    ],
+    artifacts: [],
+  });
+
+  assert.equal(view.escalation.motive, "user_cancel_requested");
+  assert.equal(view.escalation.agentRole, "planning");
+  assert.equal(view.escalation.isEscalated, true);
 });
 
 function event(id: number, eventType: string, payload: unknown): RunEventRow {
