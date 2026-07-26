@@ -348,6 +348,44 @@ Un módulo nuevo (ej. `src/intake/mapBusinessCase.ts`), sin relación con `Execu
   `status`. Reusa componentes ya existentes de FEATURE-013 donde aplique (ej. la UI de "Run en
   curso" para el botón Visualizar).
 
+### 7.6 Timeouts por fase — fijados por el owner (2026-07-25)
+
+Hallazgo de una corrida real: Developer, trabajando sobre un repo real (build de TypeScript + tests
+reales), superó los 300s hardcodeados de entonces y terminó en `Executor timeout tras 300000ms`,
+con el run marcado `failed`. Se investigó primero qué timeouts usan otros sistemas de agentes de
+IA conocidos (Claude Code CLI: 120s default, 600s máximo documentado; GitHub Copilot coding agent:
+~5-6 min por comando individual, 59 min por sesión completa; Cursor: ~10 min antes de marcar el
+terminal como disruptivo; Devin: sin timeout fijo, mide en Agent Compute Units, ~15 min por ACU).
+Con eso más los datos reales de `durationMs` (instrumentado en la ronda anterior), el owner fijó
+los valores finales — una variable de entorno propia por rol, no compartida (mismo patrón que
+`RUN_CLONES_BASE_DIR`/`CLAUDE_OAUTH_CACHE_DIR`):
+
+| Rol | Variable | Default | Antes |
+|---|---|---|---|
+| Architect | `ARCHITECT_TIMEOUT_MS` | `600000` (10 min) | 180000 (compartido, hardcodeado) |
+| Functional | `FUNCTIONAL_TIMEOUT_MS` | `600000` (10 min) | 180000 (compartido, hardcodeado) |
+| Planning | `PLANNING_TIMEOUT_MS` | `600000` (10 min) | 180000 (compartido, hardcodeado) |
+| Developer | `DEVELOPER_TIMEOUT_MS` | `900000` (15 min) | 300000 |
+| QA | `QA_TIMEOUT_MS` | `900000` (15 min) | 300000 |
+
+**Por qué Architect/Functional/Planning suben de 180s a 600s, sin evidencia de timeout real
+todavía en esos roles**: anticipa FEATURE-018 (Wiring real del ciclo Roadmap de Releases +
+Release Plan) — ahí Architect pasa a diseñar release roadmaps completos y Functional puede llegar
+a generar varias features por release en una sola invocación, tareas más largas que el mapeo de
+una fase única de hoy. Subirlo ahora evita tener que volver a tocar este mismo archivo apenas
+arranque esa Feature.
+
+**Developer/QA a 900000ms**: confirmado que 300000ms no alcanza para trabajo real (build + tests);
+10-15 min es el rango que sugerí tras la investigación externa, y el owner fijó el techo de ese
+rango (15 min) en vez del piso, dado que ya se vio fallar en la práctica.
+
+Implementado en `src/cli/commands/runStart.ts`: `LINEAR_PHASE_TIMEOUT_MS` (mapa `AgentRole ->
+timeout`) reemplaza el `timeoutMs: 180_000` que antes compartían las tres fases lineales
+(`while` de `executePipelineRun`), seleccionado por `phase.agentRole` vía `timeoutForLinearPhase()`
+— mismo patrón `parsePositiveIntEnv` ya usado para Developer/QA. El registro de `durationMs`
+(`phaseTiming`, ronda anterior) no se tocó — sigue calculando la diferencia real entre
+`phase_started` y `phase_finished`/`run_error` sin importar qué timeout tenga cada fase.
+
 ---
 
 ## 8. Validation Criteria

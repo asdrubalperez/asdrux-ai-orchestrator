@@ -48,11 +48,11 @@ const MAX_ESCALATION_ATTEMPTS = 3;
 /**
  * Hallazgo de una corrida real (2026-07-25): Developer, trabajando sobre un repo real (build de
  * TypeScript + tests reales), superó los 300s hardcodeados y terminó en
- * "Executor timeout tras 300000ms" con el run marcado failed. Se deja configurable por variable de
- * entorno, mismo patrón que RUN_CLONES_BASE_DIR/CLAUDE_OAUTH_CACHE_DIR — default sin cambios
- * (300000ms) hasta confirmar con el owner el valor final, calibrado con datos reales de duración
- * por fase (ver phaseDurationMs más abajo). Architect/Functional/Planning (180s) quedan sin tocar
- * — no hay evidencia de que necesiten cambiar.
+ * "Executor timeout tras 300000ms" con el run marcado failed. Timeouts finales fijados por el
+ * owner (2026-07-25), una variable propia por rol (no compartida) — ver
+ * docs/features/FEATURE-017-*.md, sección 7 (tabla de timeouts) para la justificación completa,
+ * incluida la anticipación de FEATURE-018 (Architect diseñando release roadmaps, Functional
+ * generando varias features por release).
  */
 function parsePositiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -61,8 +61,25 @@ function parsePositiveIntEnv(name: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-const DEVELOPER_TIMEOUT_MS = parsePositiveIntEnv("DEVELOPER_TIMEOUT_MS", 300_000);
-const QA_TIMEOUT_MS = parsePositiveIntEnv("QA_TIMEOUT_MS", 300_000);
+const ARCHITECT_TIMEOUT_MS = parsePositiveIntEnv("ARCHITECT_TIMEOUT_MS", 600_000);
+const FUNCTIONAL_TIMEOUT_MS = parsePositiveIntEnv("FUNCTIONAL_TIMEOUT_MS", 600_000);
+const PLANNING_TIMEOUT_MS = parsePositiveIntEnv("PLANNING_TIMEOUT_MS", 600_000);
+const DEVELOPER_TIMEOUT_MS = parsePositiveIntEnv("DEVELOPER_TIMEOUT_MS", 900_000);
+const QA_TIMEOUT_MS = parsePositiveIntEnv("QA_TIMEOUT_MS", 900_000);
+
+const LINEAR_PHASE_TIMEOUT_MS: Partial<Record<AgentRole, number>> = {
+  architect: ARCHITECT_TIMEOUT_MS,
+  functional: FUNCTIONAL_TIMEOUT_MS,
+  planning: PLANNING_TIMEOUT_MS,
+};
+
+function timeoutForLinearPhase(agentRole: AgentRole): number {
+  const timeout = LINEAR_PHASE_TIMEOUT_MS[agentRole];
+  if (timeout === undefined) {
+    throw new Error(`No hay timeout configurado para la fase lineal "${agentRole}".`);
+  }
+  return timeout;
+}
 
 /**
  * FEATURE-017, sección 7.4: señal interna para cortar el pipeline en el próximo punto de corte
@@ -283,7 +300,7 @@ export async function executePipelineRun(params: {
       phaseTiming.agentRole = invocation.agentRole;
       phaseTiming.startedAt = Date.now();
       await recordRunEvent(runId, "phase_started", { agentRole: invocation.agentRole });
-      const result = await executor.runPhase(invocation, { timeoutMs: 180_000 });
+      const result = await executor.runPhase(invocation, { timeoutMs: timeoutForLinearPhase(phase.agentRole) });
       const durationMs = Date.now() - phaseTiming.startedAt;
       await recordRunEvent(runId, "phase_finished", { agentRole: invocation.agentRole, result, durationMs });
       const artifact = await recordArtifact({
