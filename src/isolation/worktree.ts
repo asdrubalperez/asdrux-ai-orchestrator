@@ -79,8 +79,18 @@ export async function pushRunBranch(worktree: RunWorktree): Promise<void> {
  * FEATURE-019: mergea la sub-rama ya pusheada de una Feature contra la rama base del release, y
  * pushea la rama base actualizada. La rama base nunca tiene su propio worktree persistente (a
  * diferencia de `run/<id>`, que sí vive en `createRunWorktree`) — se crea uno efímero puntual para
- * el merge y se borra enseguida; git no permite dos worktrees sobre la misma rama a la vez, así que
- * este worktree no puede convivir con ningún otro checkout abierto sobre `baseBranch`.
+ * el merge y se borra enseguida.
+ *
+ * Hallazgo real (verificado contra git, no solo en diseño): checkoutear `baseBranch` tal cual (sin
+ * `--detach`) revienta con "already used by worktree" en cuanto esa rama ya está checked out en
+ * OTRO worktree del mismo repo — algo que pasa seguido en la práctica, no es un edge case: el clon
+ * compartido original de un proyecto (`project.repo_path`, estrategia "shared-worktree") queda
+ * checked out en su rama default para siempre, y esa rama default suele ser exactamente
+ * `ramaBaseTrabajo` (default "main", FEATURE-017 Regla 4). Por eso el worktree efímero se crea
+ * `--detach` (apunta al commit de `baseBranch`, no a la rama en sí — no colisiona con nada) y el
+ * push usa el refspec explícito `HEAD:refs/heads/<baseBranch>` en vez de `git push origin
+ * <baseBranch>` (que asume una rama local con ese nombre checked out, inexistente en detached
+ * HEAD).
  */
 export async function mergeFeatureBranchIntoBase(params: {
   repoRoot: string;
@@ -92,7 +102,7 @@ export async function mergeFeatureBranchIntoBase(params: {
     `base-${randomUUID()}`
   );
 
-  await execFileAsync("git", ["worktree", "add", baseWorktreePath, params.baseBranch], {
+  await execFileAsync("git", ["worktree", "add", "--detach", baseWorktreePath, params.baseBranch], {
     cwd: params.repoRoot,
   });
   try {
@@ -111,7 +121,9 @@ export async function mergeFeatureBranchIntoBase(params: {
       ],
       { cwd: baseWorktreePath }
     );
-    await execFileAsync("git", ["push", "origin", params.baseBranch], { cwd: baseWorktreePath });
+    await execFileAsync("git", ["push", "origin", `HEAD:refs/heads/${params.baseBranch}`], {
+      cwd: baseWorktreePath,
+    });
   } finally {
     await execFileAsync("git", ["worktree", "remove", baseWorktreePath, "--force"], {
       cwd: params.repoRoot,

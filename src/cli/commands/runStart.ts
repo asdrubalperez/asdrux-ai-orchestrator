@@ -397,7 +397,6 @@ export async function executePipelineRun(params: {
         // FEATURE-019: en vez de finishRun con push+cleanup inmediato, la Feature aprobada
         // continúa el release (merge a la rama base + run de continuación a Planning) — ver 6.2.
         await continueReleaseAfterFeatureApproved({
-          projectRepoRoot,
           projectId,
           runId,
           worktree,
@@ -573,7 +572,6 @@ async function persistReleasePlanIfDeclared(params: {
  * el run de continuación (`PLANNING_TO_QA`) sin pasar por escalamiento.
  */
 async function continueReleaseAfterFeatureApproved(params: {
-  projectRepoRoot?: string;
   projectId: string;
   runId: string;
   worktree: RunWorktree;
@@ -582,11 +580,15 @@ async function continueReleaseAfterFeatureApproved(params: {
   model?: string;
   cleanupStrategy: "shared-worktree" | "standalone-clone";
 }): Promise<void> {
-  const { projectRepoRoot, projectId, runId, worktree, userId, cliAgentOverride, model, cleanupStrategy } = params;
+  const { projectId, runId, worktree, userId, cliAgentOverride, model, cleanupStrategy } = params;
 
-  if (!projectRepoRoot) {
-    throw new Error(`Run ${runId}: la continuación por éxito (FEATURE-019) requiere projectRepoRoot.`);
-  }
+  // FEATURE-019, hallazgo de cierre: no usamos `projectRepoRoot` (bug preexistente de FEATURE-018
+  // — ver `respondService.ts`, ese valor es ambiguo entre las dos cleanupStrategy de FEATURE-017:
+  // para runs "standalone-clone" es la URL de git del caso, no una ruta de filesystem). El propio
+  // `worktree.worktreePath` de este run SÍ es siempre una ruta local válida de un repo git completo
+  // (clon standalone, o worktree linkeado de un repo compartido) — git worktree add/merge
+  // funcionan igual desde cualquiera de los dos, sin necesitar el repo "raíz" compartido.
+  const repoRoot = worktree.worktreePath;
 
   const committed = await commitAllChanges(worktree, `feat: implementación aprobada por QA (run ${runId})`);
   await recordRunEvent(runId, "run_committed", { committed });
@@ -643,7 +645,7 @@ async function continueReleaseAfterFeatureApproved(params: {
     summary: `Feature aprobada por QA, mergeada automáticamente a "${baseBranch}" (Modo Auto).`,
     escalationReason: null,
   });
-  await mergeFeatureBranchIntoBase({ repoRoot: projectRepoRoot, baseBranch, featureBranch: worktree.branchName });
+  await mergeFeatureBranchIntoBase({ repoRoot, baseBranch, featureBranch: worktree.branchName });
   await recordRunEvent(runId, "feature_merged_to_base", {
     baseBranch,
     featureBranch: worktree.branchName,
@@ -652,7 +654,7 @@ async function continueReleaseAfterFeatureApproved(params: {
   console.log(`[run:start] Modo Auto: sub-rama "${worktree.branchName}" mergeada y pusheada a "${baseBranch}".`);
 
   const { childRunId, childWorktree } = await createPlanningToQaChildRun({
-    projectRepoRoot,
+    repoRoot,
     parentRunId: runId,
     projectId,
     baseBranch,
@@ -662,7 +664,7 @@ async function continueReleaseAfterFeatureApproved(params: {
   });
   console.log(`[run:start] run de continuación creado: ${childRunId} (Planning).`);
   await executePipelineRun({
-    projectRepoRoot,
+    projectRepoRoot: childWorktree.worktreePath,
     runId: childRunId,
     projectId,
     worktree: childWorktree,
@@ -680,9 +682,15 @@ async function continueReleaseAfterFeatureApproved(params: {
  * aprobada — separado de la ejecución (`executePipelineRun`) para que `respondService.ts` pueda
  * reusarlo en el camino de aprobación de merge en Modo Manual (crea el run y solo ENTONCES ejecuta,
  * dentro de un `execute()` diferido, mismo patrón que ya usa `respondToEscalation`).
+ *
+ * `repoRoot`: cualquier ruta local válida de un repo git completo que ya tenga `baseBranch`
+ * disponible como ref local — el `worktree.worktreePath` de la Feature que se acaba de mergear
+ * (clon standalone o worktree linkeado, da igual), nunca `project.repo_path`/`business_case.repositorio`
+ * directamente (ver hallazgo de cierre de FEATURE-019 sobre el bug preexistente sobre esto en
+ * `respondService.ts`).
  */
 export async function createPlanningToQaChildRun(params: {
-  projectRepoRoot: string;
+  repoRoot: string;
   parentRunId: string;
   projectId: string;
   baseBranch: string;
@@ -692,7 +700,7 @@ export async function createPlanningToQaChildRun(params: {
 }): Promise<{ childRunId: string; childWorktree: RunWorktree }> {
   const childRunId = randomUUID();
   const pipelineDefinition = await ensurePipelineDefinition(PLANNING_TO_QA);
-  const childWorktree = await createRunWorktree(params.projectRepoRoot, childRunId, params.baseBranch);
+  const childWorktree = await createRunWorktree(params.repoRoot, childRunId, params.baseBranch);
   const firstPhaseSelection: AgentConfig =
     params.cliAgentOverride ?? (await resolveAgentConfig(params.userId, "planning"));
 
@@ -722,7 +730,7 @@ export async function createPlanningToQaChildRun(params: {
         model: params.model ?? null,
         pipeline: `${PLANNING_TO_QA.name}@${PLANNING_TO_QA.version}`,
         projectId: params.projectId,
-        repoPath: params.projectRepoRoot,
+        repoPath: childWorktree.worktreePath,
         originatedFromRunId: params.parentRunId,
       },
       client

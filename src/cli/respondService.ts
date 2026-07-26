@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import path from "node:path";
 import type { AgentRole } from "../contracts/executor.js";
 import { pool } from "../db/pool.js";
 import {
@@ -96,7 +95,6 @@ export async function respondToEscalation(params: {
     authMode: parseAuthMode(runStarted.authMode ?? "api_key"),
   };
   const model = runStarted.model ?? undefined;
-  const projectRepoRoot = path.resolve(runStarted.repoPath);
 
   if (!parentRun.branch_name || !parentRun.worktree_path) {
     throw new Error(`El run ${params.parentRunId} no tiene branch_name/worktree_path persistidos.`);
@@ -106,7 +104,16 @@ export async function respondToEscalation(params: {
     branchName: parentRun.branch_name,
     worktreePath: parentRun.worktree_path,
   };
-  await assertRunWorktreeAvailable(projectRepoRoot, parentWorktree);
+  // FEATURE-019, hallazgo de cierre: bug preexistente de FEATURE-018 — `runStarted.repoPath` (del
+  // evento run_started) es ambiguo entre las dos cleanupStrategy de FEATURE-017: para runs
+  // "standalone-clone" (el camino real de intake/UI) es la URL de git del caso, no una ruta de
+  // filesystem — `path.resolve()` sobre eso no tira, produce una ruta inexistente que rompía acá
+  // mismo, en el primer comando git (`assertRunWorktreeAvailable`). `parentWorktree.worktreePath`
+  // SÍ es siempre una ruta local válida de un repo git completo en los dos casos (clon standalone,
+  // o worktree linkeado de un repo compartido) — git worktree add/merge funcionan igual desde
+  // cualquiera de los dos, sin necesitar el repo "raíz" compartido.
+  const repoRoot = parentWorktree.worktreePath;
+  await assertRunWorktreeAvailable(repoRoot, parentWorktree);
   await commitAllChanges(parentWorktree, `chore: preserve escalated work (run ${params.parentRunId})`);
 
   if (!parentRun.project_id) {
@@ -126,7 +133,7 @@ export async function respondToEscalation(params: {
       parentRunId: params.parentRunId,
       userId: params.userId,
       projectId,
-      projectRepoRoot,
+      repoRoot,
       cliAgentOverride,
       model,
       mergeApproval,
@@ -234,7 +241,7 @@ export async function respondToEscalation(params: {
       });
     }
 
-    childWorktree = await createRunWorktree(projectRepoRoot, childRunId, parentWorktree.branchName);
+    childWorktree = await createRunWorktree(repoRoot, childRunId, parentWorktree.branchName);
     const childRun = await createRun({
       id: childRunId,
       pipelineDefinitionId: parentRun.pipeline_definition_id,
@@ -258,7 +265,7 @@ export async function respondToEscalation(params: {
         model: model ?? null,
         pipeline: `${pipelineSpec.name}@${pipelineSpec.version}`,
         projectId: parentRun.project_id,
-        repoPath: projectRepoRoot,
+        repoPath: childWorktree.worktreePath,
         originatedFromRunId: params.parentRunId,
       },
       client
@@ -291,7 +298,7 @@ export async function respondToEscalation(params: {
     childRunId,
     execute: () =>
       executePipelineRun({
-        projectRepoRoot,
+        projectRepoRoot: (childWorktree as RunWorktree).worktreePath,
         runId: childRunId,
         projectId,
         worktree: childWorktree as RunWorktree,
@@ -416,7 +423,7 @@ async function respondMergeApproval(params: {
   parentRunId: string;
   userId: string;
   projectId: string;
-  projectRepoRoot: string;
+  repoRoot: string;
   cliAgentOverride: AgentConfig;
   model?: string;
   mergeApproval: MergeApprovalPayload;
@@ -445,13 +452,13 @@ async function respondMergeApproval(params: {
   }
 
   await mergeFeatureBranchIntoBase({
-    repoRoot: params.projectRepoRoot,
+    repoRoot: params.repoRoot,
     baseBranch: params.mergeApproval.baseBranch,
     featureBranch: params.mergeApproval.featureBranch,
   });
 
   const { childRunId, childWorktree } = await createPlanningToQaChildRun({
-    projectRepoRoot: params.projectRepoRoot,
+    repoRoot: params.repoRoot,
     parentRunId: params.parentRunId,
     projectId: params.projectId,
     baseBranch: params.mergeApproval.baseBranch,
@@ -465,7 +472,7 @@ async function respondMergeApproval(params: {
     childRunId,
     execute: () =>
       executePipelineRun({
-        projectRepoRoot: params.projectRepoRoot,
+        projectRepoRoot: childWorktree.worktreePath,
         runId: childRunId,
         projectId: params.projectId,
         worktree: childWorktree,

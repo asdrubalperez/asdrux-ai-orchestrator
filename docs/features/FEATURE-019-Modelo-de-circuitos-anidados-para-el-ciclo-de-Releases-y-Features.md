@@ -259,6 +259,11 @@ queda sujeto a la política de retención de 21 días (ítem ⚪ Tentativo ya ex
 `docs/ROADMAP.md`, "Limpieza automática de worktrees/branches vencidos"). No se introduce ninguna
 limpieza inmediata nueva en esta Feature.
 
+**Nota de implementación (post-Approval Gate, ver Lecciones Aprendidas)**: el snippet de arriba
+(`git worktree add <path> <baseBranch>`, sin `--detach`) es el aprobado en el diseño, pero se
+corrigió al implementar — ver "Lecciones Aprendidas" al final del documento por qué y qué cambió
+exactamente (`--detach` + push por refspec).
+
 ### 6.3 Persistencia del Release Plan (estado por Feature)
 
 Mismo patrón que `release_roadmap` (FEATURE-018): `project_config_versions`,
@@ -377,5 +382,44 @@ Implementación prohibida hasta aprobación humana explícita de este documento.
 ## Estado de la implementación
 
 Aprobado por el owner tras 5 rondas de validación técnica (Go condicionado en las primeras 4, Go
-limpio en la 5ª). Approval Gate cumplido — pasa a implementación en la rama
-`feature/019-modelo-circuitos-anidados`.
+limpio en la 5ª). Approval Gate cumplido. Implementado en la rama
+`feature/019-modelo-circuitos-anidados`, incluyendo el arreglo del hallazgo de cierre descrito en
+"Lecciones Aprendidas" (bug preexistente de FEATURE-018 sobre `projectRepoRoot`, más un segundo bug
+propio de `mergeFeatureBranchIntoBase` encontrado al escribir el test real de este cierre).
+Validado con `tsc --noEmit` (backend y frontend), `npm run build`, y suite completa (`npm test`,
+90 pass / 2 skipped por Docker CLI no disponible en este entorno). Test nuevo:
+`src/isolation/worktree.test.ts` — mergea contra un repo git real, reproduciendo el escenario de
+producción más común (clon raíz compartido con la rama base ya checked out).
+
+## Lecciones Aprendidas
+
+Al implementar el punto 3 de esta Feature (persistencia y propagación de la rama base a través de
+la cadena de runs) se encontró un bug preexistente de FEATURE-018, ya en `main`: `respondToEscalation`
+derivaba `repoRoot` de `path.resolve(run_started.repoPath)` — para un run creado vía el flujo real
+de intake (`cleanupStrategy: "standalone-clone"`, FEATURE-017), ese `repoPath` es la URL de git del
+caso (`business_case.repositorio`), no una ruta de filesystem. `path.resolve()` sobre una URL de
+git no tira — produce una ruta inexistente que recién rompía en el primer comando git
+(`assertRunWorktreeAvailable`), como un `ENOENT` crudo de `child_process.spawn`, no un error de
+dominio. Esto afectaba tanto al camino `{solution: ...}` genérico de `respondToEscalation` (activo
+desde FEATURE-012/013C) como a esta misma Feature. Se corrigió derivando `repoRoot` de
+`parentWorktree.worktreePath`/`worktree.worktreePath` — siempre una ruta local válida de un repo
+git completo en las dos `cleanupStrategy`, a diferencia de `repoPath`.
+
+Al escribir el test real de este arreglo (`src/isolation/worktree.test.ts`, contra git de verdad,
+no mocks) apareció un segundo bug, propio de esta Feature y no detectado en las 5 rondas de
+validación de diseño: `mergeFeatureBranchIntoBase` checkouteaba `baseBranch` tal cual (sin
+`--detach`) en el worktree efímero — eso revienta con "already used by worktree" en cuanto esa
+rama ya está checked out en otro worktree del mismo repo, que es el caso común en la estrategia
+"shared-worktree": el clon compartido original de un proyecto (`project.repo_path`) queda checked
+out en su rama default para siempre, y esa rama default suele ser exactamente `ramaBaseTrabajo`
+(default "main"). Se corrigió creando el worktree efímero con `--detach` (apunta al commit, no a
+la rama) y pusheando con el refspec explícito `HEAD:refs/heads/<baseBranch>` en vez de `git push
+origin <baseBranch>`.
+
+Ninguno de los dos bugs se detectó en el diseño ni en las validaciones técnicas previas porque
+ambos solo se manifiestan contra un repositorio git real — el patrón de esta Feature (y de
+FEATURE-018) de citar líneas de código reales fue suficiente para validar la lógica de aplicación,
+pero no sustituye una prueba real contra las herramientas externas (git) que el propio mecanismo
+invoca. Vale la pena que el criterio de "prueba real, no solo revisión de código" (ya aplicado en
+FEATURE-016/017) se extienda explícitamente a herramientas externas invocadas por subprocess,
+no solo a los flujos de negocio de punta a punta.
