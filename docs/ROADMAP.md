@@ -46,20 +46,47 @@
   por rol. Aprobada por el owner, validada técnicamente por el DAIA y mergeada a `main` (commit
   `eed5e88` implementación principal, `14693c8` merge). Diseño y evidencia en
   `docs/features/FEATURE-017-Capa-de-UI-Disparo-intake-de-caso-de-negocio-asistido-por-IA.md`.
+- FEATURE-018 (antes FEATURE-017, antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases
+  (Architect) + Release Plan (Planning): Architect declara siempre un Roadmap de Releases (mínimo
+  un release MVP) y escala para aprobación humana reusando el mecanismo de escalamiento existente
+  (atomicidad real vía `client` compartido en `setProjectConfig`); Planning recibe el release activo
+  como contexto y escala si no hay ninguno aprobado; `ReleasePlanPanel` conectado a datos reales;
+  6 documentos de gobernanza del Runbook actualizados. Aprobada por el owner tras 3 rondas de
+  validación técnica del DAIA y verificación independiente del Architect, mergeada a `main` (commit
+  `458c159` implementación, `411f73d` merge). **Alcance final, ajustado durante el
+  cierre**: no incluye el disparo automático de "release completo → Architect propone el
+  siguiente" (Functional Goal original de la Feature) — se descubrió que el motor de pipeline no
+  tiene hoy ningún concepto de "Feature" como dato rastreable ni de múltiples Features ejecutándose
+  en secuencia dentro de un release, lo cual excede el alcance de wiring de esta Feature. Ver
+  Lecciones Aprendidas más abajo y FEATURE-019/020. Diseño y evidencia en
+  `docs/features/FEATURE-018-Wiring-real-del-ciclo-Roadmap-de-Releases-(Architect)-+-Release-Plan-(Planning).md`.
 
 **🟡 Confirmado**
-- FEATURE-018 (antes FEATURE-017, antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases (Architect) +
-  Release Plan (Planning): conectar el diseño ya escrito en el Runbook
-  (`docs/runbook/02-ARCHITECTURE-TEMPLATE.md` sección 0, y
-  `docs/runbook/09-RELEASE-PLAN-TEMPLATE.md`) con los roles reales del Orquestador
-  (`architect.txt`, `planning.txt`) y con la UI (placeholder `ReleasePlanPanel` ya reservado en
-  FEATURE-013).
-- FEATURE-019 (antes FEATURE-018, antes FEATURE-017, antes FEATURE-014) — Milestone 2 — Validación
-  end-to-end con caso de negocio real
+- FEATURE-019 — Modelo de circuitos anidados para el ciclo de releases: Architect gobierna el
+  avance entre releases del Roadmap, Planning gobierna la iteración de Features dentro del release
+  activo (Developer siempre vuelve a Planning al terminar una Feature, en vez de autogobernarse —
+  resuelve una tensión real con la Regla 10, Ownership de Artefactos, del Runbook). Cada uno de los
+  tres circuitos (Roadmap/Architect, Release Plan/Planning, Feature Implementation/Developer↔QA)
+  tiene su propia salida natural hacia el circuito contenedor; reintento y escalada al humano se
+  mantienen uniformes, sin cambios, para cualquier circuito. Discovery en curso — diagrama base
+  acordado con el owner, pendiente Design.
+- FEATURE-020 — Adaptación de FEATURE-018 al mecanismo que resulte de FEATURE-019. Depende
+  enteramente de que FEATURE-019 cierre su Diseño — no se puede dimensionar ni implementar antes
+  (mismo criterio que la dependencia ya documentada de FEATURE-016 respecto de FEATURE-015A/015B).
+- FEATURE-021 (antes FEATURE-019, antes FEATURE-018, antes FEATURE-017, antes FEATURE-014) —
+  Milestone 2 — Validación end-to-end con caso de negocio real
+- FEATURE-022 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
+- FEATURE-023 — Credenciales git por usuario para el Orquestador (promovida de ⚪ Tentativo)
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
-- Selección de proveedor/modelo/credenciales por rol
+- Planning valida la Feature de Functional antes de diseñar el Release Plan — hoy Stage 2 de
+  `docs/runbook/06-DELIVERY-WORKFLOW.md` dice que Planning "parte de los 3 escenarios que Functional
+  entregó — no los redefine desde cero", sin un paso explícito de análisis/validación de lo que
+  Functional entregó antes de diseñar el cómo. Propuesta a explorar en Discovery aparte: que
+  Planning analice y valide activamente la Feature de Functional (ambigüedades, dependencias entre
+  Features del release, huecos) antes de diseñar el Release Plan. Complementa (no reemplaza) al
+  ítem "Escalamiento optimizado sin reinicio completo".
 - Approval Model por Release
 - Concurrencia de runs simultáneos
 - Limpieza automática de worktrees/branches vencidos
@@ -71,11 +98,6 @@
   alertas fuera de cuando se está mirando activamente)
 - Limpieza de persistencia de codigo versionado: `artifacts.commit_ref` existe en schema pero no se
   puebla nunca; los commits reales quedan hoy solo en `run_events`.
-- Credenciales git por usuario para el Orquestador — hoy el clonado de repos (FEATURE-017) usa una
-  única identidad git fija a nivel de servidor. Para que cualquier usuario pueda usar sus propios
-  repos privados sin intervención manual, hace falta un mecanismo de autorización por usuario
-  (patrón tipo GitHub App/OAuth, similar en espíritu al `authMode` de FEATURE-016 pero para acceso
-  a repos, no a modelos de IA). No diseñado todavía.
 
 ---
 
@@ -201,14 +223,73 @@ dentro de contenedor con una sesión OAuth real montada como caché; (2) `CODEX_
 íntegro de solo lectura y Codex también lo usa para logs/sqlite — riesgo de que falle al intentar
 escribir ahí, sin probar todavía con un turno real de Codex en `cli_session`.
 
-### 🟡 FEATURE-018 (antes FEATURE-017, antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases + Release Plan
-Promovido de ⚪ Tentativo a 🟡 Confirmado. El diseño ya existe en el Runbook
-(`docs/runbook/02-ARCHITECTURE-TEMPLATE.md` sección 0, y `docs/runbook/09-RELEASE-PLAN-TEMPLATE.md`)
-pero no está implementado en los roles reales del Orquestador (`src/executor/roles/architect.txt`,
-`planning.txt`) ni conectado a la UI. La UI ya reservó el espacio visual (placeholder
-`ReleasePlanPanel`, sin datos reales) en FEATURE-013. Distinto de "Approval Model por Release"
-(ese es sobre quién aprueba el avance de etapas; este es sobre qué contenido de planificación de
-releases se genera y muestra).
+### ✅ FEATURE-018 (antes FEATURE-017, antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases + Release Plan
+Implementada, validada (3 rondas de validación técnica del DAIA + verificación independiente del
+Architect contra el repo real, incluyendo typecheck y suite completa de tests corridos de forma
+independiente) y mergeada a `main` (commit `458c159` implementación, `411f73d` merge). Distinto de
+"Approval Model por Release" (ese es sobre quién aprueba el avance de etapas; este es sobre qué
+contenido de planificación de releases se genera y muestra).
+
+**Alcance final entregado**: Architect declara siempre un Roadmap de Releases (mínimo un release
+MVP) como parte de su salida normal, y escala para aprobación humana — reusando el mecanismo de
+escalamiento existente, distinguido por contenido (`ROADMAP` presente en `outputArtifact`, mismo
+patrón que `comandoTest`) en vez de un tipo de acción nuevo. La aprobación persiste la nueva versión
+en `project_config_versions` (`config_key = "release_roadmap"`) y crea el child run en una única
+transacción real (`setProjectConfig` acepta `client?: PoolClient`, mismo patrón que
+`getCurrentProjectConfigs`/`createRun`). Planning recibe el release activo como contexto
+(`activeRelease`) y escala si no hay ninguno aprobado. `ReleasePlanPanel` conectado a datos reales
+vía `GET /runs/:id` extendido (sin ruta nueva). 6 documentos de gobernanza del Runbook actualizados
+para reflejar que el roadmap ya no es condicional.
+
+**Excluido del alcance final** (ajuste hecho al cierre, no estaba en el documento de Diseño
+original): el disparo automático de "release completo → Architect propone el release siguiente"
+(Functional Goal original de la Feature). Se descubrió, ya con la implementación validada, que:
+- El motor de pipeline (`src/pipelines/definitions.ts`) no tiene ningún concepto de "Feature" como
+  dato rastreable — hoy es prosa dentro del artefacto de texto de Planning, no un registro con
+  estado.
+- El loop de fases (`PipelineSpec.definition.loop`) es deliberadamente de un solo tipo
+  (Developer↔QA, decisión de FEATURE-005) — no soporta hoy que Planning itere múltiples Features
+  de un release, ni que Architect sea re-invocado automáticamente al cerrar uno.
+- El texto de Developer en `08-CODE-SYSTEM-PROMPT.md` ("si hay Feature siguiente, continúa por su
+  cuenta") tiene además una tensión real con la Regla 10 (Ownership de Artefactos: el Release Plan
+  es propiedad de Planning, no de Developer).
+
+**Lecciones Aprendidas**: este hallazgo, surgido en la revisión de cierre de FEATURE-018, derivó en
+dos Features nuevas — FEATURE-019 (rediseño del ciclo de ejecución de releases/Features, con
+Planning gobernando la iteración y Architect gobernando el avance entre releases) y FEATURE-020
+(adaptar esta Feature al mecanismo que resulte de FEATURE-019). El patrón de reusar mecanismos ya
+probados (atomicidad vía `client` compartido, distinción de escalamiento por contenido en vez de
+un campo nuevo) siguió dando resultado en esta Feature, igual que en ciclos anteriores.
+
+### 🟡 FEATURE-019 — Modelo de circuitos anidados para el ciclo de Releases y Features
+Surge de la revisión de cierre de FEATURE-018 (ver Lecciones Aprendidas ahí). Modelo acordado con
+el owner (diagramas AS IS / TO BE, tres circuitos anidados):
+- Circuito 1 (Roadmap de Releases): Architect → Functional → Circuito 2. Salida natural (no hay
+  más releases) → Usuario (proyecto cerrado). Architect gobierna el avance entre releases.
+- Circuito 2 (Release Plan): Planning → Circuito 3, repetido por cada Feature del release activo.
+  Salida natural (no hay más Features) → Architect (dispara la propuesta/aprobación del release
+  siguiente). Planning gobierna la iteración de Features — Developer nunca se autogobierna entre
+  Features, siempre vuelve a Planning (resuelve la tensión con la Regla 10, Ownership de
+  Artefactos, que tenía el texto actual de Developer en `08-CODE-SYSTEM-PROMPT.md`).
+- Circuito 3 (Feature Implementation): Developer↔QA, sin cambios respecto al loop ya existente.
+  Salida natural (QA aprueba, Developer commitea y pushea) → Planning, no termina el run.
+- Reintento (hasta 3) y Escalada a humano se mantienen exactamente iguales a hoy (Regla 8.3/8.4),
+  aplicando uniformemente sin importar en qué circuito ocurra el problema — no se toca ese
+  mecanismo, solo se generaliza su punto de entrada.
+
+Pendiente de Discovery/Design completo: cómo se modela una Feature como dato rastreable (hoy es
+prosa), cómo Planning decide "no hay más Features" y Architect decide "no hay más releases", y
+cómo interactúa esto con el tope de 3 pasadas del circuito de escalamiento cuando hay múltiples
+Features en juego. Buena parte de la mecánica de aprobación de FEATURE-018 (escalamiento
+distinguido por contenido, atomicidad vía `client` compartido) es reusable para la salida del
+Circuito 2 hacia Architect, sin construir un mecanismo nuevo desde cero.
+
+### 🟡 FEATURE-020 — Adaptación de FEATURE-018 al mecanismo de FEATURE-019
+Depende enteramente de que FEATURE-019 cierre su Diseño — no se puede dimensionar antes (mismo
+criterio que la dependencia ya documentada de FEATURE-016 respecto de FEATURE-015A/015B). Cubre lo
+que haga falta ajustar en `architect.txt`/`planning.txt`/`respondService.ts` (ya construidos en
+FEATURE-018) para encajar en el modelo de circuitos anidados de FEATURE-019, en vez de descartar lo
+ya implementado.
 
 ### ✅ Feature 09 — Runbook para el Orquestador AI automático
 Diseño completo y cerrado: 12 archivos en `docs/runbook/` (equivalente al `docs/playbook/` actual
@@ -265,7 +346,8 @@ recorre secuencialmente los pasos intermedios aunque no tengan nada que resolver
 optimización futura: permitir que el circuito llegue directo al dueño real sin recorrer los pasos
 intermedios, cuando el costo de la v1 secuencial resulte un problema real en la práctica.
 
-### ⚪ Selección de proveedor/modelo/credenciales por rol
+### 🟡 FEATURE-022 — Selección de proveedor/modelo/credenciales por rol
+Promovido de ⚪ Tentativo a 🟡 Confirmado.
 Ítem ampliado en la sesión de FEATURE-007, cubre tres superficies de configuración, todas parte de
 la misma pantalla de Disparo de la UI:
 - Selección de proveedor (Claude Code / Codex / futuro) por rol.
@@ -284,7 +366,8 @@ la misma pantalla de Disparo de la UI:
   que el resto de los roles, no quedar como excepción fija. Pendiente de diseño técnico (el mapeo no
   usa Executor/holder-worker hoy, por no necesitar tools — ver FEATURE-017 Regla 5 y Risks).
 
-### ⚪ Credenciales git por usuario para el Orquestador
+### 🟡 FEATURE-023 — Credenciales git por usuario para el Orquestador
+Promovido de ⚪ Tentativo a 🟡 Confirmado.
 Hoy el clonado de repos (FEATURE-017, `cloneRunRepository`) usa una única identidad git fija a
 nivel de servidor — la clave SSH del usuario del sistema que corre el proceso del Orquestador.
 Funciona porque hoy hay un solo usuario real (el owner) trabajando sobre sus propios repos. Para
@@ -400,7 +483,7 @@ primera opción porque, a esfuerzo comparable, una UI mínima de solo lectura da
 reusable hacia la Capa de UI completa. Queda como complemento futuro si hace falta alertas push
 (fase completada/fallida) fuera de cuando alguien está mirando la UI activamente.
 
-### 🟡 FEATURE-019 (antes FEATURE-018, antes FEATURE-017, antes FEATURE-014) — Milestone 2 — Validación
-end-to-end con caso de negocio real
+### 🟡 FEATURE-021 (antes FEATURE-019, antes FEATURE-018, antes FEATURE-017, antes FEATURE-014) —
+Milestone 2 — Validación end-to-end con caso de negocio real
 Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
 Confirmado y no Tentativo.

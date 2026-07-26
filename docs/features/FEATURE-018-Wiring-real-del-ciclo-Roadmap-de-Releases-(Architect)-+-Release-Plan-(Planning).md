@@ -18,8 +18,9 @@ Versión de plantilla usada: v2.1 (`docs/playbook/07-FEATURE-TEMPLATE.md`)
   (`ReleasePlanPanel` real) + Gobernanza (edición de `docs/runbook/02-ARCHITECTURE-TEMPLATE.md` §0
   y `docs/runbook/03-AI-CONSTITUTION.md` Regla 8.4)
 - **Owner**: asdru
-- **Status**: 🔵 Implementada (rama `feature/018-wiring-roadmap-release-plan`, pendiente de
-  validación del owner en la VPS y merge a `main`)
+- **Status**: ✅ Ejecutada. Aprobada por el owner, validada en la VPS y mergeada a `main` (commit
+  `458c159` implementación, `411f73d` merge). Alcance final ajustado al cierre — ver "Lecciones
+  Aprendidas" al final de este documento.
 - **Priority**: Confirmada (`docs/ROADMAP.md`)
 
 ---
@@ -354,9 +355,8 @@ del owner.
 ## Estado de la implementación (2026-07-26)
 
 Implementado completo en la rama `feature/018-wiring-roadmap-release-plan`, sobre `main` tal como
-estaba tras `6a37d48`. No mergeado — pendiente de validación del owner en la VPS y de su
-confirmación explícita para el merge (Approval Gate cumplido para el diseño; el merge en sí
-requiere una segunda confirmación, ver handoff de implementación).
+estaba tras `6a37d48`. Validado por el owner en la VPS y mergeado a `main` (commit `458c159`
+implementación, `411f73d` merge).
 
 Resumen de archivos:
 
@@ -401,3 +401,25 @@ Feature), `npm run build` (incluye `vite build`). Tests nuevos: `src/cli/escalat
 `src/server/runView.test.ts` (`releaseRoadmap`/`toReleaseRoadmapView`). No se corrió un business
 case real end-to-end contra Docker/Claude Code CLI en este entorno (ver Validation Evidence,
 sección 8 del documento) — queda para la validación del owner en la VPS.
+
+## Lecciones Aprendidas
+
+**Excluido del alcance final** (ajuste hecho al cierre, no estaba en el documento de Diseño
+original): el disparo automático de "release completo → Architect propone el release siguiente"
+(Functional Goal original de la Feature). Se descubrió, ya con la implementación validada, que:
+- El motor de pipeline (`src/pipelines/definitions.ts`) no tiene ningún concepto de "Feature" como
+  dato rastreable — hoy es prosa dentro del artefacto de texto de Planning, no un registro con
+  estado.
+- El loop de fases (`PipelineSpec.definition.loop`) es deliberadamente de un solo tipo
+  (Developer↔QA, decisión de FEATURE-005) — no soporta hoy que Planning itere múltiples Features
+  de un release, ni que Architect sea re-invocado automáticamente al cerrar uno.
+- El texto de Developer en `08-CODE-SYSTEM-PROMPT.md` ("si hay Feature siguiente, continúa por su
+  cuenta") tiene además una tensión real con la Regla 10 (Ownership de Artefactos: el Release Plan
+  es propiedad de Planning, no de Developer).
+
+Este hallazgo, surgido en la revisión de cierre de FEATURE-018, derivó en dos Features nuevas —
+FEATURE-019 (rediseño del ciclo de ejecución de releases/Features, con Planning gobernando la
+iteración y Architect gobernando el avance entre releases) y FEATURE-020 (adaptar esta Feature al
+mecanismo que resulte de FEATURE-019). El patrón de reusar mecanismos ya probados (atomicidad vía
+`client` compartido, distinción de escalamiento por contenido en vez de un campo nuevo) siguió
+dando resultado en esta Feature, igual que en ciclos anteriores.
