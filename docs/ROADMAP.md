@@ -67,14 +67,23 @@
   encontró un bug crítico preexistente de pérdida de contexto en reintentos de escalamiento, que
   bloqueó seguir probando y derivó en FEATURE-020. Ver Lecciones Aprendidas en
   `docs/features/FEATURE-019-*.md`.
-
-**🟡 Confirmado**
 - FEATURE-020 — Rediseño de cómo se arma el contexto entre roles: lectura de artefactos
   persistidos por referencia (DB) en vez de acumulación en el contexto que viaja entre fases.
-  Prioridad alta — bloqueó la validación end-to-end de FEATURE-019. Ver detalle abajo.
-- FEATURE-021 — Adaptación de FEATURE-018 al mecanismo que resulte de FEATURE-019. Depende
-  enteramente de que FEATURE-019 cierre su Diseño — no se puede dimensionar ni implementar antes
-  (mismo criterio que la dependencia ya documentada de FEATURE-016 respecto de FEATURE-015A/015B).
+  Implementada y mergeada (commit `9d066a8`, más fix de `ramaBaseTrabajoFromBusinessCase` y ajuste
+  de texto). Validación end-to-end real: Circuito 1/2/3 funcionaron de punta a punta (incluida la
+  primera aprobación de merge en Modo Manual) — encontró un problema real y distinto en el paso de
+  build de QA (no relacionado con el diseño de esta Feature), que derivó en FEATURE-021 (ver
+  abajo). Ver Lecciones Aprendidas en `docs/features/FEATURE-020-*.md`.
+
+**🟡 Confirmado**
+- FEATURE-021 — Build determinístico garantizado por el Orquestador entre Developer y QA: hoy
+  `COMANDO_TEST` puede incluir un paso de compilación que falla siempre en el sandbox de solo
+  lectura de QA (`EROFS`) y además expone un bug real en `parseTestCommand` (split ingenuo por
+  espacios, sin soporte de `&&`). Prioridad alta — bloqueó la validación end-to-end de FEATURE-020.
+  Ver detalle abajo. (Nota: el ítem "Adaptación de FEATURE-018 al mecanismo de FEATURE-019" que
+  tenía este número quedó absorbido sin trabajo propio por la implementación real de
+  FEATURE-019/020 — verificado en `08-CODE-SYSTEM-PROMPT.md`/`06-DELIVERY-WORKFLOW.md`, ya
+  reflejan el modelo nuevo. No se abre como Feature separada.)
 - FEATURE-022 (antes FEATURE-021, antes FEATURE-019, antes FEATURE-018, antes FEATURE-017, antes
   FEATURE-014) — Milestone 2 — Validación end-to-end con caso de negocio real
 - FEATURE-023 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
@@ -257,9 +266,12 @@ original): el disparo automático de "release completo → Architect propone el 
   es propiedad de Planning, no de Developer).
 
 **Lecciones Aprendidas**: este hallazgo, surgido en la revisión de cierre de FEATURE-018, derivó en
-dos Features nuevas — FEATURE-019 (rediseño del ciclo de ejecución de releases/Features, con
-Planning gobernando la iteración y Architect gobernando el avance entre releases) y FEATURE-021
-(adaptar esta Feature al mecanismo que resulte de FEATURE-019). El patrón de reusar mecanismos ya
+una Feature nueva — FEATURE-019 (rediseño del ciclo de ejecución de releases/Features, con
+Planning gobernando la iteración y Architect gobernando el avance entre releases). La adaptación de
+esta Feature al mecanismo resultante (originalmente reservada bajo el número FEATURE-021) terminó
+absorbida sin trabajo propio por la implementación real de FEATURE-019/020 — verificado en
+`08-CODE-SYSTEM-PROMPT.md`/`06-DELIVERY-WORKFLOW.md`, ya reflejan el modelo nuevo; ese número se
+reutilizó para una Feature distinta (ver FEATURE-021 actual). El patrón de reusar mecanismos ya
 probados (atomicidad vía `client` compartido, distinción de escalamiento por contenido en vez de
 un campo nuevo) siguió dando resultado en esta Feature, igual que en ciclos anteriores.
 
@@ -287,7 +299,7 @@ en el mecanismo genérico de reintento de escalamiento (pérdida del `business_c
 bloqueó seguir validando Circuito 2/3 de punta a punta. Ver Lecciones Aprendidas en
 `docs/features/FEATURE-019-*.md` y FEATURE-020 (rediseño derivado del hallazgo).
 
-### 🟡 FEATURE-020 — Rediseño de armado de contexto entre roles (lectura por referencia desde DB)
+### ✅ FEATURE-020 — Rediseño de armado de contexto entre roles (lectura por referencia desde DB)
 Surge de un hallazgo real durante la prueba E2E de FEATURE-019 (ver su Lecciones Aprendidas): el
 mecanismo genérico de reintento de escalamiento pierde el `business_case` original porque
 `buildEscalationContext`/`currentInitialContext` reemplazan el contexto completo en vez de
@@ -304,18 +316,64 @@ parcialmente — `withActiveReleaseContext` (FEATURE-018) resuelve esto para Pla
 Generalizar este patrón a los demás bordes: reintento de escalamiento (cualquier rol), Developer↔QA,
 y cualquier otro punto donde hoy se pase contenido completo en vez de una referencia resuelta.
 
-Pendiente de Discovery/Design completo: qué bordes exactos del pipeline hoy dependen de contexto
-acumulado (relevar todos, no solo los 2 encontrados), qué forma toma "leer por referencia" en cada
-uno (identificador + resolución en el momento de la invocación), y si hace falta tocar el esquema de
-`artifacts`/`project_config_versions` o alcanza con generalizar el patrón de
-`withActiveReleaseContext` ya construido.
+Implementada y mergeada (commit `9d066a8` implementación, más el fix de
+`ramaBaseTrabajoFromBusinessCase` y el ajuste de terminología "el humano" → "el usuario",
+`docs/features/FEATURE-020-*.md`). 4 rondas de validación técnica (Go condicionado en las 2
+primeras, Go técnico limpio en la 3ª) más un hallazgo real durante la implementación (Planning
+nunca pasa el contexto de reingreso — alimenta al loop Developer↔QA, Regla 10b) resuelto con el
+owner antes de mergear. Validación end-to-end real del owner contra la VPS: los tres circuitos
+(Roadmap/Architect, Release Plan/Planning, Feature Implementation/Developer↔QA) funcionaron de
+punta a punta, incluida la primera aprobación de merge real en Modo Manual — algo que FEATURE-019
+no había llegado a probar. La prueba encontró un problema real y no relacionado con el diseño de
+esta Feature (el paso de compilación de `COMANDO_TEST` no puede correr en el sandbox de solo
+lectura de QA), que derivó en FEATURE-021 (ver abajo). Ver Lecciones Aprendidas en
+`docs/features/FEATURE-020-*.md` para el detalle completo de los 3 hallazgos de implementación.
 
-### 🟡 FEATURE-021 — Adaptación de FEATURE-018 al mecanismo de FEATURE-019
-Depende enteramente de que FEATURE-019 cierre su Diseño — no se puede dimensionar antes (mismo
-criterio que la dependencia ya documentada de FEATURE-016 respecto de FEATURE-015A/015B). Cubre lo
-que haga falta ajustar en `architect.txt`/`planning.txt`/`respondService.ts` (ya construidos en
-FEATURE-018) para encajar en el modelo de circuitos anidados de FEATURE-019, en vez de descartar lo
-ya implementado.
+### 🟡 FEATURE-021 — Build determinístico garantizado por el Orquestador entre Developer y QA
+Surge de un hallazgo real durante la prueba E2E de FEATURE-020: `COMANDO_TEST` (declarado por
+Planning) incluía un paso de compilación (`npm run build && node --test dist/...`). El sandbox de
+QA es intencionalmente de solo lectura (`qaPolicy.ts`, `qaRuntime.ts`, Regla 10 — QA valida, no
+produce) — cualquier intento de recompilar ahí falla con `EROFS`, sin importar que Developer ya
+haya compilado en su propio turno (mismo `worktree.worktreePath`, sin clon separado). Además, el
+`&&` en `COMANDO_TEST` expone un bug real y confirmado en `parseTestCommand`
+(`src/testing/testExecutor.ts:104`): divide el comando solo por espacios, sin soporte de shell real
+(`spawn(..., { shell: false })`, deliberado desde FEATURE-006 por seguridad — nunca debe
+reintroducirse un shell real que interprete `COMANDO_TEST` como string, reabriría el riesgo de
+inyección que esa Feature cerró) — npm reenvía los tokens sobrantes al script `build`, causando
+`TS5042` cada vez que `COMANDO_TEST` tiene `&&`, en cualquier proyecto con paso de compilación.
+
+Se evaluaron 3 opciones (análisis completo de Claude Code):
+- QA puede escribir/compilar: descartada — no aporta nada que la opción elegida no dé gratis, y
+  amplía la superficie de un rol cuyo valor específico (FEATURE-006, resuelve H14) es ser el
+  extremo minimal/read-only del pipeline.
+- QA nunca recompila, confía en lo que Developer dejó: viable a corto plazo (Developer ya tiene
+  `command_exec`/escritura en su propio turno) pero reintroduce disciplina de prompt sin garantía
+  estructural — un `dist/` desactualizado generaría un falso positivo de aprobación, no un
+  escalamiento visible. Riesgo más alto que otras convenciones H12 ya toleradas.
+- El Orquestador garantiza el build, como infraestructura (elegida): un componente nuevo (no
+  reusar `TestExecutor`, que también es `:ro`) monta el worktree con `:rw` entre el turno de
+  Developer y el de QA, corre `npm run build` por convención (si existe `scripts.build` en el
+  `package.json` del worktree — no un campo nuevo que Planning tenga que declarar bien, eso
+  reintroduciría el mismo riesgo que se busca eliminar), no-op limpio si no hay paso de
+  compilación. Un build roto se trata como responsabilidad de Developer (Regla 10) — alimenta el
+  error al mismo Developer en el mismo intento, reusando el contador de `maxAttempts` ya existente,
+  sin gastar un turno de QA.
+
+Con esta opción, `COMANDO_TEST` deja de necesitar `&&` por construcción — el disparador del bug de
+`parseTestCommand` desaparece. Queda como ítem chico de deuda técnica (no bloqueante, incluido en
+el alcance de esta misma Feature): que `parseTestCommand` rechace explícito (`throw`) si detecta
+`&&`/`;`/`|` en el string, en vez de pasarlo tal cual a `spawn` con resultados confusos.
+
+Pendiente de Discovery/Design formal antes de implementar (mismo criterio de Approval Gate que el
+resto de las Features) — este ítem del Roadmap resume el análisis ya hecho, no reemplaza el
+documento de diseño propio.
+
+**Nota de numeración**: este número (FEATURE-021) reemplaza al ítem viejo "Adaptación de
+FEATURE-018 al mecanismo de FEATURE-019" — verificado (owner + Architect) que ese trabajo quedó
+absorbido sin trabajo propio por la implementación real de FEATURE-019/020
+(`08-CODE-SYSTEM-PROMPT.md:157`, `06-DELIVERY-WORKFLOW.md:200,232,271-279` ya reflejan el modelo
+nuevo: continuación automática a Planning, "Modo Manual" renombrado, cierre de release escalando a
+Architect vía humano). No se abre como Feature separada; el número se reutiliza acá.
 
 ### ✅ Feature 09 — Runbook para el Orquestador AI automático
 Diseño completo y cerrado: 12 archivos en `docs/runbook/` (equivalente al `docs/playbook/` actual
