@@ -132,10 +132,13 @@ Se evaluaron 3 opciones (Discovery conjunto owner + Architect + validación téc
    los `maxAttempts` ya existentes, con el error de build como contexto para el intento siguiente
    de Developer, en un campo propio (`buildFailureReason`, ver 6.2 y 6.4) — nunca reusando ni
    falseando `qaRejectionReason`/`previousAttemptSummary`, que corresponden a resultados reales de
-   QA/Developer. Si el build sigue fallando al llegar al último intento (`attempt === maxAttempts`),
-   se escala a humano explícitamente (mismo patrón que `loop_exhausted` cuando QA agota sus
-   intentos) — nunca se deja que el loop termine sin haber invocado a QA ni una vez y sin un
-   resultado final válido.
+   QA/Developer. `buildFailureReason` y `qaRejectionReason` son mutuamente excluyentes (ronda 2 de
+   validación técnica): si el motivo inmediato del reintento es un build roto, ese es el único
+   motivo que ve Developer — un `qaRejectionReason` de un intento anterior no se cuela junto a un
+   fallo de build más reciente. Si el build sigue fallando al llegar al último intento (`attempt
+   === maxAttempts`), se escala a humano explícitamente (mismo patrón que `loop_exhausted` cuando
+   QA agota sus intentos) — nunca se deja que el loop termine sin haber invocado a QA ni una vez y
+   sin un resultado final válido.
 5. El comando que corre el paso de build es siempre, literalmente, `npm run build` — nunca el
    contenido textual del script tal como aparece en `package.json` (evita reintroducir cualquier
    forma de interpretación de string).
@@ -145,6 +148,12 @@ Se evaluaron 3 opciones (Discovery conjunto owner + Architect + validación téc
    (`--network none`, `--cap-drop ALL`, `--security-opt no-new-privileges`, `--user node`, límites
    de `--pids-limit`/`--memory`/`--cpus`) — la única diferencia deliberada es el montaje de
    filesystem (`:rw` en vez de `:ro`, sin `--read-only`).
+8. Un `package.json` que existe pero no es JSON parseable **no** se trata igual que uno ausente
+   (ronda 2 de validación técnica) — un `package.json` ausente es no-op limpio (Regla 3); uno
+   presente pero corrupto se trata como un build fallido más (Regla 4), atribuible a Developer,
+   nunca como una categoría de escalamiento de infraestructura aparte. Un error real de
+   infraestructura (ej. Docker no disponible) sí se propaga como excepción, igual que ya hace
+   `TestExecutor.run()` hoy — sin agregar un mecanismo de manejo nuevo para ese caso.
 
 ---
 
@@ -153,7 +162,8 @@ Se evaluaron 3 opciones (Discovery conjunto owner + Architect + validación téc
 ### 6.1 Nuevo componente `BuildExecutor`
 
 Análogo estructural a `TestExecutor` (`src/testing/testExecutor.ts`), mismo perfil Docker con un
-solo cambio deliberado:
+solo cambio deliberado. **`BuildExecutionResult` se mantiene como interfaz plana** (no una unión
+discriminada) — consistente con el estilo de `TestExecutionResult`, el análogo ya existente:
 
 ```ts
 export interface BuildExecutionResult {
@@ -168,9 +178,28 @@ const BUILD_RUNNER_IMAGE = "node:22-alpine"; // misma familia que docker/develop
 
 export class BuildExecutor {
   async runIfNeeded(workingDirectory: string, timeoutMs: number): Promise<BuildExecutionResult> {
-    const hasBuildScript = await this.hasBuildScript(workingDirectory);
-    if (!hasBuildScript) {
+    const buildScriptCheck = await this.checkBuildScript(workingDirectory);
+
+    // "missing" (no hay package.json) y "no-script" (hay package.json, pero sin scripts.build)
+    // son AMBOS no-op limpio — ninguno es responsabilidad de Developer, el proyecto simplemente
+    // no tiene paso de build (Regla 3/8, ver 6.2 corregido en la ronda 2 de validación).
+    if (buildScriptCheck === "missing" || buildScriptCheck === "no-script") {
       return { ran: false, exitCode: null, stdout: "", stderr: "", timedOut: false };
+    }
+
+    // "invalid" (package.json existe pero no es JSON parseable) NO es lo mismo que "missing" —
+    // tratarlo como no-op dejaría a QA validando un dist/ viejo si Developer rompió el archivo
+    // por accidente (tiene escritura sobre todo el worktree). Se modela como un build fallido más
+    // (mismo camino que un exitCode !== 0, ver 6.2), no como una categoría de escalamiento nueva —
+    // sigue siendo responsabilidad de Developer (Regla 10, dueño del estado del repo).
+    if (buildScriptCheck === "invalid") {
+      return {
+        ran: true,
+        exitCode: null,
+        stdout: "",
+        stderr: `package.json en ${workingDirectory} no es JSON válido — no se pudo determinar si hay un paso de build.`,
+        timedOut: false,
+      };
     }
 
     const dockerArgs = [
@@ -186,13 +215,39 @@ export class BuildExecutor {
       "--workdir", "/workspace",
       BUILD_RUNNER_IMAGE, "npm", "run", "build", // siempre literal, nunca el string del script
     ];
-    // spawn(..., { shell: false }) — mismo criterio que TestExecutor, sin excepción.
+    // spawn(..., { shell: false }) — mismo criterio que TestExecutor, sin excepción. Un error de
+    // spawn (docker no disponible, etc.) rechaza la promesa igual que hoy hace TestExecutor.run()
+    // (child.on("error", ...) → reject) — no se agrega ningún manejo nuevo acá: se propaga hasta
+    // el mismo catch genérico de executePipelineRun que ya maneja cualquier otro fallo de
+    // infraestructura del pipeline (run_error → finishRun status "failed"). Ver 6.2, nota de
+    // la ronda 2.
     // ... ejecutar, capturar stdout/stderr/exitCode/timedOut, return { ran: true, ... }
   }
 
-  private async hasBuildScript(workingDirectory: string): Promise<boolean> {
-    // leer ${workingDirectory}/package.json, parsear JSON, chequear
-    // typeof pkg.scripts?.build === "string" && pkg.scripts.build.trim().length > 0
+  /**
+   * Distingue 3 casos, no 2 (ronda 2 de validación técnica — el diseño original solo
+   * distinguía "hay build script" sí/no, tratando un `package.json` corrupto igual que uno
+   * ausente):
+   * - "missing": no existe `package.json` (o no se pudo leer) — no-op limpio.
+   * - "invalid": existe pero `JSON.parse` falla — NO es "missing", ver arriba.
+   * - "no-script": es JSON válido pero sin `scripts.build` (o vacío) — no-op limpio.
+   * - "present": `scripts.build` es un string no vacío.
+   */
+  private async checkBuildScript(workingDirectory: string): Promise<"missing" | "invalid" | "no-script" | "present"> {
+    let raw: string;
+    try {
+      raw = await readFile(path.join(workingDirectory, "package.json"), "utf8");
+    } catch {
+      return "missing";
+    }
+    let pkg: unknown;
+    try {
+      pkg = JSON.parse(raw);
+    } catch {
+      return "invalid";
+    }
+    const buildScript = (pkg as { scripts?: { build?: unknown } } | null)?.scripts?.build;
+    return typeof buildScript === "string" && buildScript.trim().length > 0 ? "present" : "no-script";
   }
 }
 ```
@@ -216,16 +271,29 @@ a nivel de código):
    PhaseResult` final del loop (`runStart.ts:937`) devolvería `null` — rompiendo el resto del
    pipeline (`finishRun`/`finalizeRun` esperan un `PhaseResult` real).
 
+**Corregido en la ronda 2 de validación técnica (Architect, vía revisión externa)** — un 3er
+defecto en el snippet de la ronda 1: `developerContext` incluía `qaRejectionReason` y
+`buildFailureReason` **a la vez**, sin exclusión mutua. Escenario que lo rompe: intento 1, QA
+rechaza (real); intento 2, Developer corrige pero rompe el build (nunca llega a invocar a QA,
+`lastQaResult` queda sin tocar); intento 3 recibiría el `buildFailureReason` real del intento 2
+**junto con** el `qaRejectionReason` viejo del intento 1 — contexto stale que puede ya no tener
+nada que ver con lo que rompió el build en el medio. Corregido haciendo que ambos campos sean
+mutuamente excluyentes: si hay un fallo de build pendiente, ese es el único motivo que se muestra;
+`qaRejectionReason` solo aparece cuando el motivo inmediato del reintento fue un rechazo de QA real.
+
 Mecanismo corregido: una variable dedicada (`lastBuildFailureSummary`), nunca se falsea el
-resultado real de Developer/QA, y un bloque de agotamiento explícito que espeja el que ya existe
-para el rechazo de QA (`runStart.ts:922-932`).
+resultado real de Developer/QA, un bloque de agotamiento explícito que espeja el que ya existe
+para el rechazo de QA (`runStart.ts:922-932`), y los dos motivos de reintento (build vs. QA) se
+excluyen mutuamente en el contexto.
 
 Nueva variable, declarada junto a `lastDeveloperResult`/`lastQaResult` (`runStart.ts:820-821`):
 ```ts
 let lastBuildFailureSummary: string | null = null;
 ```
 
-`developerContext` (`runStart.ts:827-834`) gana un campo nuevo, opcional, sin tocar los existentes:
+`developerContext` (`runStart.ts:827-834`) gana un campo nuevo, opcional, sin tocar
+`previousAttemptSummary` — pero `qaRejectionReason` y `buildFailureReason` pasan a ser mutuamente
+excluyentes (ronda 2):
 ```ts
 const developerContext =
   attempt === 1
@@ -233,8 +301,11 @@ const developerContext =
     : {
         plan: planningResult.outputArtifact,
         previousAttemptSummary: lastDeveloperResult?.summary,
-        qaRejectionReason: lastQaResult?.summary,
-        ...(lastBuildFailureSummary ? { buildFailureReason: lastBuildFailureSummary } : {}),
+        ...(lastBuildFailureSummary
+          ? { buildFailureReason: lastBuildFailureSummary }
+          : lastQaResult
+            ? { qaRejectionReason: lastQaResult.summary }
+            : {}),
       };
 ```
 
@@ -250,14 +321,19 @@ if (buildResult.ran) {
   await recordRunEvent(runId, "build_executed", { attempt, buildResult });
 }
 if (buildResult.ran && buildResult.exitCode !== 0) {
-  lastBuildFailureSummary = `Build falló (exitCode ${buildResult.exitCode}): ${buildResult.stderr.slice(0, 2000)}`;
+  // ronda 2: el mensaje distingue timeout de un exitCode real — evita que un timeout se lea como
+  // si fuera un error de compilación del código (el mecanismo de agotamiento de abajo ya cubre
+  // el caso de que persista en los 3 intentos, sin necesitar una categoría de escalamiento nueva).
+  lastBuildFailureSummary = buildResult.timedOut
+    ? `Build superó el timeout (${120_000}ms) sin terminar.`
+    : `Build falló (exitCode ${buildResult.exitCode}): ${buildResult.stderr.slice(0, 2000)}`;
   console.log(`[run:start] Build (intento ${attempt}) falló — Developer recibe el error en el próximo intento.`);
 
   if (attempt === maxAttempts) {
     const exhausted: PhaseResult = {
       status: "escalated",
       outputArtifact: null,
-      summary: `Se agotaron los ${maxAttempts} intentos sin lograr un build exitoso. Último error: ${buildResult.stderr.slice(0, 500)}`,
+      summary: `Se agotaron los ${maxAttempts} intentos sin lograr un build exitoso. Último error: ${lastBuildFailureSummary}`,
       escalationReason: `Límite de reintentos (${maxAttempts}) alcanzado — build roto en todos los intentos, QA nunca llegó a validar.`,
     };
     await recordRunEvent(runId, "loop_exhausted", { maxAttempts, reason: "build", lastBuildResult: buildResult });
@@ -353,6 +429,9 @@ rechazo"):
 | Regresión de FEATURE-006 | Cualquier `COMANDO_TEST` normal, sin build | Sigue ejecutándose con `shell: false`, sin cambios de seguridad |
 | Build roto en todos los intentos (agregado en la ronda 1, Hallazgo 2) | `scripts.build` presente, `tsc` falla en los `maxAttempts` intentos | Se escala a humano explícitamente en el último intento (`loop_exhausted`, `reason: "build"`) — el loop nunca termina sin haber invocado a QA y sin devolver un `PhaseResult` válido |
 | `buildFailureReason` llega a Developer (agregado en la ronda 1, Hallazgo 1) | Build falla en el intento 1 | El contexto del intento 2 incluye `buildFailureReason` con el error real (no el `summary` original de Developer ni un `qaRejectionReason` ajeno) |
+| Mutua exclusión de motivos (agregado en la ronda 2) | Intento 1: QA rechaza. Intento 2: Developer corrige pero rompe el build | El contexto del intento 3 incluye `buildFailureReason` del intento 2 — nunca junto con el `qaRejectionReason` viejo del intento 1 |
+| `package.json` corrupto (agregado en la ronda 2) | `package.json` presente pero no es JSON válido | Se trata como build fallido (Regla 8) — Developer recibe el error en el intento siguiente, consume un `attempt`, nunca se lee como "sin build" |
+| Timeout de build distinguido (agregado en la ronda 2) | Build supera el `timeoutMs` sin terminar | `buildFailureReason` menciona explícitamente el timeout, distinto de un `exitCode` de compilación real — mismo mecanismo de agotamiento si persiste en los 3 intentos |
 
 ### Validation Evidence
 
@@ -384,16 +463,30 @@ Implementación prohibida hasta aprobación humana explícita de este documento.
 
 ## Estado de la implementación
 
-Pendiente — 1 ronda de validación técnica realizada (Go condicionado). Confirmado contra `main`
-que no hubo cambios posteriores a FEATURE-020 que afecten `runDeveloperQaLoop`/`TestExecutor`/
-`qaPolicy.ts`/`qaRuntime.ts`, y que no existe ningún otro punto del pipeline con un build implícito.
-2 hallazgos bloqueantes en el snippet de integración original (6.2) — el mecanismo de
-`buildFailureReason` no llegaba realmente a Developer, y no había ruta de agotamiento si el build
-fallaba en todos los intentos (podía devolver `null` en vez de un `PhaseResult`) — ya corregidos en
-este documento, con la propuesta concreta de código y el ajuste correspondiente a `developer.txt`.
+Pendiente — 2 rondas de validación técnica realizadas (Go condicionado en ambas). Confirmado
+contra `main` que no hubo cambios posteriores a FEATURE-020 que afecten
+`runDeveloperQaLoop`/`TestExecutor`/`qaPolicy.ts`/`qaRuntime.ts`, y que no existe ningún otro punto
+del pipeline con un build implícito.
 
-Nota de proceso: Discovery y el Architect no tienen acceso al repo en este momento, así que no
-pudieron validar este documento — la ronda 1 y esta corrección las hizo Claude Code cumpliendo
-ese rol de forma temporal, con las citas de línea/código verificadas directamente contra `main`.
-Pendiente de que Discovery/Architect (o el owner) revisen esta versión cuando puedan volver a
-acceder, antes del Approval Gate.
+Ronda 1: 2 hallazgos bloqueantes en el snippet de integración original (6.2) — el mecanismo de
+`buildFailureReason` no llegaba realmente a Developer, y no había ruta de agotamiento si el build
+fallaba en todos los intentos (podía devolver `null` en vez de un `PhaseResult`) — corregidos con
+la propuesta concreta de código y el ajuste correspondiente a `developer.txt`.
+
+Ronda 2 (revisión del Architect, vía ChatGPT, sobre la corrección de la ronda 1): 3 hallazgos
+adicionales, todos incorporados — (a) `qaRejectionReason` y `buildFailureReason` no eran
+mutuamente excluyentes, contexto viejo podía colarse junto a un fallo de build más reciente; (b)
+un `package.json` corrupto se trataba igual que uno ausente, arriesgando que QA valide un `dist/`
+viejo en silencio — ahora se modela como build fallido (Regla 8), nunca como no-op; (c) el mensaje
+de fallo ahora distingue timeout de un `exitCode` de compilación real. Se evaluó y se decidió NO
+incorporar 2 propuestas de esa ronda: una unión discriminada para `BuildExecutionResult` (se
+mantiene la interfaz plana, consistente con `TestExecutionResult`) y un camino de escalamiento
+nuevo para errores de `spawn`/Docker (se deja que se propague igual que ya hace `TestExecutor.run()`
+hoy, sin mecanismo adicional) — con la justificación de cada decisión documentada en 6.1/6.2 y
+Functional Rules.
+
+Nota de proceso: Discovery y el Architect no tienen acceso directo al repo en este momento — la
+ronda 1 la hizo Claude Code cumpliendo ese rol temporalmente, y la ronda 2 la revisó el Architect
+por fuera del repo (vía ChatGPT), validada por Claude Code contra el código real de `main` antes
+de incorporarla acá. Pendiente de que Discovery/Architect (o el owner) revisen esta versión
+directamente cuando puedan volver a acceder, antes del Approval Gate.
