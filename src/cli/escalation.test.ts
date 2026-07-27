@@ -3,14 +3,19 @@ import test from "node:test";
 import {
   activeReleaseFromRoadmap,
   artifactsAreEquivalent,
+  buildEscalationContext,
+  buildReentryContext,
   canonicalJson,
   extractMergeApproval,
   extractReleasePlanDeclaration,
   isMergeApprovalPayload,
+  isNotApplicableOutput,
+  isReentryContext,
   isReleaseCompletionEscalation,
   isReleasePlanDeclaration,
   isRoadmapApprovalPayload,
   parsePipelineDefinitionRow,
+  predecessorRoleFor,
 } from "./escalation.js";
 
 test("canonicalJson ordena claves de objetos anidados", () => {
@@ -145,4 +150,68 @@ test("extractMergeApproval no confunde una escalación real de ambigüedad de De
 
 test("extractMergeApproval devuelve null para roles distintos de developer", () => {
   assert.equal(extractMergeApproval({ phase: "planning" }, { outputArtifact: VALID_MERGE_APPROVAL }), null);
+});
+
+// FEATURE-020
+
+test("predecessorRoleFor devuelve el rol inmediatamente anterior en el orden del pipeline", () => {
+  assert.equal(predecessorRoleFor("functional"), "architect");
+  assert.equal(predecessorRoleFor("planning"), "functional");
+  assert.equal(predecessorRoleFor("developer"), "planning");
+  assert.equal(predecessorRoleFor("qa"), "developer");
+});
+
+test("predecessorRoleFor devuelve null para architect (no participa del mecanismo de paso)", () => {
+  assert.equal(predecessorRoleFor("architect"), null);
+});
+
+test("buildEscalationContext incluye businessCase (Regla 2/9, fix del bug de FEATURE-019)", () => {
+  const context = buildEscalationContext({
+    businessCase: { titulo: "caso real" },
+    escalationReason: null,
+    rejectedArtifact: "propuesta",
+    originAgentRole: "architect",
+    humanSolution: null,
+  });
+  assert.deepEqual(context.businessCase, { titulo: "caso real" });
+  assert.equal(context.escalationReason, "Escalamiento sin razón explícita persistida.");
+});
+
+test("buildReentryContext calcula targetAgentRole vía predecessorRoleFor y preserva attempt/originalVersionRef", () => {
+  const context = buildReentryContext({
+    businessCase: null,
+    escalationReason: "QA rechazó",
+    rejectedArtifact: { plan: "v1" },
+    originAgentRole: "qa",
+    humanSolution: "arreglalo",
+    attempt: 2,
+    originalVersionRef: "artifact-123",
+  });
+  assert.equal(context.targetAgentRole, "developer");
+  assert.equal(context.attempt, 2);
+  assert.equal(context.originalVersionRef, "artifact-123");
+});
+
+test("isReentryContext distingue un contexto de reingreso de un artifact normal", () => {
+  const reentry = buildReentryContext({
+    businessCase: null,
+    escalationReason: "algo",
+    rejectedArtifact: null,
+    originAgentRole: "developer",
+    humanSolution: null,
+    attempt: 1,
+    originalVersionRef: "x",
+  });
+  assert.equal(isReentryContext(reentry), true);
+  assert.equal(isReentryContext({ functionalArtifact: { features: [] } }), false);
+  assert.equal(isReentryContext(null), false);
+  assert.equal(isReentryContext("texto plano"), false);
+});
+
+test("isNotApplicableOutput acepta booleano real (Codex) o el string 'true' (Claude, convención de texto)", () => {
+  assert.equal(isNotApplicableOutput({ notApplicable: true }), true);
+  assert.equal(isNotApplicableOutput({ notApplicable: "true" }), true);
+  assert.equal(isNotApplicableOutput({ notApplicable: false }), false);
+  assert.equal(isNotApplicableOutput({ text: "propuesta real" }), false);
+  assert.equal(isNotApplicableOutput(null), false);
 });

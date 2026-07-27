@@ -158,7 +158,14 @@ export function extractMergeApproval(
   return isMergeApprovalPayload(content.outputArtifact) ? content.outputArtifact : null;
 }
 
+/**
+ * FEATURE-020, Regla 2/9: el reintento en el mismo run (`handleLinearEscalation`, sin cambios de
+ * mecanismo) ahora incluye `businessCase` (vía `getBusinessCaseForRun`/`root_run_id`) — arregla el
+ * bug original de FEATURE-019 (Architect reinterpretando sin poder contrastar contra el caso de
+ * negocio real) sin tocar el resto del mecanismo.
+ */
 export interface EscalationContext {
+  businessCase: unknown;
   escalationReason: string;
   rejectedArtifact: unknown;
   originAgentRole: AgentRole;
@@ -166,17 +173,88 @@ export interface EscalationContext {
 }
 
 export function buildEscalationContext(params: {
+  businessCase: unknown;
   escalationReason: string | null;
   rejectedArtifact: unknown;
   originAgentRole: AgentRole;
   humanSolution: string | null;
 }): EscalationContext {
   return {
+    businessCase: params.businessCase,
     escalationReason: params.escalationReason ?? "Escalamiento sin razón explícita persistida.",
     rejectedArtifact: params.rejectedArtifact,
     originAgentRole: params.originAgentRole,
     humanSolution: params.humanSolution,
   };
+}
+
+/**
+ * FEATURE-020, sección 6.3: tabla estática de predecesor por rol en el orden del pipeline —
+ * `architect` no tiene entrada, sus escalaciones no usan el mecanismo de reingreso encadenado
+ * (Regla 9). Calculada mecánicamente por el orquestador, nunca por el LLM.
+ */
+const PREDECESSOR_ROLE: Partial<Record<AgentRole, AgentRole>> = {
+  functional: "architect",
+  planning: "functional",
+  developer: "planning",
+  qa: "developer",
+};
+
+export function predecessorRoleFor(role: AgentRole): AgentRole | null {
+  return PREDECESSOR_ROLE[role] ?? null;
+}
+
+/**
+ * FEATURE-020, sección 6.4: contexto de reingreso encadenado — usado por el camino genérico de
+ * `respondService.ts` (todo lo que no sea `mergeApproval`). Se distingue de un artifact normal por
+ * su forma (siempre tiene `escalationReason` + `targetAgentRole`, ver `isReentryContext`).
+ */
+export interface ReentryContext extends EscalationContext {
+  targetAgentRole: AgentRole | null;
+  /** Contador de recorridos completos (tope 3, Regla 8) — viaja en el contexto, no en memoria. */
+  attempt: number;
+  /** `id` de la versión vigente del artefacto relevante al momento de escalar (Regla 7/6.5). */
+  originalVersionRef: string | null;
+}
+
+export function buildReentryContext(params: {
+  businessCase: unknown;
+  escalationReason: string | null;
+  rejectedArtifact: unknown;
+  originAgentRole: AgentRole;
+  humanSolution: string | null;
+  attempt: number;
+  originalVersionRef: string | null;
+}): ReentryContext {
+  return {
+    ...buildEscalationContext(params),
+    targetAgentRole: predecessorRoleFor(params.originAgentRole),
+    attempt: params.attempt,
+    originalVersionRef: params.originalVersionRef,
+  };
+}
+
+/**
+ * Distingue un contexto de reingreso de cualquier otro contenido que viaje como `context` de una
+ * fase (el `outputArtifact` normal de un rol, o el `business_case` crudo) — ningún artifact de rol
+ * declara `escalationReason`/`targetAgentRole` como campos propios (confirmado por grep sobre los 5
+ * prompts de rol en la ronda 3 de validación de FEATURE-020).
+ */
+export function isReentryContext(value: unknown): value is ReentryContext {
+  if (value === null || typeof value !== "object") return false;
+  return "escalationReason" in value && "targetAgentRole" in value;
+}
+
+/**
+ * FEATURE-020, Regla 5: marcador que un rol usa para indicar que una escalación en revisión no le
+ * corresponde — el orquestador reconoce esta forma exacta para avanzar de fase sin tratarla como
+ * un artifact normal. Acepta booleano real (`CodexExecutor`, JSON nativo) o el string `"true"`
+ * (`ClaudeCodeExecutor`, convención de texto plano — mismo patrón que `RELEASE_COMPLETO`).
+ */
+export function isNotApplicableOutput(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return false;
+  const notApplicable = (value as { notApplicable?: unknown }).notApplicable;
+  return notApplicable === true || notApplicable === "true";
 }
 
 export function canonicalJson(value: unknown): string {

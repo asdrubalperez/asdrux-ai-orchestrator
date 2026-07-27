@@ -367,6 +367,7 @@ export class ClaudeCodeExecutor implements Executor {
     if (parsed.features) extras.features = parsed.features;
     if (parsed.releasePlan) extras.releasePlan = parsed.releasePlan;
     if (parsed.releaseCompleto) extras.releaseCompleto = parsed.releaseCompleto;
+    if (parsed.notApplicable) extras.notApplicable = parsed.notApplicable;
     const outputArtifact =
       Object.keys(extras).length > 0 ? { text: parsed.artefacto, ...extras } : parsed.artefacto;
 
@@ -399,6 +400,7 @@ export class ClaudeCodeExecutor implements Executor {
     features: string | null;
     releasePlan: string | null;
     releaseCompleto: string | null;
+    notApplicable: string | null;
   } {
     // Defensa adicional (FEATURE-005, H12): modelos más económicos (ej. haiku) no siempre
     // respetan "texto plano sin Markdown" al pie de la letra — envuelven las etiquetas en
@@ -421,6 +423,10 @@ export class ClaudeCodeExecutor implements Executor {
     const features = extract("FEATURES");
     const releasePlan = extract("RELEASE_PLAN");
     const releaseCompleto = extract("RELEASE_COMPLETO");
+    // FEATURE-020, Regla 5: marcador de "paso" — un rol que recibe una revisión de escalamiento
+    // que no le corresponde declara NO_APLICA: true en vez de un ARTEFACTO real (mismo patrón que
+    // RELEASE_COMPLETO). Ningún rol usaba esta etiqueta antes de esta Feature.
+    const noAplica = extract("NO_APLICA");
 
     const status: PhaseStatus =
       estado === "escalated" ? "escalated" : estado === "rejected" ? "rejected" : "completed";
@@ -435,6 +441,7 @@ export class ClaudeCodeExecutor implements Executor {
       releaseCompleto: releaseCompleto && releaseCompleto !== "null" ? releaseCompleto : null,
       comandoTest: comandoTest && comandoTest !== "null" ? comandoTest : null,
       roadmap: roadmap && roadmap !== "null" ? roadmap : null,
+      notApplicable: noAplica && noAplica !== "null" ? noAplica : null,
     };
   }
 
