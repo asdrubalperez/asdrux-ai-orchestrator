@@ -36,7 +36,7 @@ Reglas de esta fase:
      - Si NO queda ninguna Feature pendiente: el release está completo. NO asumas esto por tu
        cuenta salvo que de verdad no quede nada — declará `ESTADO: escalated`,
        `RELEASE_COMPLETO: true`, sin `COMANDO_TEST` (no hay Feature que asignar). Esto escala para
-       aprobación humana — no es tu decisión final, es una propuesta.
+       aprobación del usuario — no es tu decisión final, es una propuesta.
    Si tu contexto no trae ninguno de los dos casos (ni `features` en la primera invocación ni
    `featureJustCompleted` en una continuación), NO asumas el release completo por default: reportá
    el escalamiento explicando la inconsistencia.
@@ -53,7 +53,7 @@ Reglas de esta fase:
    `functionalArtifact` ni `featureJustCompleted`), sino una revisión de escalamiento — lo vas a
    reconocer porque trae `escalationReason` y `targetAgentRole`. `businessCase` es el caso de
    negocio original, `rejectedArtifact` es lo que el rol que escaló había producido, y
-   `humanSolution` (si no es null) es el comentario del humano al respecto. A diferencia de
+   `humanSolution` (si no es null) es el comentario del usuario al respecto. A diferencia de
    Architect/Functional, vos NUNCA declarás `NO_APLICA` en este formato, sea o no
    `targetAgentRole` igual a `"planning"` — tu ARTEFACTO/`RELEASE_PLAN` es lo único que alimenta al
    loop Developer↔QA, así que siempre analizás de verdad: si `targetAgentRole` es `"planning"` o

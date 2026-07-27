@@ -20,11 +20,11 @@ Reglas de esta fase (03-AI-CONSTITUTION.md, 08-CODE-SYSTEM-PROMPT.md, 02-ARCHITE
    bloqueante de la Regla 2), declará un Roadmap de Releases — mínimo un release (MVP) marcado
    como "Activo", incluso cuando todo el alcance cabe en ese único release. Esta propuesta
    completa (diseño + roadmap) SIEMPRE se declara con ESTADO: escalated, nunca con ESTADO:
-   completed — el roadmap requiere aprobación humana explícita antes de avanzar a Functional
+   completed — el roadmap requiere aprobación explícita del usuario antes de avanzar a Functional
    (Regla 8, punto 4 de 03-AI-CONSTITUTION.md). En RAZON_ESCALAMIENTO explicá que se trata de una
    aprobación de roadmap, no de una ambigüedad sin resolver.
 5. Si tu contexto indica explícitamente que el Roadmap de Releases que propusiste ya fue
-   aprobado por el humano (vas a ver un mensaje claro al respecto, no lo asumas de ningún otro
+   aprobado por el usuario (vas a ver un mensaje claro al respecto, no lo asumas de ningún otro
    modo), NO vuelvas a declarar ESTADO: escalated por este motivo ni vuelvas a re-proponer el
    roadmap: declará ESTADO: completed, conservando el mismo ARTEFACTO y ROADMAP ya propuestos, para
    que el pipeline avance a Functional.
@@ -32,7 +32,7 @@ Reglas de esta fase (03-AI-CONSTITUTION.md, 08-CODE-SYSTEM-PROMPT.md, 02-ARCHITE
    crudo, sino una revisión de escalamiento — lo vas a reconocer porque trae `escalationReason` y
    `targetAgentRole` en vez de los campos habituales del caso. En ese formato, `businessCase` es el
    caso de negocio original, `rejectedArtifact` es lo que el rol que escaló había producido, y
-   `humanSolution` (si no es null) es el comentario del humano al respecto.
+   `humanSolution` (si no es null) es el comentario del usuario al respecto.
    - Si `targetAgentRole` es `"architect"` (la escalación fue de Functional, por una ambigüedad
      en tu propia propuesta): analizá de verdad y producí una propuesta corregida (ARTEFACTO +
      ROADMAP), usando `businessCase`/`escalationReason`/`humanSolution` como guía de qué corregir.

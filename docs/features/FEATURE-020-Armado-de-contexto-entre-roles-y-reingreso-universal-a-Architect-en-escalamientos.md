@@ -111,12 +111,16 @@ Architect. No hay ningún mecanismo que cruce de un run a otro para cumplir la r
   continuación — tanto si se origina en el run principal como en un run `PLANNING_TO_QA`.
 - Marcador `notApplicable: true` en `outputArtifact`, reconocido por el orquestador para avanzar
   de fase sin tratar el resultado como un artefacto normal ni como una escalación nueva.
-- Ajuste de rol/prompt en `architect.txt`, `functional.txt`, `planning.txt`, `developer.txt` (QA no
-  participa de este mecanismo de "paso" — siempre fue destino final del loop, no intermedio de
-  este recorrido) para reconocer un contexto de "revisión de escalamiento" y decidir si les toca.
-- Detección de "contenido repetido" basada en comparar el `id` de la versión vigente del artefacto
-  relevante (en `artifacts` o `project_config_versions`, ambos ya versionados/append-only) contra
-  el `id` guardado en el contexto al momento de escalar — no en memoria de proceso.
+- Ajuste de rol/prompt en `architect.txt`, `functional.txt`, `planning.txt` para reconocer un
+  contexto de "revisión de escalamiento" y decidir si les toca. **`developer.txt` finalmente no
+  se tocó** (ajuste real de implementación, ver Lecciones Aprendidas): con la Regla 10b (Planning
+  nunca pasa), Developer nunca recibe el contexto de reingreso directamente — Planning siempre
+  resuelve antes de que el loop Developer↔QA arranque, así que este ítem del Scope quedó
+  mecánicamente innecesario. QA tampoco participa de este mecanismo de "paso" — siempre fue
+  destino final del loop, no intermedio de este recorrido.
+- Detección de "contenido repetido" basada en comparar contenido (`rejectedArtifact` vs. el nuevo
+  `outputArtifact`, vía `artifactsAreEquivalent`) — ajuste real de implementación respecto a la
+  comparación por `id` de versión originalmente descrita acá (ver 6.5 y Lecciones Aprendidas).
 - Contador de recorridos completos (máximo 3), persistido como parte del contexto que viaja entre
   runs encadenados (no en un `Map` en memoria, que no sobrevive entre runs).
 
@@ -406,13 +410,14 @@ que confundir:
   contexto de reingreso de por medio: procesa el input real de Functional exactamente como lo hace
   hoy. No aplica ninguna regla especial.
 
-**Impacto en la detección de "repetido" (Regla 7) para `targetAgentRole = "developer"`**: como
-Planning siempre escribe una versión nueva en la Situación A (aunque sea solo reafirmando), la
-comparación de `id` de versión (Regla 7) prácticamente nunca coincide con `originalVersionRef` en
-este camino específico — casi nunca se detecta "repetido" antes de tiempo. El tope de 3
-recorridos (Regla 8) deja de ser un respaldo adicional y pasa a ser **la única red de seguridad
-real** para este caso, a diferencia del resto de los caminos (donde "repetido" y "tope" actúan de
-forma independiente, como ya muestra el ejemplo de traza de la Regla 7).
+**Impacto en la detección de "repetido" (Regla 7) para `targetAgentRole = "developer"`**: la
+detección de "repetido" (ver 6.5, corregida a comparación por contenido tras el mismo hallazgo de
+implementación) compara el contenido de la escalación de QA/Developer, no la reafirmación
+intermedia de Planning — así que sí puede activarse correctamente para este camino: si Planning
+reafirma el mismo plan y Developer/QA vuelven a producir y rechazar exactamente lo mismo, la
+comparación de contenido lo detecta igual que en cualquier otro camino. El tope de 3 recorridos
+(Regla 8) sigue siendo el respaldo para el caso donde cada vuelta produce *algo* distinto (aunque
+sea marginalmente) sin resolver el problema de fondo.
 
 Traza concreta para este caso: Recorrido 1 (`attempt = 1`) — QA escala; Architect y Functional
 pasan; Planning resuelve (reafirma o ajusta), versión nueva; el loop retoma con Developer. Si QA
@@ -422,25 +427,38 @@ resuelve de nuevo, otra versión nueva. Si QA sigue sin conformarse, escala de n
 **no** arranca un recorrido 4 — corta y escala directo al humano, aunque cada versión haya sido
 "distinta" cada vez (nunca se activó "repetido").
 
-### 6.5 Detección de contenido repetido — comparación por `id` de versión
+### 6.5 Detección de contenido repetido — comparación por contenido (ajuste real de implementación)
 
-Antes de crear **cada** run de reingreso (no solo el primero), se guarda `originalVersionRef`: el
-`id` de la fila vigente en `artifacts` (o `project_config_versions`, según corresponda) que
-representa lo que el rol que escala está cuestionando **en ese momento** — si ya hubo un recorrido
-anterior que cambió algo, este `id` es el de la versión nueva, no el de la escalación original
-absoluta (ver 6.6 y el ejemplo de traza en Regla 7). Ni `artifacts` (`insert`-only, confirmado en
-`repository.ts:518-525`) ni `project_config_versions` (versionado con `valid_to`, nunca se pisa
-`value`, confirmado en `writeProjectConfigVersion`, `repository.ts:314-347`, invocada desde
-`setProjectConfig`, `repository.ts:281-312`) sobreescriben contenido — el `id` guardado sigue
-siendo válido para siempre.
+**Cambio respecto a la versión original de esta sección (hallazgo al implementar, confirmado
+correcto por el owner)**: esta sección describía originalmente una comparación por `id` de
+`project_config_versions` para Architect/Planning (release_roadmap/release_plan) y por `id` de
+`artifacts` para el resto. Al implementarlo, comparar por `id` de config para **Planning**
+específicamente da un falso positivo: por la Regla 10b, Planning es el único rol que escribe
+`release_plan`, y siempre escribe una fila nueva (aunque sea solo reafirmando, `writeProjectConfigVersion` inserta incondicionalmente) — así que "sin cambios antes de invocar a Planning" sería
+**siempre cierto**, disparando "repetido" antes de darle a Planning la oportunidad de resolver
+(Regla 10b/6.4.a). La comparación por `id` no tiene este problema para Architect (su config,
+`release_roadmap`, la escribe un humano vía `respondService.ts`, no Architect mismo en su propia
+invocación), pero para mantener un único mecanismo uniforme para los 5 roles se descartó la
+distinción por rol.
 
-Cuando el recorrido llega de nuevo a `originAgentRole` (el rol que escaló al arrancar **ese**
-recorrido), el orquestador resuelve cuál es el `id` de la versión **vigente ahora** de ese mismo
-artefacto. Si coincide con `originalVersionRef`, nadie lo cambió **durante este recorrido** — se
-activa "contenido repetido" (`escalation_repeated_detected`, evento ya existente) y se escala al
-humano, sin importar en qué número de recorrido estemos. Si es un `id` distinto, algo cambió — el
-pipeline sigue normal desde ahí, lo cual puede resolver el problema o, más adelante, generar una
-escalación nueva (un recorrido siguiente, con su propio `originalVersionRef`).
+**Mecanismo implementado**: se compara **contenido**, no `id` — `artifactsAreEquivalent`
+(`escalation.ts`, JSON canonicalizado, el mismo mecanismo que ya usaba `handleLinearEscalation`
+desde antes de esta Feature) entre `rejectedArtifact` (lo que el rol que escaló había producido,
+guardado en el contexto de reingreso al momento de escalar) y el nuevo `outputArtifact` que
+produce ese mismo rol (`originAgentRole`) la próxima vez que escala. La comparación vive en
+`respondService.ts` (`findOriginatingReentryContext` + el bloque previo a crear el run hijo), no
+dentro del loop de fases de `runStart.ts`: cuando llega una escalación nueva, si el rol que escala
+ahora (`escalationArtifact.phase`) coincide con el `originAgentRole` del contexto que creó el run
+padre, y el contenido rechazado es equivalente al de ahora, nadie lo corrigió — se activa
+"contenido repetido" (`escalation_repeated_detected`) y se corta sin crear otro run encadenado
+(`{ kind: "escalation_dead_end", reason: "repeated" }`). Se excluye explícitamente el camino de
+aprobación (`roadmapApproval`/`releaseClosureRoadmap`) — ahí el usuario está aprobando, no
+"el mismo problema volvió a aparecer sin resolver".
+
+`originalVersionRef` se conserva en el contexto (`escalationArtifact.id`, una referencia estable
+y válida para siempre — confirmado insert-only en `repository.ts:518-525`) como evidencia de
+auditoría (Validation Evidence: "corresponde a filas reales"), pero ya no es el mecanismo de
+comparación en sí.
 
 ### 6.6 Contador de recorridos completos (tope 3)
 
@@ -484,7 +502,7 @@ sueltas de un rol.
 | Aprobación de Roadmap vía camino genérico | Humano aprueba el Roadmap (`roadmapApproval`), child run se crea | `pipelineSpec = FULL_PIPELINE` (sin cambio de resultado respecto a hoy, ya no por coincidencia), `targetAgentRole` indefinido para Architect es un no-op natural, `release_roadmap` ya actualizado antes de que Architect arranque — sin falso positivo de "repetido" |
 | Continuación de Planning con Release Plan | Run `PLANNING_TO_QA` arranca tras Feature A mergeada | Planning recibe la lista completa de Features + estados, no solo `featureJustCompleted` |
 | Escalamiento de Developer llega a Planning | Developer escala por ambigüedad del plan, `targetAgentRole = "planning"` | Architect y Functional responden `notApplicable`, Planning corrige, el pipeline continúa normal desde Planning (incluye loop Developer↔QA de nuevo) |
-| Peor caso — nadie se hace cargo | Ningún rol corrige nada real | Al llegar de nuevo a Developer (`originAgentRole`), el `id` de versión vigente es igual al guardado — se activa `escalation_repeated_detected`, escala a humano |
+| Peor caso — nadie se hace cargo | Ningún rol corrige nada real | Al escalar de nuevo el mismo rol (`originAgentRole`), el contenido nuevo es equivalente al `rejectedArtifact` guardado — se activa `escalation_repeated_detected`, corta sin crear otro run (`escalation_dead_end`) |
 | Tope de 3 recorridos | 3 recorridos completos sin resolución y sin contenido idéntico detectado | Se escala a humano al llegar a `attempt = 3`, sin esperar un 4to recorrido |
 | Cierre de release ya no rompe (regresión) | Confirmar que el bug-fix aparte de `respondService.ts:197` sigue funcionando tras este cambio | Cierre de release con release siguiente sigue arrancando en Architect |
 | Loop Developer↔QA sin cambios | Cualquier corrida normal sin escalamiento | Comportamiento idéntico a hoy — este mecanismo no lo toca |
@@ -495,8 +513,10 @@ sueltas de un rol.
 - Prueba real end-to-end en la VPS con un caso de negocio real que fuerce al menos un
   escalamiento en un rol distinto de Architect (ej. Developer), siguiendo el circuito completo
   hasta observar el reingreso y la resolución.
-- Consulta SQL sobre `artifacts`/`project_config_versions` mostrando que el `id` de versión
-  comparado en la detección de "repetido" corresponde a filas reales, no a un mecanismo en memoria.
+- Consulta SQL sobre `run_events` mostrando que `originalVersionRef`/`rejectedArtifact` persistidos
+  en `escalation_retry_context_prepared` corresponden a filas reales de `artifacts`, no a un
+  mecanismo en memoria — y que la comparación de "repetido" (Regla 7/6.5) usa el contenido
+  (`rejectedArtifact` vs. el nuevo `outputArtifact`), no ese `id`.
 
 ---
 
@@ -521,10 +541,52 @@ Implementación prohibida hasta aprobación humana explícita de este documento.
 
 ---
 
+## Lecciones Aprendidas
+
+Dos hallazgos reales de la implementación, ya confirmados correctos por el owner y reflejados en
+el cuerpo del documento (Regla 10b/6.4.a, 6.5), y un bug crítico encontrado recién en la primera
+prueba real end-to-end contra la VPS — los tres comparten la misma causa raíz: son detalles de
+"cómo se arma exactamente el contexto en runtime" que ninguna de las 4 rondas de validación de
+diseño podía detectar sin ejecutar el código real, porque las rondas de validación revisan la
+lógica descripta contra el código existente, no ejercitan el flujo de datos real entre las piezas
+nuevas.
+
+- **Planning nunca pasa** (Regla 10b): el mecanismo de "paso" solo está enganchado a las fases
+  lineales; Developer/QA corren aparte, en `runDeveloperQaLoop`, y ese loop siempre necesita un
+  plan real de Planning. Encontrado al escribir el código de Corrección 1, antes de cualquier
+  prueba — resuelto con el owner antes de seguir implementando.
+- **Detección de "repetido" por contenido, no por `id`** (6.5): comparar por `id` de
+  `project_config_versions` para Planning da un falso positivo, porque Planning es el único rol
+  que escribe esa config y siempre escribe una fila nueva (Regla 10b). Encontrado al escribir el
+  código de detección — resuelto en el momento, sin necesitar consulta al owner (ver el commit de
+  implementación).
+- **Bug crítico: `ramaBaseTrabajoFromBusinessCase` no encontraba `rama_base_trabajo` en un
+  `ReentryContext`** (`runStart.ts`): con la Regla 6, el camino genérico de `respondService.ts`
+  ahora siempre usa `pipelineSpec = FULL_PIPELINE`, así que el `initialContext` del run nuevo dejó
+  de ser el `business_case` crudo (como pasaba antes, cuando el padre ya coincidía por casualidad
+  con `FULL_PIPELINE`) — pasó a ser el `ReentryContext`, con `businessCase` anidado. La función que
+  busca `rama_base_trabajo` seguía asumiendo la forma vieja (nivel superior), así que
+  **la primera Feature de cualquier release fallaba siempre**, encontrado recién en la primera
+  prueba real end-to-end del owner contra la VPS (run `7f7127b2...`), después de que las 4 rondas
+  de validación de diseño y la implementación misma no lo detectaran — ninguna tenía un test ni un
+  caso de prueba real que ejercitara el camino completo (aprobar Roadmap → Planning arranca la
+  primera Feature). Arreglado haciendo que la función reconozca ambas formas de `initialContext`
+  (recursión de 1 nivel sobre `businessCase`).
+
+La lección general, consistente con lo que ya señaló el owner en la Nota de proceso de este
+documento: revisar la lógica contra el código existente (lo que hicieron las 4 rondas de
+validación) detecta contradicciones de diseño, pero no sustituye probar el flujo de datos real
+entre las piezas nuevas — sobre todo cuando una pieza (acá, `initialContext`) cambia de forma según
+qué camino la construyó, y el código que la consume no lo sabe.
+
+---
+
 ## Estado de la implementación
 
 Aprobado por el owner (Go para implementar). 3 rondas de validación técnica realizadas (Go
-condicionado en las 2 primeras, Go técnico limpio en la ronda 3). Durante el arranque de la
-implementación apareció un hallazgo real no cubierto por ninguna ronda de validación (Planning y
-el loop Developer↔QA no tenían ningún enganche con el mecanismo de "paso") — resuelto por el owner
-(Regla 10b, sección 6.4.a) sin necesitar otra ronda completa. En curso.
+condicionado en las 2 primeras, Go técnico limpio en la ronda 3). Implementada, con 3 hallazgos
+reales de la implementación (ver Lecciones Aprendidas) ya resueltos: Planning nunca pasa (Regla
+10b), detección de "repetido" por contenido en vez de por `id` (6.5), y el bug crítico de
+`ramaBaseTrabajoFromBusinessCase` con `ReentryContext` encontrado en la primera prueba real
+end-to-end. Validado con `tsc --noEmit` (backend y frontend), `npm run build`, y suite completa.
+Lista para mergear a `main`.

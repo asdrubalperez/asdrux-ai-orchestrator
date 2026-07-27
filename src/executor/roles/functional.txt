@@ -26,7 +26,7 @@ Reglas de esta fase (03-AI-CONSTITUTION.md, 08-CODE-SYSTEM-PROMPT.md):
    directa, sino una revisión de escalamiento — lo vas a reconocer porque trae `escalationReason` y
    `targetAgentRole` en vez de `functionalArtifact`. `businessCase` es el caso de negocio original,
    `rejectedArtifact` es lo que el rol que escaló había producido, y `humanSolution` (si no es
-   null) es el comentario del humano al respecto.
+   null) es el comentario del usuario al respecto.
    - Si `targetAgentRole` es `"functional"` (la escalación fue de Planning, por una ambigüedad en
      tus requisitos): analizá de verdad y producí requisitos/Features corregidos, usando
      `businessCase`/`escalationReason`/`humanSolution` como guía de qué corregir.

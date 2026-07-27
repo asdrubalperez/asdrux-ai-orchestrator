@@ -549,11 +549,27 @@ async function withRoleContext(projectId: string, incomingContext: unknown): Pro
     : { functionalArtifact: incomingContext, ...shared };
 }
 
-/** FEATURE-019: `rama_base_trabajo` solo existe en el `business_case` crudo del run raíz (FEATURE-017) — nunca en el contexto ya envuelto de invocaciones posteriores (ej. `{ featureJustCompleted }`). */
-function ramaBaseTrabajoFromBusinessCase(value: unknown): string | undefined {
+/**
+ * FEATURE-019: `rama_base_trabajo` solo existe en el `business_case` crudo del run raíz
+ * (FEATURE-017) — nunca en el contexto ya envuelto de invocaciones posteriores (ej.
+ * `{ featureJustCompleted }`).
+ *
+ * FEATURE-020, bug encontrado en prueba real: con la Regla 6 del camino genérico de
+ * `respondService.ts` (siempre `FULL_PIPELINE`), el `initialContext` de un run creado por ese
+ * camino ya no es el `business_case` crudo — es un `ReentryContext`, con el `business_case`
+ * anidado en `businessCase`, no al nivel superior. Sin este chequeo, la primera Feature de
+ * cualquier release fallaba siempre que Planning se invocaba dentro de un run nacido del
+ * mecanismo de reingreso (`"Planning declaró RELEASE_PLAN pero no hay ramaBaseTrabajo
+ * disponible..."`, aunque el business_case real sí tuviera `rama_base_trabajo`). Recursión acotada
+ * a 1 nivel (`businessCase` nunca anida otro `ReentryContext` — es siempre el caso de negocio
+ * crudo o `null`).
+ */
+export function ramaBaseTrabajoFromBusinessCase(value: unknown): string | undefined {
   if (value === null || typeof value !== "object") return undefined;
-  const raw = (value as { rama_base_trabajo?: unknown }).rama_base_trabajo;
-  return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+  const record = value as { rama_base_trabajo?: unknown; businessCase?: unknown };
+  const direct = record.rama_base_trabajo;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  return ramaBaseTrabajoFromBusinessCase(record.businessCase);
 }
 
 /**
