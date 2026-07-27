@@ -129,6 +129,10 @@ Architect. No hay ningún mecanismo que cruce de un run a otro para cumplir la r
   (verificado: mantiene el plan de Planning en memoria durante todo el loop), no se toca.
 - Dar a los agentes acceso directo a la base de datos — el orquestador sigue siendo el único que
   lee/escribe; los agentes solo reciben lo que el orquestador les arma en el contexto.
+- `respondMergeApproval` (`respondService.ts:436-463`) — camino totalmente aparte, nunca pasa por
+  `buildEscalationContext` ni por este mecanismo; sigue creando el run de continuación
+  (`createPlanningToQaChildRun`/`PLANNING_TO_QA`) exactamente como hoy. No debería verse afectado —
+  se agrega un escenario a Validation Criteria para confirmarlo explícitamente, no por accidente.
 
 ---
 
@@ -147,23 +151,78 @@ Architect. No hay ningún mecanismo que cruce de un run a otro para cumplir la r
    pipeline), calculado por el orquestador — nunca lo decide ni lo declara el propio agente.
 5. Un rol que determina que la escalación no le corresponde responde con
    `outputArtifact: { notApplicable: true }` — el orquestador reconoce este marcador y avanza a la
-   fase siguiente sin registrar un artifact de tipo `design`/`code` normal para ese rol, y sin
-   reiniciar el contador de intentos.
-6. El recorrido completo (Architect→...→rol que escaló) vive en un único run nuevo, con
-   `pipelineSpec = FULL_PIPELINE` siempre — nunca se crea un run por cada rol que dice "no es mío".
-7. La detección de "contenido repetido" solo se evalúa cuando el recorrido llega de nuevo al rol
-   que escaló originalmente (`originAgentRole`) — comparando el `id` de la versión vigente del
-   artefacto relevante contra el `id` guardado al momento de escalar. Si son iguales, se activa el
-   escalamiento a humano (regla ya existente, sin cambios en ese punto final).
-8. El contador de recorridos completos tiene tope 3 (igual que hoy) — se incrementa cada vez que
-   se crea un run nuevo encadenado para la misma escalación original, viaja en el contexto (nunca
-   en memoria de proceso), y al alcanzar el tope se escala a humano aunque el contenido no sea
-   idéntico al original.
-9. Architect no participa del mecanismo de "paso" — sus propias escalaciones (ambigüedad de caso
-   de negocio real, o la aprobación de Roadmap que siempre requiere humano por regla) siguen
-   yendo directo al humano, sin cambios respecto a hoy.
+   fase siguiente sin reiniciar el contador de intentos. Se registra igual un artifact en
+   `artifacts` para no perder trazabilidad del recorrido, con `kind: "pass"` (nuevo, junto a los
+   3 valores que el código realmente escribe hoy: `"escalation"`, `"design"`, `"code"` —
+   `runStart.ts:328`, `runStart.ts:811`; corregido en la ronda 2 de validación, `verdict_approved`/
+   `verdict_rejected` no existen como valores reales de `kind`) — ningún código de UI/lógica
+   existente consulta `kind` fuera de `"escalation"` (`runView.ts:179`, confirmado en la ronda 1),
+   así que agregar este valor no rompe nada.
+6. Hay dos mecanismos distintos, y la distinción es **por camino, no por qué pipeline tenía el
+   run padre** (corrección real de la ronda 2 de validación — la Regla 6 original ataba esto al
+   pipeline del padre, y eso dejaba sin resolver el caso de Developer/QA escalando dentro de
+   `FULL_PIPELINE`):
+   - **Reintento automático en el mismo run** (`handleLinearEscalation`, sin cambios de mecanismo):
+     aplica únicamente a Architect/Functional/Planning escalando como fase lineal dentro de
+     `FULL_PIPELINE` — es gratis, sin worktree/rama nueva, y ya reingresa por Architect
+     (`phaseIndex = 0`). Solo se le corrige el contexto (Regla 2). Developer/QA nunca pasan por
+     este camino (el loop nunca tuvo reintento automático — escala directo, sin cambios).
+   - **Camino genérico de `respondService.ts`** (crea un run nuevo tras tu aprobación): aplica a
+     **cualquier** escalación que llegue ahí — sin importar el rol que escaló ni el pipeline del
+     run padre (`FULL_PIPELINE` o `PLANNING_TO_QA`) — excepto `mergeApproval`, que sigue su camino
+     totalmente aparte (Scope, Excluido). Este camino **siempre** usa `pipelineSpec = FULL_PIPELINE`
+     (simplifica el bug-fix ya mergeado `resolveChildPipelineSpec`: en vez de forzarlo solo cuando
+     hay `releaseClosureRoadmap`, lo fuerza siempre en este camino — es consistente, porque acá
+     siempre se crea un run nuevo, nunca hay reingreso gratis posible) y **siempre** arma el
+     contexto de reingreso enriquecido (`businessCase`, `targetAgentRole`, soporte
+     `notApplicable`), sin importar de qué rol/pipeline vino la escalación.
+7. La detección de "contenido repetido" se evalúa **dentro de cada recorrido**, cuando ese
+   recorrido llega de nuevo al rol que escaló originalmente (`originAgentRole`) — comparando el
+   `id` de la versión vigente contra `originalVersionRef`, que es el `id` vigente **al arrancar
+   ese recorrido específico** (no el de la escalación original absoluta, si ya hubo más de un
+   recorrido). Si son iguales, se activa el escalamiento a humano ya mismo, en ese recorrido —
+   puede pasar en el recorrido 1, 2 o 3, no está atado a llegar al tope. Si son distintos, alguien
+   cambió algo real — el pipeline sigue normal desde ahí (Regla 11), lo cual puede terminar en una
+   resolución real, o en una escalación nueva más adelante (arrancando un recorrido siguiente, con
+   su propio `originalVersionRef` nuevo).
+
+   **Ejemplo de traza, para que no quede ambiguo** (mismo caso de Developer↔Planning que venimos
+   usando): Developer escala con el plan en versión `V1` → recorrido 1, `attempt = 1`,
+   `originalVersionRef = V1`. Si nadie cambia nada y vuelve a Developer con `V1` intacto →
+   repetido, escala a humano — **en el recorrido 1**, sin necesitar un segundo intento. Si Planning
+   sí corrige (nueva versión `V2`), el pipeline sigue normal — si eso resuelve el problema, listo,
+   sin más recorridos. Si Developer, ya con `V2`, encuentra que el problema persiste (mismo u otro
+   motivo) y escala de nuevo, arranca el **recorrido 2**: `attempt = 2`, `originalVersionRef = V2`
+   (no `V1`) — la comparación de "repetido" en este recorrido es contra `V2`, no contra el
+   original absoluto.
+8. El contador de recorridos completos (`attempt`) tiene tope 3 — es un techo de seguridad
+   independiente de la detección de "repetido": cubre el caso donde cada recorrido sí produce
+   algún cambio real (nunca se detecta "repetido" en el sentido de la Regla 7), pero el problema de
+   fondo persiste recorrido tras recorrido. Al llegar a `attempt = 3` sin resolución, se escala a
+   humano aunque el contenido de ese último recorrido no sea idéntico al de su propio inicio.
+   Viaja en el contexto (nunca en memoria de proceso, que no sobrevive entre runs). Aplica solo al
+   camino genérico de `respondService.ts` — el reinicio en el mismo run dentro de `FULL_PIPELINE`
+   sigue contando como hoy (`MAX_ESCALATION_ATTEMPTS`, sin cambios).
+9. Architect, cuando escala dentro de un run `FULL_PIPELINE` (caso normal — ambigüedad de caso de
+   negocio real, o la aprobación de Roadmap que siempre requiere humano por regla), sigue el
+   mecanismo actual sin cambios: reinicio en el mismo run, ahora con `business_case` correctamente
+   incluido (Regla 2). Architect no participa del mecanismo de "paso" (`notApplicable`) en ningún
+   caso — no hay ningún rol anterior a él en el pipeline al que targetAgentRole pudiera apuntar.
 10. QA no participa como destino intermedio de este mecanismo — sigue siendo, como hoy, quien
     escala directo a humano cuando el loop Developer↔QA se agota o QA mismo no puede validar.
+11. Mientras un rol responde `notApplicable` (no le corresponde), el contexto que recibe la fase
+    siguiente es **el mismo contexto de reingreso original** (`businessCase`, `escalationReason`,
+    `rejectedArtifact`, `targetAgentRole`, etc.), nunca el `outputArtifact` de quien acaba de
+    pasar — recién cuando un rol resuelve algo real, su `outputArtifact` pasa a ser el input
+    normal de la fase siguiente, como en cualquier ejecución lineal.
+12. Cuando el rol que recibe el contexto de reingreso es Planning, el enriquecimiento que hoy se
+    le agrega siempre (Roadmap activo, Release Plan) se suma **al lado** del contexto de
+    reingreso, sin envolverlo dentro de `functionalArtifact` — el envoltorio actual
+    (`functionalArtifact: <lo recibido>`) solo aplica al flujo normal (lo que Functional produjo),
+    nunca a un contexto de reingreso.
+13. Los runs creados antes de esta Feature no tienen `root_run_id` — cualquier reintento sobre
+    ellos vuelve a perder `business_case` (degradación conocida, aceptada, sin backfill). No
+    afecta a ningún run creado después de esta Feature.
 
 ---
 
@@ -191,19 +250,39 @@ export async function getBusinessCaseForRun(runId: string): Promise<unknown> {
 ```
 Una sola consulta indexada, sin recursión ni CTE.
 
+**Runs preexistentes (decisión explícita, no silenciosa)**: la migración no hace backfill de
+`root_run_id` para runs creados antes de esta Feature — quedan en `NULL`. Para esos runs,
+`getBusinessCaseForRun` no matchea nada y devuelve `null` — cualquier reintento de escalamiento
+sobre un run viejo vuelve a tener el bug original (pérdida de `business_case`). Es una degradación
+aceptada conscientemente (Regla 13), no un bug nuevo — el owner decidió no hacer backfill. No
+afecta a ningún run creado después de mergear esta Feature.
+
 ### 6.2 Release Plan en toda invocación de Planning
 
 Extender `withActiveReleaseContext` (`runStart.ts:514-520`) para leer también
-`getCurrentProjectConfig(projectId, "release_plan")` e incluirlo:
+`getCurrentProjectConfig(projectId, "release_plan")` e incluirlo — con la distinción por forma que
+describe la Corrección 2 de 6.4 (no envolver un contexto de reingreso dentro de
+`functionalArtifact`):
 ```ts
-async function withRoleContext(projectId: string, functionalArtifact: unknown): Promise<unknown> {
+function isReingresoContext(value: unknown): value is { escalationReason: unknown; targetAgentRole: unknown } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "escalationReason" in value &&
+    "targetAgentRole" in value
+  );
+}
+
+async function withRoleContext(projectId: string, incomingContext: unknown): Promise<unknown> {
   const roadmap = await getCurrentProjectConfig(projectId, "release_roadmap");
   const releasePlan = await getCurrentProjectConfig(projectId, "release_plan");
-  return {
-    functionalArtifact,
+  const shared = {
     activeRelease: activeReleaseFromRoadmap(roadmap?.value ?? null),
     releasePlan: releasePlan?.value ?? null,
   };
+  return isReingresoContext(incomingContext)
+    ? { ...incomingContext, ...shared }
+    : { functionalArtifact: incomingContext, ...shared };
 }
 ```
 Aplica igual en la invocación normal (dentro de `FULL_PIPELINE`) y en la continuación
@@ -222,12 +301,27 @@ const PREDECESSOR_ROLE: Partial<Record<AgentRole, AgentRole>> = {
 `architect` no tiene entrada — sus escalaciones no usan este mecanismo (Regla 9). Se calcula en el
 momento de armar el contexto de reingreso (`buildEscalationContext` extendido), nunca por el LLM.
 
-### 6.4 Reingreso único vía `FULL_PIPELINE`, con marcador `notApplicable`
+### 6.4 Reingreso encadenado — el camino genérico de `respondService.ts`, siempre
 
-Se reemplaza el reinicio local de `handleLinearEscalation` (`phaseIndex = 0` dentro del mismo run)
-por la creación de un run nuevo (mismo patrón que ya usa `respondService.ts` para cualquier child
-run: `createRunWorktree`, `createRun` con `client`, `originated_from_run_id`), con
-`pipelineSpec = FULL_PIPELINE` siempre, y contexto inicial:
+**Alcance correcto (ajustado en la ronda 2 de validación — la distinción por "Architect está o no
+en el pipeline del padre" dejaba sin resolver el caso de Developer/QA escalando dentro de
+`FULL_PIPELINE`, que también cae en este camino genérico)**: la distinción real es **por camino,
+no por qué pipeline tenía el run padre** (ver Regla 6). El reintento automático en el mismo run
+(`handleLinearEscalation`) solo existe para Architect/Functional/Planning dentro de `FULL_PIPELINE`
+— ya reingresa por Architect gratis, sin worktree/rama nueva, solo necesitaba el arreglo de
+contexto de 6.1. Developer/QA nunca pasan por ahí (el loop siempre escaló directo a humano, sin
+reintento automático). Todo lo demás —cualquier escalación, de cualquier rol, sobre cualquier
+pipeline padre, que llegue a requerir aprobación humana— pasa por el camino genérico de
+`respondService.ts` (`resolveChildPipelineSpec` + `buildEscalationContext`, excepto
+`mergeApproval`, que sigue aparte). Este mecanismo nuevo se aplica **siempre** en ese camino
+genérico, sin condición sobre el pipeline del padre ni sobre qué rol escaló.
+
+**Mecanismo**: se crea un run nuevo (mismo patrón que ya usa `respondService.ts` para cualquier
+child run: `createRunWorktree`, `createRun` con `client`, `originated_from_run_id`), con
+`pipelineSpec = FULL_PIPELINE` siempre (simplifica `resolveChildPipelineSpec`, el bug-fix ya
+mergeado: en vez de forzarlo solo cuando hay `releaseClosureRoadmap`, se fuerza siempre en este
+camino — es consistente, porque acá siempre se crea un run nuevo, nunca hay reingreso gratis
+posible), y contexto inicial:
 ```ts
 {
   businessCase: await getBusinessCaseForRun(originalRunId),
@@ -240,56 +334,85 @@ run: `createRunWorktree`, `createRun` con `client`, `originated_from_run_id`), c
   originalVersionRef, // id de la versión vigente al momento de escalar, ver 6.5
 }
 ```
-Cada rol, al recibir este contexto, evalúa si `targetAgentRole` es él (o si de todas formas tiene
-algo que corregir aunque no sea el destinatario esperado — el "peor caso" sigue avanzando). Si no
-tiene nada que aportar, responde `{ status: "completed", outputArtifact: { notApplicable: true } }`.
-El orquestador, al ver este marcador, **no** registra un artifact de tipo `design`/`code` normal
-para ese rol y pasa el mismo contexto de reingreso (sin modificar) a la fase siguiente — el pipeline
-avanza, pero el contenido que viaja sigue siendo el de la escalación original, no el output de este
-rol.
+Llamamos a este objeto el **contexto de reingreso**. Se distingue de un artifact normal por su
+forma (siempre tiene `escalationReason` + `targetAgentRole`, que ningún artifact de Functional
+tiene).
 
-Si un rol SÍ resuelve el problema (produce un `outputArtifact` real, sin el marcador), el pipeline
-continúa de ahí en más de forma **normal** — como cualquier ejecución lineal — hasta el final del
-pipeline (incluido el loop Developer↔QA si corresponde), no se corta ahí.
+**Corrección 1 — cómo viaja el contexto mientras nadie se hace cargo (hallazgo real de la ronda 1,
+`runStart.ts:305` no lo soportaba)**: `runStart.ts:305` arma el contexto de cada fase como
+`previousResult === null ? currentInitialContext : previousResult.outputArtifact` — esto asume que
+lo que sigue siempre es el resultado normal del rol anterior. Necesita una rama nueva: si el
+`outputArtifact` de la fase anterior es `{ notApplicable: true }`, el contexto de la fase
+siguiente **no** es ese marcador — es el mismo contexto de reingreso que recibió la fase que acaba
+de pasar, sin modificar. Recién cuando un rol responde con un `outputArtifact` real (sin el
+marcador), se retoma la lógica normal (su output pasa a ser el input siguiente, como cualquier
+ejecución lineal) — desde ese punto, el pipeline continúa como cualquier corrida normal, incluido
+el loop Developer↔QA si corresponde.
+
+**Corrección 2 — cómo convive esto con el enriquecimiento de Planning (hallazgo real de la ronda
+1, choque con `withRoleContext`)**: `withRoleContext` (6.2) hoy envuelve incondicionalmente
+cualquier contexto entrante dentro de `functionalArtifact` cuando `agentRole === "planning"`. Si lo
+que llega es un contexto de reingreso, este envoltorio lo esconde un nivel más adentro de donde
+Planning espera encontrarlo (`escalationReason` directo, no `functionalArtifact.escalationReason`).
+`withRoleContext` necesita distinguir por forma: si el contexto entrante tiene `escalationReason` +
+`targetAgentRole` (es un contexto de reingreso), se le agrega `activeRelease`/`releasePlan` **al
+lado**, sin envolverlo (`{ ...context, activeRelease, releasePlan }`); si no (es el flujo normal,
+lo que Functional produjo), se mantiene el envoltorio actual (`{ functionalArtifact: context,
+activeRelease, releasePlan }`), sin cambios.
+
+**Costo operativo (agregado tras la ronda 1 — antes no estaba en Riesgos)**: a diferencia del
+reinicio dentro de `FULL_PIPELINE` (gratis, mismo run), cada recorrido completo de este mecanismo
+crea un run + worktree + rama nuevos — acotado a máximo 3 por escalación (Regla 8), pero es un
+costo real de tiempo/tokens que no existía para este camino. Ver 6.7.
 
 ### 6.5 Detección de contenido repetido — comparación por `id` de versión
 
-Antes de crear el run de reingreso, se guarda `originalVersionRef`: el `id` de la fila vigente en
-`artifacts` (o `project_config_versions`, según corresponda) que representa lo que el rol que
-escaló estaba cuestionando. Ni `artifacts` (`insert`-only, confirmado en `repository.ts:518-525`)
-ni `project_config_versions` (versionado con `valid_to`, nunca se pisa `value`, confirmado en
-`repository.ts:281-340`) sobreescriben contenido — el `id` guardado sigue siendo válido para
-siempre.
+Antes de crear **cada** run de reingreso (no solo el primero), se guarda `originalVersionRef`: el
+`id` de la fila vigente en `artifacts` (o `project_config_versions`, según corresponda) que
+representa lo que el rol que escala está cuestionando **en ese momento** — si ya hubo un recorrido
+anterior que cambió algo, este `id` es el de la versión nueva, no el de la escalación original
+absoluta (ver 6.6 y el ejemplo de traza en Regla 7). Ni `artifacts` (`insert`-only, confirmado en
+`repository.ts:518-525`) ni `project_config_versions` (versionado con `valid_to`, nunca se pisa
+`value`, confirmado en `writeProjectConfigVersion`, `repository.ts:314-347`, invocada desde
+`setProjectConfig`, `repository.ts:281-312`) sobreescriben contenido — el `id` guardado sigue
+siendo válido para siempre.
 
-Cuando el recorrido llega de nuevo a `originAgentRole` (el rol que escaló originalmente), el
-orquestador resuelve cuál es el `id` de la versión **vigente ahora** de ese mismo artefacto. Si
-coincide con `originalVersionRef`, nadie lo cambió — se activa "contenido repetido"
-(`escalation_repeated_detected`, evento ya existente) y se escala al humano, igual que hoy. Si es
-un `id` distinto, algo cambió — el pipeline sigue normal desde ahí.
+Cuando el recorrido llega de nuevo a `originAgentRole` (el rol que escaló al arrancar **ese**
+recorrido), el orquestador resuelve cuál es el `id` de la versión **vigente ahora** de ese mismo
+artefacto. Si coincide con `originalVersionRef`, nadie lo cambió **durante este recorrido** — se
+activa "contenido repetido" (`escalation_repeated_detected`, evento ya existente) y se escala al
+humano, sin importar en qué número de recorrido estemos. Si es un `id` distinto, algo cambió — el
+pipeline sigue normal desde ahí, lo cual puede resolver el problema o, más adelante, generar una
+escalación nueva (un recorrido siguiente, con su propio `originalVersionRef`).
 
 ### 6.6 Contador de recorridos completos (tope 3)
 
 `attempt` viaja en el contexto de reingreso (no en un `Map` en memoria, que no sobrevive entre
 runs separados). Se inicializa en 1 al crear el primer run de reingreso para una escalación dada, y
 se incrementa en 1 cada vez que hace falta crear **otro** run de reingreso completo para la misma
-escalación original (o sea, cuando el recorrido llegó a `originAgentRole` sin detectar cambio, pero
-todavía no se alcanzó el tope). Al llegar a `attempt = 3` sin resolución, se escala a humano aunque
+escalación original (o sea, cuando el recorrido anterior sí produjo un cambio real — no fue
+"repetido" — pero el problema persiste y se genera una escalación nueva sobre la misma cadena,
+todavía sin alcanzar el tope). Al llegar a `attempt = 3` sin resolución, se escala a humano aunque
 el contenido no sea idéntico — mismo criterio de tope que existe hoy
 (`MAX_ESCALATION_ATTEMPTS`), solo que ahora cuenta recorridos completos en vez de invocaciones
 sueltas de un rol.
 
 ### 6.7 Riesgos técnicos
 
-- Este mecanismo reemplaza una pieza central del motor de escalamiento (`handleLinearEscalation`),
-  usada por todos los roles desde antes de FEATURE-018 — el riesgo de regresión es real y amplio,
-  no acotado a un solo camino. Necesita cobertura de test proporcionalmente amplia (ver sección 7).
+- Este mecanismo agrega una pieza nueva al motor de escalamiento para el camino genérico de
+  `respondService.ts` (`handleLinearEscalation` sigue sin cambios para el reintento en el mismo
+  run dentro de `FULL_PIPELINE`, ver Regla 6) — de todas formas toca puntos usados por todos los
+  roles (`runStart.ts:305`, `withRoleContext`), así que el riesgo de regresión es real. Necesita
+  cobertura de test proporcionalmente amplia (ver sección 7).
 - El marcador `notApplicable` depende de que cada rol lo use correctamente en su prompt — mismo
   tipo de fragilidad ya aceptada (H12) para otras etiquetas de convención (`ROADMAP`,
   `FEATURES`, etc.), tolerada con el mismo mecanismo de defensa (regex genérico, tolerante a
   variaciones de formato).
 - El recorrido completo (hasta 5 invocaciones de LLM por vuelta: Architect, Functional, Planning,
   Developer, y potencialmente QA si Developer resuelve y el loop continúa) tiene un costo real de
-  tiempo/tokens mayor al reintento actual (1 invocación). Es exactamente el costo que el ítem
+  tiempo/tokens mayor al reintento actual — y, a diferencia del reinicio dentro de `FULL_PIPELINE`
+  (gratis, mismo run/worktree/rama), **cada recorrido de este mecanismo crea un run + worktree +
+  rama nuevos**, acotado a máximo 3 por escalación (Regla 8). Es exactamente el costo que el ítem
   ⚪ Tentativo "Escalamiento optimizado sin reinicio completo" ya anticipaba y decide no resolver
   todavía — aceptado como tradeoff de v1, consistente con decisiones anteriores del owner de no
   sobreingenierizar antes de que el costo sea un problema real.
@@ -301,12 +424,14 @@ sueltas de un rol.
 | Escenario | Input | Esperado |
 |---|---|---|
 | Reintento automático de Architect | Architect escala su Roadmap, `humanSolution` null | El run de reingreso incluye `business_case` real (vía `root_run_id`), Architect puede reinterpretar en vez de reportar "rechazado" sin fundamento |
+| Aprobación de Roadmap vía camino genérico | Humano aprueba el Roadmap (`roadmapApproval`), child run se crea | `pipelineSpec = FULL_PIPELINE` (sin cambio de resultado respecto a hoy, ya no por coincidencia), `targetAgentRole` indefinido para Architect es un no-op natural, `release_roadmap` ya actualizado antes de que Architect arranque — sin falso positivo de "repetido" |
 | Continuación de Planning con Release Plan | Run `PLANNING_TO_QA` arranca tras Feature A mergeada | Planning recibe la lista completa de Features + estados, no solo `featureJustCompleted` |
 | Escalamiento de Developer llega a Planning | Developer escala por ambigüedad del plan, `targetAgentRole = "planning"` | Architect y Functional responden `notApplicable`, Planning corrige, el pipeline continúa normal desde Planning (incluye loop Developer↔QA de nuevo) |
 | Peor caso — nadie se hace cargo | Ningún rol corrige nada real | Al llegar de nuevo a Developer (`originAgentRole`), el `id` de versión vigente es igual al guardado — se activa `escalation_repeated_detected`, escala a humano |
 | Tope de 3 recorridos | 3 recorridos completos sin resolución y sin contenido idéntico detectado | Se escala a humano al llegar a `attempt = 3`, sin esperar un 4to recorrido |
 | Cierre de release ya no rompe (regresión) | Confirmar que el bug-fix aparte de `respondService.ts:197` sigue funcionando tras este cambio | Cierre de release con release siguiente sigue arrancando en Architect |
 | Loop Developer↔QA sin cambios | Cualquier corrida normal sin escalamiento | Comportamiento idéntico a hoy — este mecanismo no lo toca |
+| `respondMergeApproval` intacto (regresión) | Aprobación de merge en Modo Manual (FEATURE-019) | Sigue creando el run de continuación vía `PLANNING_TO_QA`, sin pasar por ningún camino de este mecanismo |
 
 ### Validation Evidence
 
@@ -341,4 +466,7 @@ Implementación prohibida hasta aprobación humana explícita de este documento.
 
 ## Estado de la implementación
 
-Pendiente — documento recién redactado, aún no enviado a validación técnica (Codex/Claude Code).
+Pendiente — 3 rondas de validación técnica realizadas (Go condicionado en las 2 primeras, **Go
+técnico limpio en la ronda 3**, con 2 sugerencias menores de pulido ya incorporadas: snippet de
+`withRoleContext` actualizado con la rama condicional real, y escenario de aprobación de Roadmap
+vía camino genérico agregado a Validation Criteria). Listo para Approval Gate del owner.
