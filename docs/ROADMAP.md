@@ -58,25 +58,27 @@
   siguiente" (Functional Goal original de la Feature) — se descubrió que el motor de pipeline no
   tiene hoy ningún concepto de "Feature" como dato rastreable ni de múltiples Features ejecutándose
   en secuencia dentro de un release, lo cual excede el alcance de wiring de esta Feature. Ver
-  Lecciones Aprendidas más abajo y FEATURE-019/020. Diseño y evidencia en
+  Lecciones Aprendidas más abajo y FEATURE-019/021. Diseño y evidencia en
   `docs/features/FEATURE-018-Wiring-real-del-ciclo-Roadmap-de-Releases-(Architect)-+-Release-Plan-(Planning).md`.
-
-**🟡 Confirmado**
 - FEATURE-019 — Modelo de circuitos anidados para el ciclo de releases: Architect gobierna el
   avance entre releases del Roadmap, Planning gobierna la iteración de Features dentro del release
-  activo (Developer siempre vuelve a Planning al terminar una Feature, en vez de autogobernarse —
-  resuelve una tensión real con la Regla 10, Ownership de Artefactos, del Runbook). Cada uno de los
-  tres circuitos (Roadmap/Architect, Release Plan/Planning, Feature Implementation/Developer↔QA)
-  tiene su propia salida natural hacia el circuito contenedor; reintento y escalada al humano se
-  mantienen uniformes, sin cambios, para cualquier circuito. Discovery en curso — diagrama base
-  acordado con el owner, pendiente Design.
-- FEATURE-020 — Adaptación de FEATURE-018 al mecanismo que resulte de FEATURE-019. Depende
+  activo (Developer siempre vuelve a Planning al terminar una Feature, en vez de autogobernarse).
+  Implementada y mergeada (commits `2c85221`, `f361a96`). Validación end-to-end incompleta —
+  encontró un bug crítico preexistente de pérdida de contexto en reintentos de escalamiento, que
+  bloqueó seguir probando y derivó en FEATURE-020. Ver Lecciones Aprendidas en
+  `docs/features/FEATURE-019-*.md`.
+
+**🟡 Confirmado**
+- FEATURE-020 — Rediseño de cómo se arma el contexto entre roles: lectura de artefactos
+  persistidos por referencia (DB) en vez de acumulación en el contexto que viaja entre fases.
+  Prioridad alta — bloqueó la validación end-to-end de FEATURE-019. Ver detalle abajo.
+- FEATURE-021 — Adaptación de FEATURE-018 al mecanismo que resulte de FEATURE-019. Depende
   enteramente de que FEATURE-019 cierre su Diseño — no se puede dimensionar ni implementar antes
   (mismo criterio que la dependencia ya documentada de FEATURE-016 respecto de FEATURE-015A/015B).
-- FEATURE-021 (antes FEATURE-019, antes FEATURE-018, antes FEATURE-017, antes FEATURE-014) —
-  Milestone 2 — Validación end-to-end con caso de negocio real
-- FEATURE-022 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
-- FEATURE-023 — Credenciales git por usuario para el Orquestador (promovida de ⚪ Tentativo)
+- FEATURE-022 (antes FEATURE-021, antes FEATURE-019, antes FEATURE-018, antes FEATURE-017, antes
+  FEATURE-014) — Milestone 2 — Validación end-to-end con caso de negocio real
+- FEATURE-023 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
+- FEATURE-024 — Credenciales git por usuario para el Orquestador (promovida de ⚪ Tentativo)
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
@@ -256,12 +258,12 @@ original): el disparo automático de "release completo → Architect propone el 
 
 **Lecciones Aprendidas**: este hallazgo, surgido en la revisión de cierre de FEATURE-018, derivó en
 dos Features nuevas — FEATURE-019 (rediseño del ciclo de ejecución de releases/Features, con
-Planning gobernando la iteración y Architect gobernando el avance entre releases) y FEATURE-020
+Planning gobernando la iteración y Architect gobernando el avance entre releases) y FEATURE-021
 (adaptar esta Feature al mecanismo que resulte de FEATURE-019). El patrón de reusar mecanismos ya
 probados (atomicidad vía `client` compartido, distinción de escalamiento por contenido en vez de
 un campo nuevo) siguió dando resultado en esta Feature, igual que en ciclos anteriores.
 
-### 🟡 FEATURE-019 — Modelo de circuitos anidados para el ciclo de Releases y Features
+### ✅ FEATURE-019 — Modelo de circuitos anidados para el ciclo de Releases y Features
 Surge de la revisión de cierre de FEATURE-018 (ver Lecciones Aprendidas ahí). Modelo acordado con
 el owner (diagramas AS IS / TO BE, tres circuitos anidados):
 - Circuito 1 (Roadmap de Releases): Architect → Functional → Circuito 2. Salida natural (no hay
@@ -277,14 +279,38 @@ el owner (diagramas AS IS / TO BE, tres circuitos anidados):
   aplicando uniformemente sin importar en qué circuito ocurra el problema — no se toca ese
   mecanismo, solo se generaliza su punto de entrada.
 
-Pendiente de Discovery/Design completo: cómo se modela una Feature como dato rastreable (hoy es
-prosa), cómo Planning decide "no hay más Features" y Architect decide "no hay más releases", y
-cómo interactúa esto con el tope de 3 pasadas del circuito de escalamiento cuando hay múltiples
-Features en juego. Buena parte de la mecánica de aprobación de FEATURE-018 (escalamiento
-distinguido por contenido, atomicidad vía `client` compartido) es reusable para la salida del
-Circuito 2 hacia Architect, sin construir un mecanismo nuevo desde cero.
+Implementada (commit `2c85221`), con 2 correcciones propias encontradas durante la implementación
+y ya incluidas (commit `f361a96`): `projectRepoRoot` ambiguo (bug preexistente de FEATURE-018) y
+colisión de worktree en `mergeFeatureBranchIntoBase`. Mergeada a `main`. Validación end-to-end
+incompleta: la prueba real del owner validó Circuito 1 pero encontró un bug crítico preexistente
+en el mecanismo genérico de reintento de escalamiento (pérdida del `business_case` original), que
+bloqueó seguir validando Circuito 2/3 de punta a punta. Ver Lecciones Aprendidas en
+`docs/features/FEATURE-019-*.md` y FEATURE-020 (rediseño derivado del hallazgo).
 
-### 🟡 FEATURE-020 — Adaptación de FEATURE-018 al mecanismo de FEATURE-019
+### 🟡 FEATURE-020 — Rediseño de armado de contexto entre roles (lectura por referencia desde DB)
+Surge de un hallazgo real durante la prueba E2E de FEATURE-019 (ver su Lecciones Aprendidas): el
+mecanismo genérico de reintento de escalamiento pierde el `business_case` original porque
+`buildEscalationContext`/`currentInitialContext` reemplazan el contexto completo en vez de
+mergearlo. El owner señaló que el problema es más general: cualquier borde entre roles que dependa
+de contexto acumulado en vez de leer artefactos persistidos por referencia tiene el mismo riesgo —
+ej. Developer↔QA (QA le devuelve a Developer un error puntual; Developer necesita poder recuperar
+la Feature completa, no solo el error, sin que se la tengan que re-adjuntar a mano).
+
+Principio de diseño a aplicar: escritura de un artefacto es de su rol dueño (Regla 10, Ownership de
+Artefactos); lectura debería estar abierta a cualquier rol que la necesite, resuelta por el
+orquestador al armar el contexto de cada invocación (no por acumulación). El patrón ya existe
+parcialmente — `withActiveReleaseContext` (FEATURE-018) resuelve esto para Planning, leyendo
+`release_roadmap` fresco de la DB en cada invocación en vez de esperar que venga arrastrado.
+Generalizar este patrón a los demás bordes: reintento de escalamiento (cualquier rol), Developer↔QA,
+y cualquier otro punto donde hoy se pase contenido completo en vez de una referencia resuelta.
+
+Pendiente de Discovery/Design completo: qué bordes exactos del pipeline hoy dependen de contexto
+acumulado (relevar todos, no solo los 2 encontrados), qué forma toma "leer por referencia" en cada
+uno (identificador + resolución en el momento de la invocación), y si hace falta tocar el esquema de
+`artifacts`/`project_config_versions` o alcanza con generalizar el patrón de
+`withActiveReleaseContext` ya construido.
+
+### 🟡 FEATURE-021 — Adaptación de FEATURE-018 al mecanismo de FEATURE-019
 Depende enteramente de que FEATURE-019 cierre su Diseño — no se puede dimensionar antes (mismo
 criterio que la dependencia ya documentada de FEATURE-016 respecto de FEATURE-015A/015B). Cubre lo
 que haga falta ajustar en `architect.txt`/`planning.txt`/`respondService.ts` (ya construidos en
@@ -346,7 +372,7 @@ recorre secuencialmente los pasos intermedios aunque no tengan nada que resolver
 optimización futura: permitir que el circuito llegue directo al dueño real sin recorrer los pasos
 intermedios, cuando el costo de la v1 secuencial resulte un problema real en la práctica.
 
-### 🟡 FEATURE-022 — Selección de proveedor/modelo/credenciales por rol
+### 🟡 FEATURE-023 — Selección de proveedor/modelo/credenciales por rol
 Promovido de ⚪ Tentativo a 🟡 Confirmado.
 Ítem ampliado en la sesión de FEATURE-007, cubre tres superficies de configuración, todas parte de
 la misma pantalla de Disparo de la UI:
@@ -366,7 +392,7 @@ la misma pantalla de Disparo de la UI:
   que el resto de los roles, no quedar como excepción fija. Pendiente de diseño técnico (el mapeo no
   usa Executor/holder-worker hoy, por no necesitar tools — ver FEATURE-017 Regla 5 y Risks).
 
-### 🟡 FEATURE-023 — Credenciales git por usuario para el Orquestador
+### 🟡 FEATURE-024 — Credenciales git por usuario para el Orquestador
 Promovido de ⚪ Tentativo a 🟡 Confirmado.
 Hoy el clonado de repos (FEATURE-017, `cloneRunRepository`) usa una única identidad git fija a
 nivel de servidor — la clave SSH del usuario del sistema que corre el proceso del Orquestador.
@@ -483,7 +509,7 @@ primera opción porque, a esfuerzo comparable, una UI mínima de solo lectura da
 reusable hacia la Capa de UI completa. Queda como complemento futuro si hace falta alertas push
 (fase completada/fallida) fuera de cuando alguien está mirando la UI activamente.
 
-### 🟡 FEATURE-021 (antes FEATURE-019, antes FEATURE-018, antes FEATURE-017, antes FEATURE-014) —
-Milestone 2 — Validación end-to-end con caso de negocio real
+### 🟡 FEATURE-022 (antes FEATURE-021, antes FEATURE-019, antes FEATURE-018, antes FEATURE-017,
+antes FEATURE-014) — Milestone 2 — Validación end-to-end con caso de negocio real
 Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
 Confirmado y no Tentativo.

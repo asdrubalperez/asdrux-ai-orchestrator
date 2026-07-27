@@ -379,19 +379,44 @@ Implementación prohibida hasta aprobación humana explícita de este documento.
 
 ---
 
+## Lecciones Aprendidas (validación E2E)
+
+Durante la prueba real E2E se encontró que el mecanismo genérico de reintento de escalamiento
+(`buildEscalationContext`, `escalation.ts`) arma el contexto de reintento con solo 4 campos
+(`escalationReason`, `rejectedArtifact`, `originAgentRole`, `humanSolution`) y nunca incluye el
+`business_case` original — en `executePipelineRun` (`runStart.ts`), `currentInitialContext` se
+reemplaza por completo en cada reintento (`currentInitialContext = decision.context`), no se
+mergea con el contexto original. El mismo patrón se repite en `respondService.ts` para el run hijo
+creado tras la aprobación humana. Esto hace que cualquier rol, en cualquier escalamiento con
+reintento automático, pierda el caso de negocio original — confirmado como la causa exacta de que
+el owner nunca pudiera ver el Roadmap real que Architect diseñó (se degradó antes de llegar al
+modal de aprobación).
+
+El owner señaló, correctamente, que el parche mínimo (agregar `business_case` a esos 2 call
+sites) no resuelve el problema de fondo: cualquier borde entre roles (ej. Developer↔QA)
+tiene el mismo riesgo si dependen de contexto acumulado en vez de leer artefactos persistidos por
+referencia. El patrón correcto ya existe parcialmente (`withActiveReleaseContext`, FEATURE-018,
+que Planning usa para leer `release_roadmap` fresco de la DB en cada invocación) — hace falta
+generalizarlo. Se abrió FEATURE-020 para ese rediseño, con prioridad alta.
+
 ## Estado de la implementación
 
-Aprobado por el owner tras 5 rondas de validación técnica (Go condicionado en las primeras 4, Go
-limpio en la 5ª). Approval Gate cumplido. Implementado en la rama
-`feature/019-modelo-circuitos-anidados`, incluyendo el arreglo del hallazgo de cierre descrito en
-"Lecciones Aprendidas" (bug preexistente de FEATURE-018 sobre `projectRepoRoot`, más un segundo bug
-propio de `mergeFeatureBranchIntoBase` encontrado al escribir el test real de este cierre).
-Validado con `tsc --noEmit` (backend y frontend), `npm run build`, y suite completa (`npm test`,
-90 pass / 2 skipped por Docker CLI no disponible en este entorno). Test nuevo:
-`src/isolation/worktree.test.ts` — mergea contra un repo git real, reproduciendo el escenario de
-producción más común (clon raíz compartido con la rama base ya checked out).
+✅ Ejecutada. Implementada (commit `2c85221`), con 2 correcciones propias encontradas durante la
+implementación y ya incluidas (commit `f361a96`): (a) `projectRepoRoot` ambiguo — bug preexistente
+de FEATURE-018, corregido para derivarse siempre de `worktree.worktreePath` en vez de
+`runStarted.repoPath`; (b) colisión de worktree en `mergeFeatureBranchIntoBase` cuando la rama base
+ya está checked out en el clon compartido — corregido con `--detach` + push por refspec explícito.
+Mergeada a `main`.
+Validación end-to-end: incompleta, documentado explícitamente. La prueba real del owner sobre
+la VPS permitió validar Circuito 1 (Architect declara Roadmap, escala, se aprueba) pero encontró un
+bug crítico en el mecanismo genérico de reintento de escalamiento (`handleLinearEscalation` en
+`runStart.ts`, y la rama `{kind: "solution"}` de `respondToEscalation` en `respondService.ts`) que
+descarta el `business_case` original del contexto en cada reintento — no es un bug de esta Feature,
+es preexistente y afecta a cualquier rol/escalamiento, pero impidió seguir validando Circuito 2/3
+(continuación de Features) de punta a punta en esta sesión. Ver Lecciones Aprendidas arriba y
+FEATURE-020.
 
-## Lecciones Aprendidas
+## Lecciones Aprendidas (implementación)
 
 Al implementar el punto 3 de esta Feature (persistencia y propagación de la rama base a través de
 la cadena de runs) se encontró un bug preexistente de FEATURE-018, ya en `main`: `respondToEscalation`
