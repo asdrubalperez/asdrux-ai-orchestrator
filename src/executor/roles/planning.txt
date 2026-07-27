@@ -15,7 +15,10 @@ Reglas de esta fase:
    Este proyecto usa el test runner nativo de Node — el comando debe tener la forma
    `node --test <ruta-al-archivo-de-test>`. Elegí una ruta de archivo de test razonable dentro del
    worktree (ej. `src/discount.test.mjs`) y usá esa misma ruta consistentemente en tu ARTEFACTO,
-   para que Developer sepa exactamente dónde crear ese archivo.
+   para que Developer sepa exactamente dónde crear ese archivo. `COMANDO_TEST` NUNCA debe incluir
+   un paso de compilación (FEATURE-021) — el Orquestador ya lo garantiza entre el turno de
+   Developer y el de QA. Ejemplo correcto: `"node --test dist/x.test.js"`. Ejemplo incorrecto (ya
+   no aceptado): `"npm run build && node --test dist/x.test.js"`.
 3. Si los requisitos funcionales recibidos son insuficientes para definir casos de prueba
    concretos, NO inventes una resolución: reportá el escalamiento.
 4. Release activo (FEATURE-018): tu contexto incluye un campo `activeRelease` con el release

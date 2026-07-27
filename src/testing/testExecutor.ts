@@ -100,8 +100,22 @@ export class TestExecutor {
  * executable + args por espacios — suficiente para el único caso soportado hoy (el test runner
  * nativo de Node, sin argumentos citados/con espacios). Documentado como simplificación conocida,
  * no un parser de shell completo.
+ *
+ * FEATURE-021: rechaza explícitamente operadores de shell (`&&`, `;`, `|`) en vez de dividirlos
+ * como tokens sueltos — antes de esta Feature, un `COMANDO_TEST` con `&&` (ej. un paso de build
+ * mezclado con el test) producía tokens sin sentido ejecutados igual, sin `shell: false` real de
+ * por medio, con fallos confusos (`TS5042` en la prueba real que motivó esta Feature). El build ya
+ * lo garantiza `BuildExecutor` por separado (ver `buildExecutor.ts`) — `COMANDO_TEST` nunca
+ * necesita un operador de shell.
  */
 export function parseTestCommand(comandoTest: string): { executable: string; args: string[] } {
+  if (/&&|;|\|/.test(comandoTest)) {
+    throw new Error(
+      `COMANDO_TEST no puede contener operadores de shell (&&, ;, |): "${comandoTest}". ` +
+        `El paso de build ya lo garantiza el Orquestador (FEATURE-021) — declará solo el comando ` +
+        `de ejecución de tests.`
+    );
+  }
   const parts = comandoTest.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) {
     throw new Error(`COMANDO_TEST vacío o no parseable: "${comandoTest}"`);

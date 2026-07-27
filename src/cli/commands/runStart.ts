@@ -41,6 +41,7 @@ import { PIPELINES, PLANNING_TO_QA, SINGLE_PHASE_ARCHITECT } from "../../pipelin
 import type { PipelineSpec } from "../../pipelines/definitions.js";
 import { extractTestCommand } from "../../pipelines/extractTestCommand.js";
 import { TestExecutor, parseTestCommand } from "../../testing/testExecutor.js";
+import { BuildExecutor } from "../../testing/buildExecutor.js";
 import {
   activeReleaseFromRoadmap,
   artifactsAreEquivalent,
@@ -811,6 +812,7 @@ export async function runDeveloperQaLoop(params: {
 }): Promise<PhaseResult> {
   const { executor, developerExecutor, readRole, runId, planningResult, maxAttempts, phaseTiming } = params;
   const testExecutor = new TestExecutor();
+  const buildExecutor = new BuildExecutor();
   const testCommand = extractTestCommand(planningResult.outputArtifact);
   console.log(`[run:start] COMANDO_TEST declarado por Planning: ${testCommand}`);
 
@@ -819,6 +821,11 @@ export async function runDeveloperQaLoop(params: {
 
   let lastDeveloperResult: PhaseResult | null = null;
   let lastQaResult: PhaseResult | null = null;
+  // FEATURE-021: motivo del reintento cuando el build falla entre el turno de Developer y el de
+  // QA — mutuamente excluyente con qaRejectionReason (ver developerContext más abajo): si el
+  // motivo inmediato del reintento es un build roto, ese es el único motivo que ve Developer, no
+  // se le mezcla un qaRejectionReason viejo de un intento anterior donde QA sí llegó a correr.
+  let lastBuildFailureSummary: string | null = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     await haltIfCancelledExternally(runId);
@@ -830,7 +837,11 @@ export async function runDeveloperQaLoop(params: {
         : {
             plan: planningResult.outputArtifact,
             previousAttemptSummary: lastDeveloperResult?.summary,
-            qaRejectionReason: lastQaResult?.summary,
+            ...(lastBuildFailureSummary
+              ? { buildFailureReason: lastBuildFailureSummary }
+              : lastQaResult
+                ? { qaRejectionReason: lastQaResult.summary }
+                : {}),
           };
 
     const developerInvocation: PhaseInvocation = {
@@ -866,6 +877,40 @@ export async function runDeveloperQaLoop(params: {
     }
 
     await haltIfCancelledExternally(runId);
+
+    // FEATURE-021: build determinístico garantizado por el Orquestador, entre el turno de
+    // Developer y el de QA — nunca por decisión de ningún agente. QA es intencionalmente
+    // read-only (Regla 10, Ownership de Artefactos) y no puede recompilar; este paso corre en un
+    // contenedor efímero propio, separado, con permiso de escritura, antes de que TestExecutor
+    // monte el worktree en modo :ro para correr el test.
+    const buildResult = await buildExecutor.runIfNeeded(executor.options.workingDirectory, 120_000);
+    if (buildResult.ran) {
+      await recordRunEvent(runId, "build_executed", { attempt, buildResult });
+    }
+    if (buildResult.ran && buildResult.exitCode !== 0) {
+      lastBuildFailureSummary = buildResult.timedOut
+        ? `Build superó el timeout (120000ms) sin terminar.`
+        : `Build falló (exitCode ${buildResult.exitCode}): ${buildResult.stderr.slice(0, 2000)}`;
+      console.log(`[run:start] Build (intento ${attempt}) falló — Developer recibe el error en el próximo intento.`);
+
+      if (attempt === maxAttempts) {
+        const exhausted: PhaseResult = {
+          status: "escalated",
+          outputArtifact: null,
+          summary: `Se agotaron los ${maxAttempts} intentos sin lograr un build exitoso. Último error: ${lastBuildFailureSummary}`,
+          escalationReason: `Límite de reintentos (${maxAttempts}) alcanzado — build roto en todos los intentos, QA nunca llegó a validar.`,
+        };
+        await recordRunEvent(runId, "loop_exhausted", { maxAttempts, reason: "build", lastBuildResult: buildResult });
+        console.log(`[run:start] Límite de ${maxAttempts} intentos alcanzado sin build exitoso — run escalado.`);
+        return exhausted;
+      }
+
+      // No se invoca a QA este intento — continúa al siguiente attempt del mismo for,
+      // consumiendo el mismo contador maxAttempts que ya existe (sin inventar uno nuevo).
+      continue;
+    }
+    lastBuildFailureSummary = null; // se limpia apenas un build corre bien (o es no-op) en este intento
+
     await updateRunCurrentPhase(runId, "qa");
 
     // FEATURE-006 (resuelve H14): el TestExecutor —no el agente QA— corre el comando de test,
