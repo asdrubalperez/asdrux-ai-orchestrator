@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractRoadmapApproval, resolveChildPipelineSpec } from "./respondService.js";
-import { FULL_PIPELINE, PLANNING_TO_QA } from "../pipelines/definitions.js";
+import { extractRoadmapApproval, findOriginatingReentryContext, previousAttemptFromEvents } from "./respondService.js";
 
 const VALID_ROADMAP = {
   releases: [{ id: "r1", nombre: "MVP", alcanceResumen: "Alcance mínimo.", estado: "Activo" }],
@@ -34,30 +33,69 @@ test("extractRoadmapApproval rechaza un roadmap con activeReleaseId inexistente"
   assert.equal(extractRoadmapApproval({ phase: "architect" }, content), null);
 });
 
-const PLANNING_TO_QA_ROW = {
-  id: "planning-to-qa-row-id",
-  name: PLANNING_TO_QA.name,
-  version: 1,
-  definition: PLANNING_TO_QA.definition,
-};
-
-test("resolveChildPipelineSpec fuerza FULL_PIPELINE al cerrar un release con release siguiente, aunque el run padre sea PLANNING_TO_QA", () => {
-  const releaseClosureRoadmap = {
-    releases: [
-      { id: "r1", nombre: "MVP", alcanceResumen: "Alcance mínimo.", estado: "Completado" as const },
-      { id: "r2", nombre: "Siguiente", alcanceResumen: "Alcance siguiente.", estado: "Activo" as const },
-    ],
-    activeReleaseId: "r2",
-  };
-
-  const spec = resolveChildPipelineSpec(releaseClosureRoadmap, PLANNING_TO_QA_ROW);
-
-  assert.equal(spec.name, FULL_PIPELINE.name);
-  assert.equal(spec.definition.phases[0].agentRole, "architect");
+test("previousAttemptFromEvents devuelve 0 cuando el run padre no nació del mecanismo de reingreso (primer recorrido)", () => {
+  assert.equal(previousAttemptFromEvents([]), 0);
+  assert.equal(
+    previousAttemptFromEvents([{ event_type: "run_started", payload: {} }, { event_type: "phase_finished", payload: {} }]),
+    0
+  );
 });
 
-test("resolveChildPipelineSpec reusa el pipeline del run padre cuando no hay cierre de release (camino genérico, incluye roadmapApproval)", () => {
-  const spec = resolveChildPipelineSpec(null, PLANNING_TO_QA_ROW);
+test("previousAttemptFromEvents lee el attempt del último escalation_retry_context_prepared con forma de reingreso", () => {
+  const events = [
+    { event_type: "run_started", payload: {} },
+    {
+      event_type: "escalation_retry_context_prepared",
+      payload: {
+        context: {
+          businessCase: null,
+          escalationReason: "algo",
+          rejectedArtifact: null,
+          originAgentRole: "developer",
+          targetAgentRole: "planning",
+          humanSolution: null,
+          attempt: 2,
+          originalVersionRef: "v1",
+        },
+      },
+    },
+  ];
+  assert.equal(previousAttemptFromEvents(events), 2);
+});
 
-  assert.equal(spec.name, PLANNING_TO_QA.name);
+test("previousAttemptFromEvents ignora escalation_retry_context_prepared con forma vieja (sin targetAgentRole)", () => {
+  const events = [
+    {
+      event_type: "escalation_retry_context_prepared",
+      payload: { context: { escalationReason: "algo", rejectedArtifact: null, originAgentRole: "architect", humanSolution: null } },
+    },
+  ];
+  assert.equal(previousAttemptFromEvents(events), 0);
+});
+
+test("findOriginatingReentryContext devuelve null si el run no nació del mecanismo de reingreso", () => {
+  assert.equal(findOriginatingReentryContext([]), null);
+});
+
+test("findOriginatingReentryContext devuelve el contexto completo (Regla 7: comparar originAgentRole/rejectedArtifact contra la nueva escalación)", () => {
+  const events = [
+    {
+      event_type: "escalation_retry_context_prepared",
+      payload: {
+        context: {
+          businessCase: null,
+          escalationReason: "QA rechazó",
+          rejectedArtifact: { plan: "v1" },
+          originAgentRole: "qa",
+          targetAgentRole: "developer",
+          humanSolution: "arreglalo",
+          attempt: 1,
+          originalVersionRef: "artifact-1",
+        },
+      },
+    },
+  ];
+  const context = findOriginatingReentryContext(events);
+  assert.equal(context?.originAgentRole, "qa");
+  assert.deepEqual(context?.rejectedArtifact, { plan: "v1" });
 });

@@ -19,6 +19,7 @@ import {
   ensurePipelineDefinition,
   finalizeRun,
   findUserById,
+  getBusinessCaseForRun,
   getCurrentProjectConfig,
   getProjectForUser,
   getRunStatus,
@@ -45,6 +46,8 @@ import {
   artifactsAreEquivalent,
   buildEscalationContext,
   extractReleasePlanDeclaration,
+  isNotApplicableOutput,
+  isReentryContext,
   type MergeApprovalPayload,
 } from "../escalation.js";
 
@@ -293,7 +296,12 @@ export async function executePipelineRun(params: {
   try {
     let previousResult: PhaseResult | null = null;
     let phaseIndex = 0;
-    let currentInitialContext = initialContext;
+    // FEATURE-020, Corrección 1 (6.4): el contexto que recibe la próxima fase. Normalmente avanza
+    // al `outputArtifact` de la fase que acaba de terminar (flujo lineal de siempre) — pero
+    // mientras un rol responde `notApplicable` (no le corresponde una revisión de escalamiento en
+    // curso), este contexto NO se pisa: la fase siguiente recibe el mismo contexto de reingreso
+    // que recibió quien acaba de pasar, sin modificar.
+    let contextForNextPhase: unknown = initialContext;
     let retrying = false;
     const escalationAttemptsByRole = new Map<AgentRole, number>();
     const previousEscalationArtifactByRole = new Map<AgentRole, ArtifactRow>();
@@ -302,9 +310,9 @@ export async function executePipelineRun(params: {
       const phase = pipelineSpec.definition.phases[phaseIndex];
       await haltIfCancelledExternally(runId);
       await updateRunCurrentPhase(runId, phase.agentRole);
-      const baseContext = previousResult === null ? currentInitialContext : previousResult.outputArtifact;
+      const baseContext = contextForNextPhase;
       const context =
-        phase.agentRole === "planning" ? await withActiveReleaseContext(projectId, baseContext) : baseContext;
+        phase.agentRole === "planning" ? await withRoleContext(projectId, baseContext) : baseContext;
       const roleInstructions = await readRole(phase.agentRole);
       const selection = await resolveSelection(phase.agentRole);
       const executor = buildExecutor(selection, worktree.worktreePath, model);
@@ -322,10 +330,13 @@ export async function executePipelineRun(params: {
       const result = await executor.runPhase(invocation, { timeoutMs: timeoutForLinearPhase(phase.agentRole) });
       const durationMs = Date.now() - phaseTiming.startedAt;
       await recordRunEvent(runId, "phase_finished", { agentRole: invocation.agentRole, result, durationMs });
+      // FEATURE-020, Regla 5/10b: Planning nunca pasa (alimenta al loop Developer↔QA, ver 6.4.a) —
+      // el marcador solo aplica a Architect/Functional acá.
+      const isPass = phase.agentRole !== "planning" && result.status === "completed" && isNotApplicableOutput(result.outputArtifact);
       const artifact = await recordArtifact({
         runId,
         phase: invocation.agentRole,
-        kind: result.status === "escalated" ? "escalation" : "design",
+        kind: result.status === "escalated" ? "escalation" : isPass ? "pass" : "design",
         content: artifactContentForResult(result),
       });
 
@@ -345,6 +356,9 @@ export async function executePipelineRun(params: {
           await updateRunStatus(runId, "running");
           retrying = false;
         }
+        if (!isPass) {
+          contextForNextPhase = result.outputArtifact;
+        }
         phaseIndex += 1;
         continue;
       }
@@ -362,7 +376,7 @@ export async function executePipelineRun(params: {
 
         if (decision.retry) {
           retrying = true;
-          currentInitialContext = decision.context;
+          contextForNextPhase = decision.context;
           previousResult = null;
           phaseIndex = 0;
           continue;
@@ -476,7 +490,11 @@ async function handleLinearEscalation(params: {
     return { retry: false };
   }
 
+  // FEATURE-020, Regla 2/9: se corrige acá el bug original de FEATURE-019 — el contexto de
+  // reintento ahora incluye el `business_case` real (vía `root_run_id`), sin cambiar el resto del
+  // mecanismo (sigue siendo un reinicio en el mismo run, gratis, sin worktree/rama nueva).
   const context = buildEscalationContext({
+    businessCase: await getBusinessCaseForRun(params.runId),
     escalationReason: params.result.escalationReason,
     rejectedArtifact: params.result.outputArtifact,
     originAgentRole: params.agentRole,
@@ -510,20 +528,48 @@ function artifactContentForResult(result: PhaseResult): Record<string, unknown> 
  * su invocación (Regla Funcional 5) — inyectado acá, no asumido por el propio rol. `activeRelease`
  * viaja `null` cuando no hay ningún roadmap aprobado todavía para el proyecto (caso defendido por
  * planning.txt: escala en vez de asumir un release implícito).
+ *
+ * FEATURE-020, sección 6.2/Corrección 2: además del Roadmap activo, toda invocación de Planning
+ * recibe también el Release Plan vigente (`release_plan`), no solo en el uso interno del merge.
+ * Si el contexto entrante es un contexto de reingreso (Regla 11/12 — Architect/Functional ya
+ * pasaron, o Planning es el `targetAgentRole`), no se envuelve dentro de `functionalArtifact`: se
+ * le agrega `activeRelease`/`releasePlan` al lado, preservando su forma (`escalationReason`,
+ * `targetAgentRole`, etc.) intacta. El flujo normal (`functionalArtifact` real de Functional, o
+ * `{ featureJustCompleted }` de una continuación de FEATURE-019) sigue envuelto como siempre.
  */
-async function withActiveReleaseContext(projectId: string, functionalArtifact: unknown): Promise<unknown> {
+async function withRoleContext(projectId: string, incomingContext: unknown): Promise<unknown> {
   const roadmap = await getCurrentProjectConfig(projectId, "release_roadmap");
-  return {
-    functionalArtifact,
+  const releasePlan = await getCurrentProjectConfig(projectId, "release_plan");
+  const shared = {
     activeRelease: activeReleaseFromRoadmap(roadmap?.value ?? null),
+    releasePlan: releasePlan?.value ?? null,
   };
+  return isReentryContext(incomingContext)
+    ? { ...incomingContext, ...shared }
+    : { functionalArtifact: incomingContext, ...shared };
 }
 
-/** FEATURE-019: `rama_base_trabajo` solo existe en el `business_case` crudo del run raíz (FEATURE-017) — nunca en el contexto ya envuelto de invocaciones posteriores (ej. `{ featureJustCompleted }`). */
-function ramaBaseTrabajoFromBusinessCase(value: unknown): string | undefined {
+/**
+ * FEATURE-019: `rama_base_trabajo` solo existe en el `business_case` crudo del run raíz
+ * (FEATURE-017) — nunca en el contexto ya envuelto de invocaciones posteriores (ej.
+ * `{ featureJustCompleted }`).
+ *
+ * FEATURE-020, bug encontrado en prueba real: con la Regla 6 del camino genérico de
+ * `respondService.ts` (siempre `FULL_PIPELINE`), el `initialContext` de un run creado por ese
+ * camino ya no es el `business_case` crudo — es un `ReentryContext`, con el `business_case`
+ * anidado en `businessCase`, no al nivel superior. Sin este chequeo, la primera Feature de
+ * cualquier release fallaba siempre que Planning se invocaba dentro de un run nacido del
+ * mecanismo de reingreso (`"Planning declaró RELEASE_PLAN pero no hay ramaBaseTrabajo
+ * disponible..."`, aunque el business_case real sí tuviera `rama_base_trabajo`). Recursión acotada
+ * a 1 nivel (`businessCase` nunca anida otro `ReentryContext` — es siempre el caso de negocio
+ * crudo o `null`).
+ */
+export function ramaBaseTrabajoFromBusinessCase(value: unknown): string | undefined {
   if (value === null || typeof value !== "object") return undefined;
-  const raw = (value as { rama_base_trabajo?: unknown }).rama_base_trabajo;
-  return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+  const record = value as { rama_base_trabajo?: unknown; businessCase?: unknown };
+  const direct = record.rama_base_trabajo;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  return ramaBaseTrabajoFromBusinessCase(record.businessCase);
 }
 
 /**

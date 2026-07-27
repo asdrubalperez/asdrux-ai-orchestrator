@@ -20,6 +20,11 @@ export interface RunRow {
   branch_name: string | null;
   worktree_path: string | null;
   originated_from_run_id: string | null;
+  /**
+   * FEATURE-020, Regla 1: resuelto una única vez al crear el run — self si es raíz, heredado del
+   * padre si no. NULL para runs creados antes de esta Feature (sin backfill, Regla 13).
+   */
+  root_run_id: string | null;
   business_case: unknown;
   created_at: string;
   updated_at: string;
@@ -142,12 +147,13 @@ export async function createRun(params: {
   client?: PoolClient;
 }): Promise<RunRow> {
   const db = params.client ?? pool;
+  const rootRunId = await resolveRootRunId(db, params.id, params.originatedFromRunId ?? null);
   const result = await db.query<RunRow>(
     `insert into runs (
        id, pipeline_definition_id, owner_id, project_id, current_phase, status,
-       branch_name, worktree_path, originated_from_run_id
+       branch_name, worktree_path, originated_from_run_id, root_run_id
      )
-     values ($1, $2, $3, $4, $5, 'running', $6, $7, $8)
+     values ($1, $2, $3, $4, $5, 'running', $6, $7, $8, $9)
      returning *`,
     [
       params.id,
@@ -158,9 +164,26 @@ export async function createRun(params: {
       params.branchName,
       params.worktreePath,
       params.originatedFromRunId ?? null,
+      rootRunId,
     ]
   );
   return result.rows[0];
+}
+
+/**
+ * FEATURE-020, Regla 1: self si es raíz (sin `originatedFromRunId`), o el `root_run_id` ya
+ * persistido del padre si no — nunca se camina la cadena completa, una sola lectura.
+ */
+async function resolveRootRunId(
+  db: PoolClient | typeof pool,
+  id: string,
+  originatedFromRunId: string | null
+): Promise<string> {
+  if (!originatedFromRunId) return id;
+  const parent = await db.query<{ root_run_id: string | null }>("select root_run_id from runs where id = $1", [
+    originatedFromRunId,
+  ]);
+  return parent.rows[0]?.root_run_id ?? originatedFromRunId;
 }
 
 /**
@@ -178,9 +201,10 @@ export async function createRunPendingStart(params: {
   client?: PoolClient;
 }): Promise<RunRow> {
   const db = params.client ?? pool;
+  // FEATURE-020, Regla 1: siempre raíz (createRunPendingStart no tiene originated_from_run_id).
   const result = await db.query<RunRow>(
-    `insert into runs (id, pipeline_definition_id, owner_id, project_id, status, business_case)
-     values ($1, $2, $3, $4, 'sin_iniciar', $5)
+    `insert into runs (id, pipeline_definition_id, owner_id, project_id, status, business_case, root_run_id)
+     values ($1, $2, $3, $4, 'sin_iniciar', $5, $1)
      returning *`,
     [params.id, params.pipelineDefinitionId, params.ownerId, params.projectId, params.businessCase]
   );
@@ -208,6 +232,22 @@ export async function promoteRunToRunning(params: {
     [params.runId, params.firstPhase, params.branchName, params.worktreePath]
   );
   return result.rows[0] ?? null;
+}
+
+/**
+ * FEATURE-020, sección 6.1: resuelve el `business_case` original de cualquier run de la cadena vía
+ * su `root_run_id` (una sola consulta indexada, sin recursión ni CTE). Devuelve `null` para runs
+ * preexistentes sin `root_run_id` (degradación aceptada, Regla 13) o si el root no tiene
+ * `business_case` persistido.
+ */
+export async function getBusinessCaseForRun(runId: string): Promise<unknown> {
+  const result = await pool.query<{ business_case: unknown }>(
+    `select r.business_case
+     from runs r
+     where r.id = (select root_run_id from runs where id = $1)`,
+    [runId]
+  );
+  return result.rows[0]?.business_case ?? null;
 }
 
 /** FEATURE-017: chequeo pre-fase de cancelación externa — ver runStart.ts, executePipelineRun. */

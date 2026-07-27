@@ -166,6 +166,11 @@ export function createApp(config: ServerConfig): express.Express {
         return;
       }
 
+      if (result.kind === "escalation_dead_end") {
+        res.status(202).json({ status: "escalation_dead_end", reason: result.reason });
+        return;
+      }
+
       const { childRunId, execute } = result;
       res.status(202).json({ childRunId });
       void execute().catch((err: unknown) => {

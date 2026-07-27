@@ -3,14 +3,14 @@ import type { AgentRole } from "../contracts/executor.js";
 import { pool } from "../db/pool.js";
 import {
   createRun,
+  ensurePipelineDefinition,
+  getBusinessCaseForRun,
   getCurrentProjectConfig,
-  getPipelineDefinitionById,
   getRunDetailForUser,
   recordRunConfigVersions,
   recordRunEvent,
   resolveEscalatedRunStatus,
   setProjectConfig,
-  type PipelineDefinitionRow,
 } from "../db/repository.js";
 import {
   assertRunWorktreeAvailable,
@@ -20,18 +20,24 @@ import {
   type RunWorktree,
 } from "../isolation/worktree.js";
 import {
-  buildEscalationContext,
+  artifactsAreEquivalent,
+  buildReentryContext,
   extractMergeApproval,
   isAgentRole,
+  isReentryContext,
   isReleaseCompletionEscalation,
   isRoadmapApprovalPayload,
-  parsePipelineDefinitionRow,
   type MergeApprovalPayload,
+  type ReentryContext,
   type RoadmapApprovalPayload,
 } from "./escalation.js";
 import { createPlanningToQaChildRun, executePipelineRun, parseAuthMode, parseExecutorProvider } from "./commands/runStart.js";
 import { FULL_PIPELINE, PLANNING_TO_QA } from "../pipelines/definitions.js";
 import type { AgentConfig } from "../db/repository.js";
+
+// FEATURE-020, Regla 8: mismo criterio de tope que `MAX_ESCALATION_ATTEMPTS` (runStart.ts), pero
+// contando recorridos completos del mecanismo de reingreso encadenado, no invocaciones sueltas.
+const MAX_REENTRY_ATTEMPTS = 3;
 
 export type EscalationResponseAction = { abort: true } | { solution: string };
 
@@ -39,6 +45,13 @@ export type EscalationResponseResult =
   | { kind: "aborted" }
   | { kind: "conflict" }
   | { kind: "project_closed" }
+  /**
+   * FEATURE-020, Regla 7/8: el recorrido volvió a escalar el mismo rol con contenido equivalente
+   * al que ya se había rechazado (`repeated`), o se alcanzó el tope de 3 recorridos sin resolución
+   * (`exhausted`) — el run queda `resolved` (el humano ya respondió) pero no se crea otro run
+   * encadenado; corta acá, sin más automatismo.
+   */
+  | { kind: "escalation_dead_end"; reason: "repeated" | "attempts_exhausted" }
   | {
       kind: "solution";
       childRunId: string;
@@ -191,11 +204,10 @@ export async function respondToEscalation(params: {
     }
   }
 
-  const pipelineDefinition = await getPipelineDefinitionById(parentRun.pipeline_definition_id);
-  if (!pipelineDefinition) {
-    throw new Error(`No existe pipeline_definition_id ${parentRun.pipeline_definition_id} para run ${params.parentRunId}.`);
-  }
-  const pipelineSpec = resolveChildPipelineSpec(releaseClosureRoadmap, pipelineDefinition);
+  // FEATURE-020, Regla 6: el camino genérico siempre usa FULL_PIPELINE — nunca hay reingreso
+  // gratis posible acá (a diferencia del reinicio en el mismo run, que sigue sin cambios y no pasa
+  // por esta función), así que ya no hace falta reusar el pipeline del run padre.
+  const pipelineDefinitionRow = await ensurePipelineDefinition(FULL_PIPELINE);
 
   // FEATURE-018, sección 7.2: no hace falta un campo ni un tipo de acción nuevo para distinguir una
   // escalación de "aprobación de roadmap" de una escalación genérica — la señal ya está en el
@@ -210,11 +222,63 @@ export async function respondToEscalation(params: {
     : releaseClosureRoadmap
       ? buildReleaseClosureHumanSolution(rawSolution)
       : rawSolution;
-  const retryContext = buildEscalationContext({
+
+  // FEATURE-020, sección 6.4/6.6: `attempt` viaja en el contexto entre runs encadenados — se lee
+  // del último `escalation_retry_context_prepared` persistido en el run padre (si el padre mismo
+  // nació de este mecanismo), nunca de memoria de proceso.
+  const originatingContext = findOriginatingReentryContext(parentDetail.events);
+  const attempt = (originatingContext?.attempt ?? 0) + 1;
+
+  // FEATURE-020, Regla 7/8: solo aplica al camino de escalación genérica (una aprobación —
+  // roadmapApproval/releaseClosureRoadmap — es una decisión humana, no "el mismo problema volvió a
+  // aparecer sin resolver"). Si el rol que escala ahora es el mismo que originó el recorrido
+  // anterior y el contenido es equivalente al que ya se había rechazado, nadie lo corrigió — corta
+  // acá, sin crear otro run encadenado.
+  if (!roadmapApproval && !releaseClosureRoadmap && originatingContext) {
+    const repeated =
+      originatingContext.originAgentRole === escalationArtifact.phase &&
+      artifactsAreEquivalent(originatingContext.rejectedArtifact, escalationContent.outputArtifact);
+
+    if (repeated || attempt > MAX_REENTRY_ATTEMPTS) {
+      const reason = repeated ? "repeated" : "attempts_exhausted";
+      const client = await pool.connect();
+      try {
+        await client.query("begin");
+        const updated = await resolveEscalatedRunStatus(params.parentRunId, "resolved", client);
+        if (!updated) {
+          await client.query("rollback");
+          return { kind: "conflict" };
+        }
+        await recordRunEvent(
+          params.parentRunId,
+          reason === "repeated" ? "escalation_repeated_detected" : "escalation_exhausted",
+          { agentRole: escalationArtifact.phase, artifactId: escalationArtifact.id, attempt },
+          client
+        );
+        await recordRunEvent(params.parentRunId, "escalation_human_response", { solution: rawSolution, deadEnd: reason }, client);
+        await client.query("commit");
+      } catch (err) {
+        await client.query("rollback");
+        throw err;
+      } finally {
+        client.release();
+      }
+      await commitAllChanges(parentWorktree, `chore: preserve escalated work (run ${params.parentRunId})`);
+      return { kind: "escalation_dead_end", reason };
+    }
+  }
+
+  const retryContext: ReentryContext = buildReentryContext({
+    businessCase: await getBusinessCaseForRun(params.parentRunId),
     escalationReason: escalationContent.escalationReason,
     rejectedArtifact: escalationContent.outputArtifact,
     originAgentRole: escalationArtifact.phase,
     humanSolution,
+    attempt,
+    // FEATURE-020, sección 6.5: referencia estable de auditoría (artifacts es insert-only) — la
+    // detección real de "repetido" (más abajo, Regla 7/8) compara CONTENIDO
+    // (`artifactsAreEquivalent`) entre `rejectedArtifact` y el nuevo `outputArtifact`, no este id.
+    originalVersionRef: escalationArtifact.id,
   });
 
   const childRunId = randomUUID();
@@ -245,10 +309,10 @@ export async function respondToEscalation(params: {
     childWorktree = await createRunWorktree(repoRoot, childRunId, parentWorktree.branchName);
     const childRun = await createRun({
       id: childRunId,
-      pipelineDefinitionId: parentRun.pipeline_definition_id,
+      pipelineDefinitionId: pipelineDefinitionRow.id,
       ownerId: params.userId,
       projectId: parentRun.project_id,
-      firstPhase: pipelineSpec.definition.phases[0].agentRole,
+      firstPhase: FULL_PIPELINE.definition.phases[0].agentRole,
       branchName: childWorktree.branchName,
       worktreePath: childWorktree.worktreePath,
       originatedFromRunId: params.parentRunId,
@@ -264,7 +328,7 @@ export async function respondToEscalation(params: {
         provider: cliAgentOverride.executorProvider,
         authMode: cliAgentOverride.authMode,
         model: model ?? null,
-        pipeline: `${pipelineSpec.name}@${pipelineSpec.version}`,
+        pipeline: `${FULL_PIPELINE.name}@${FULL_PIPELINE.version}`,
         projectId: parentRun.project_id,
         repoPath: childWorktree.worktreePath,
         originatedFromRunId: params.parentRunId,
@@ -303,13 +367,33 @@ export async function respondToEscalation(params: {
         runId: childRunId,
         projectId,
         worktree: childWorktree as RunWorktree,
-        pipelineSpec,
+        pipelineSpec: FULL_PIPELINE,
         initialContext: retryContext,
         userId: params.userId,
         cliAgentOverride,
         model,
       }),
   };
+}
+
+/**
+ * FEATURE-020, sección 6.4/6.6/Regla 7: el contexto de reingreso que creó este run, leído de sus
+ * propios eventos persistidos (no de memoria de proceso) — `null` si este run no nació de este
+ * mecanismo (primer recorrido de una escalación, o un run anterior a esta Feature).
+ */
+export function findOriginatingReentryContext(events: unknown[]): ReentryContext | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const item = events[i] as { event_type?: unknown; payload?: unknown };
+    if (item.event_type !== "escalation_retry_context_prepared") continue;
+    const payload = item.payload as { context?: unknown } | undefined;
+    if (isReentryContext(payload?.context)) return payload!.context;
+  }
+  return null;
+}
+
+/** FEATURE-020, sección 6.6: 0 si este run no nació del mecanismo de reingreso (primer recorrido). */
+export function previousAttemptFromEvents(events: unknown[]): number {
+  return findOriginatingReentryContext(events)?.attempt ?? 0;
 }
 
 function runStartedPayload(
@@ -391,19 +475,6 @@ export function extractRoadmapApproval(
   }
 
   return isRoadmapApprovalPayload(parsed) ? parsed : null;
-}
-
-/**
- * FEATURE-019, sección 6.4: el child run de un cierre de release con release siguiente debe
- * arrancar en Architect (FULL_PIPELINE), no reusar el pipeline del run padre — si el padre era
- * PLANNING_TO_QA (Circuito 2), reusarlo hace que el child arranque de nuevo en Planning, el mismo
- * rol que acaba de terminar. No afecta roadmapApproval: ese padre ya es FULL_PIPELINE.
- */
-export function resolveChildPipelineSpec(
-  releaseClosureRoadmap: RoadmapApprovalPayload | null,
-  pipelineDefinition: PipelineDefinitionRow
-) {
-  return releaseClosureRoadmap ? FULL_PIPELINE : parsePipelineDefinitionRow(pipelineDefinition);
 }
 
 function buildRoadmapApprovalHumanSolution(rawSolution: string): string {

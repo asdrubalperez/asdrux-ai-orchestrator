@@ -13,6 +13,7 @@ const baseRun: RunRow = {
   branch_name: "run/test",
   worktree_path: "/tmp/run",
   originated_from_run_id: null,
+  root_run_id: "11111111-1111-1111-1111-111111111111",
   business_case: null,
   created_at: "2026-07-20T10:00:00.000Z",
   updated_at: "2026-07-20T10:00:00.000Z",

@@ -31,6 +31,15 @@ export async function runRespond(args: string[]): Promise<void> {
     return;
   }
 
+  if (result.kind === "escalation_dead_end") {
+    console.log(
+      result.reason === "repeated"
+        ? `[run:respond] contenido repetido — nadie corrigió el problema original, no se crea otro recorrido.`
+        : `[run:respond] tope de 3 recorridos alcanzado sin resolución.`
+    );
+    return;
+  }
+
   console.log(`[run:respond] run hijo=${result.childRunId}; ejecución iniciada.`);
   await result.execute();
 }
