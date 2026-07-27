@@ -130,7 +130,12 @@ Se evaluaron 3 opciones (Discovery conjunto owner + Architect + validación téc
    invocaciones, cero eventos nuevos, cero costo.
 4. Un build fallido nunca invoca a QA en ese intento — se atribuye a Developer, consumiendo uno de
    los `maxAttempts` ya existentes, con el error de build como contexto para el intento siguiente
-   de Developer (mismo lugar que hoy ocupa `qaRejectionReason`).
+   de Developer, en un campo propio (`buildFailureReason`, ver 6.2 y 6.4) — nunca reusando ni
+   falseando `qaRejectionReason`/`previousAttemptSummary`, que corresponden a resultados reales de
+   QA/Developer. Si el build sigue fallando al llegar al último intento (`attempt === maxAttempts`),
+   se escala a humano explícitamente (mismo patrón que `loop_exhausted` cuando QA agota sus
+   intentos) — nunca se deja que el loop termine sin haber invocado a QA ni una vez y sin un
+   resultado final válido.
 5. El comando que corre el paso de build es siempre, literalmente, `npm run build` — nunca el
    contenido textual del script tal como aparece en `package.json` (evita reintroducir cualquier
    forma de interpretación de string).
@@ -197,8 +202,46 @@ diferencia real de perfil de seguridad, exactamente la que hace falta para poder
 
 ### 6.2 Integración en `runDeveloperQaLoop`
 
-Entre `if (developerResult.status !== "completed") { ...; return developerResult; }`
-(`runStart.ts:857-860`) y `await updateRunCurrentPhase(runId, "qa")` (línea 862):
+**Corregido en la ronda 1 de validación técnica** — el snippet original de esta sección tenía 2
+defectos reales, encontrados al resolver el pedido explícito de esa ronda ("proponer el mecanismo
+concreto para devolverle a Developer un build roto", que el documento original dejaba sin resolver
+a nivel de código):
+
+1. Mutar `lastDeveloperResult`/`lastQaResult` con un `escalationReason` sintético no funciona:
+   `developerContext` (`runStart.ts:827-834`, sin cambios de esta Feature) nunca lee
+   `.escalationReason` — solo `.summary` de cada uno. Developer nunca hubiera visto el error de
+   build real.
+2. El `continue` no tenía ninguna ruta de agotamiento: si el build falla en los `maxAttempts`
+   intentos, el `for` termina sin haber invocado a QA ni una vez, y el `return lastQaResult as
+   PhaseResult` final del loop (`runStart.ts:937`) devolvería `null` — rompiendo el resto del
+   pipeline (`finishRun`/`finalizeRun` esperan un `PhaseResult` real).
+
+Mecanismo corregido: una variable dedicada (`lastBuildFailureSummary`), nunca se falsea el
+resultado real de Developer/QA, y un bloque de agotamiento explícito que espeja el que ya existe
+para el rechazo de QA (`runStart.ts:922-932`).
+
+Nueva variable, declarada junto a `lastDeveloperResult`/`lastQaResult` (`runStart.ts:820-821`):
+```ts
+let lastBuildFailureSummary: string | null = null;
+```
+
+`developerContext` (`runStart.ts:827-834`) gana un campo nuevo, opcional, sin tocar los existentes:
+```ts
+const developerContext =
+  attempt === 1
+    ? { plan: planningResult.outputArtifact }
+    : {
+        plan: planningResult.outputArtifact,
+        previousAttemptSummary: lastDeveloperResult?.summary,
+        qaRejectionReason: lastQaResult?.summary,
+        ...(lastBuildFailureSummary ? { buildFailureReason: lastBuildFailureSummary } : {}),
+      };
+```
+
+Punto de integración — entre `if (developerResult.status !== "completed") { ...; return
+developerResult; }` (`runStart.ts:863-866`) y `await updateRunCurrentPhase(runId, "qa")` (línea
+869; las líneas citadas en la versión original de esta sección, `857-860`/`862`, quedaron corridas
+por cambios de FEATURE-020 — actualizadas acá):
 
 ```ts
 const buildExecutor = new BuildExecutor();
@@ -207,21 +250,36 @@ if (buildResult.ran) {
   await recordRunEvent(runId, "build_executed", { attempt, buildResult });
 }
 if (buildResult.ran && buildResult.exitCode !== 0) {
-  lastDeveloperResult = {
-    status: "rejected",
-    outputArtifact: developerResult.outputArtifact,
-    summary: developerResult.summary,
-    // se reusa el mismo canal que hoy ocupa qaRejectionReason en el intento siguiente
-    escalationReason: `Build falló (exitCode ${buildResult.exitCode}): ${buildResult.stderr}`,
-  };
-  // no se invoca a QA este intento — continúa al siguiente attempt del mismo for,
-  // igual que hoy hace un rechazo de QA (sin consumir un attempt extra fuera del loop existente)
+  lastBuildFailureSummary = `Build falló (exitCode ${buildResult.exitCode}): ${buildResult.stderr.slice(0, 2000)}`;
+  console.log(`[run:start] Build (intento ${attempt}) falló — Developer recibe el error en el próximo intento.`);
+
+  if (attempt === maxAttempts) {
+    const exhausted: PhaseResult = {
+      status: "escalated",
+      outputArtifact: null,
+      summary: `Se agotaron los ${maxAttempts} intentos sin lograr un build exitoso. Último error: ${buildResult.stderr.slice(0, 500)}`,
+      escalationReason: `Límite de reintentos (${maxAttempts}) alcanzado — build roto en todos los intentos, QA nunca llegó a validar.`,
+    };
+    await recordRunEvent(runId, "loop_exhausted", { maxAttempts, reason: "build", lastBuildResult: buildResult });
+    console.log(`[run:start] Límite de ${maxAttempts} intentos alcanzado sin build exitoso — run escalado.`);
+    return exhausted;
+  }
+
+  // No se invoca a QA este intento — continúa al siguiente attempt del mismo for, consumiendo
+  // el mismo contador maxAttempts que ya existe (sin inventar uno nuevo).
   continue;
 }
+lastBuildFailureSummary = null; // se limpia apenas un build corre bien (o es no-op) en este intento
 ```
 
-El `attempt` de este ciclo se consume igual (mismo `for` de `runStart.ts:822`, `maxAttempts` sin
-cambios) — no se inventa un contador nuevo.
+**Auditoría**: el artifact que ya se persiste para el turno de Developer (`runStart.ts:854-859`,
+`kind: "code"`) sigue registrándose *antes* de este paso, con el status real que Developer
+reportó (`"completed"`) — un build roto después no lo invalida retroactivamente. Quien audite un
+run necesita cruzar ese artifact con el evento `build_executed` (`exitCode`) para entender por qué
+hubo un intento siguiente aunque Developer haya declarado éxito — es intencional (Developer sí
+completó su turno; fue el paso de infraestructura posterior el que falló), no un hueco de
+integridad de datos, pero vale la pena dejarlo explícito acá para que no se lea como inconsistencia
+al revisar logs.
 
 ### 6.3 `parseTestCommand` — rechazo explícito de comandos compuestos
 
@@ -242,11 +300,20 @@ export function parseTestCommand(comandoTest: string): { executable: string; arg
 }
 ```
 
-### 6.4 Ajuste de texto en `planning.txt`
+### 6.4 Ajuste de texto en `planning.txt` y `developer.txt`
 
-Agregar instrucción explícita: `COMANDO_TEST` nunca debe incluir un paso de build — el Orquestador
-ya lo garantiza. Ejemplo correcto: `"node --test dist/x.test.js"`. Ejemplo incorrecto (ya no
-aceptado): `"npm run build && node --test dist/x.test.js"`.
+**`planning.txt`**: agregar instrucción explícita — `COMANDO_TEST` nunca debe incluir un paso de
+build, el Orquestador ya lo garantiza. Ejemplo correcto: `"node --test dist/x.test.js"`. Ejemplo
+incorrecto (ya no aceptado): `"npm run build && node --test dist/x.test.js"`.
+
+**`developer.txt` (agregado en la ronda 1 de validación técnica — el documento original no lo
+contemplaba, y es necesario para que el mecanismo corregido de 6.2 tenga efecto real)**: nueva
+regla, mismo patrón que la Regla 3 ya existente sobre `qaRejectionReason` ("Si el contexto incluye
+'qaRejectionReason'... leé esa razón con atención y corregí específicamente lo que causó el
+rechazo"):
+> Si el contexto incluye `buildFailureReason` (un intento anterior compiló con errores antes de
+> llegar a QA), leé esa razón con atención y corregí específicamente lo que rompió la compilación
+> — no asumas que el problema es el mismo que un `qaRejectionReason` de un intento distinto.
 
 ### 6.5 Riesgos técnicos
 
@@ -262,6 +329,15 @@ aceptado): `"npm run build && node --test dist/x.test.js"`.
   propio turno es compatible con la imagen `node:22-alpine` de este nuevo contenedor — confirmado
   que `docker/developer.Dockerfile` y `docker/codex-developer.Dockerfile` ya usan la misma imagen
   base, así que no debería haber discrepancia de ABI en módulos nativos.
+- **Existencia de `node_modules` (confirmado en la ronda 1 de validación técnica)**: no hay, en
+  ningún punto del pipeline, un paso explícito de `npm install`/`npm ci` para el proyecto
+  gestionado (verificado en `worktree.ts`, `developer.txt`, `planning.txt` — ninguno lo menciona).
+  Su existencia depende hoy de que Developer lo haya instalado por su cuenta vía `command_exec` en
+  su propio turno (tiene Bash real en su contenedor, `docker/developer.Dockerfile`, a diferencia de
+  QA). No es un riesgo nuevo de esta Feature — es el mismo supuesto implícito del que ya depende
+  `TestExecutor` hoy para que `node --test ...` funcione — pero `BuildExecutor` pasa a depender de
+  él tan directamente como `TestExecutor`, así que queda documentado explícito acá en vez de
+  implícito.
 
 ---
 
@@ -275,6 +351,8 @@ aceptado): `"npm run build && node --test dist/x.test.js"`.
 | `COMANDO_TEST` con `&&` (regresión) | Planning declara `"npm run build && node --test x"` | `parseTestCommand` rechaza con error explícito, antes de intentar ejecutar nada |
 | Reproducción del bug original | Mismo caso real de la prueba (`teamOptimizationMenu`) | El build corre una sola vez entre Developer y QA; QA nunca ve `EROFS` |
 | Regresión de FEATURE-006 | Cualquier `COMANDO_TEST` normal, sin build | Sigue ejecutándose con `shell: false`, sin cambios de seguridad |
+| Build roto en todos los intentos (agregado en la ronda 1, Hallazgo 2) | `scripts.build` presente, `tsc` falla en los `maxAttempts` intentos | Se escala a humano explícitamente en el último intento (`loop_exhausted`, `reason: "build"`) — el loop nunca termina sin haber invocado a QA y sin devolver un `PhaseResult` válido |
+| `buildFailureReason` llega a Developer (agregado en la ronda 1, Hallazgo 1) | Build falla en el intento 1 | El contexto del intento 2 incluye `buildFailureReason` con el error real (no el `summary` original de Developer ni un `qaRejectionReason` ajeno) |
 
 ### Validation Evidence
 
@@ -306,4 +384,16 @@ Implementación prohibida hasta aprobación humana explícita de este documento.
 
 ## Estado de la implementación
 
-Pendiente — documento recién redactado, aún no enviado a validación técnica (Codex/Claude Code).
+Pendiente — 1 ronda de validación técnica realizada (Go condicionado). Confirmado contra `main`
+que no hubo cambios posteriores a FEATURE-020 que afecten `runDeveloperQaLoop`/`TestExecutor`/
+`qaPolicy.ts`/`qaRuntime.ts`, y que no existe ningún otro punto del pipeline con un build implícito.
+2 hallazgos bloqueantes en el snippet de integración original (6.2) — el mecanismo de
+`buildFailureReason` no llegaba realmente a Developer, y no había ruta de agotamiento si el build
+fallaba en todos los intentos (podía devolver `null` en vez de un `PhaseResult`) — ya corregidos en
+este documento, con la propuesta concreta de código y el ajuste correspondiente a `developer.txt`.
+
+Nota de proceso: Discovery y el Architect no tienen acceso al repo en este momento, así que no
+pudieron validar este documento — la ronda 1 y esta corrección las hizo Claude Code cumpliendo
+ese rol de forma temporal, con las citas de línea/código verificadas directamente contra `main`.
+Pendiente de que Discovery/Architect (o el owner) revisen esta versión cuando puedan volver a
+acceder, antes del Approval Gate.
