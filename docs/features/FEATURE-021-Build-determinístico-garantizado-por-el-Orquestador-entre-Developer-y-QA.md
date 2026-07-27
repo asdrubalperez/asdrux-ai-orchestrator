@@ -516,5 +516,12 @@ Funcionales y los snippets de 6.1/6.2.
 Nota de proceso: Discovery y el Architect no tienen acceso directo al repo en este momento — las
 rondas 1 y 3 las hizo Claude Code cumpliendo ese rol temporalmente, y la ronda 2 la revisó el
 Architect por fuera del repo (vía ChatGPT), validada por Claude Code contra el código real de
-`main` antes de incorporarla acá. Pendiente de que Discovery/Architect (o el owner) revisen esta
-versión directamente cuando puedan volver a acceder, antes del Approval Gate.
+`main` antes de incorporarla acá.
+
+**Implementada** (commit `bfe70d7`, rama `feature/021-build-deterministico`) — el owner dio el Go
+para implementar tras la ronda 3. `tsc --noEmit` (backend y frontend), `npm run build` y suite
+completa verificados (116 pass / 3 skipped — 2 por Docker no disponible en este entorno, mismo
+criterio que otras Features, y 1 escenario `ENOTDIR` que solo aplica en POSIX, ver
+`buildExecutor.test.ts`). Validación real end-to-end contra la VPS (Docker disponible, caso de
+negocio real con paso de compilación) todavía pendiente — sin mergear a `main`, a la espera de que
+el owner la pruebe en su entorno.
