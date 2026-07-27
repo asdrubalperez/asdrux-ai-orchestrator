@@ -149,10 +149,12 @@ Se evaluaron 3 opciones (Discovery conjunto owner + Architect + validación téc
    de `--pids-limit`/`--memory`/`--cpus`) — la única diferencia deliberada es el montaje de
    filesystem (`:rw` en vez de `:ro`, sin `--read-only`).
 8. Un `package.json` que existe pero no es JSON parseable **no** se trata igual que uno ausente
-   (ronda 2 de validación técnica) — un `package.json` ausente es no-op limpio (Regla 3); uno
-   presente pero corrupto se trata como un build fallido más (Regla 4), atribuible a Developer,
-   nunca como una categoría de escalamiento de infraestructura aparte. Un error real de
-   infraestructura (ej. Docker no disponible) sí se propaga como excepción, igual que ya hace
+   (ronda 2 de validación técnica) — un `package.json` ausente (específicamente `ENOENT` — el
+   archivo genuinamente no existe, ronda 3) es no-op limpio (Regla 3); uno presente pero corrupto
+   se trata como un build fallido más (Regla 4), atribuible a Developer, nunca como una categoría
+   de escalamiento de infraestructura aparte. Cualquier otro error al intentar leer
+   `package.json` (permisos, I/O, path inaccesible — no `ENOENT`) **tampoco** es "ausente": es un
+   error real de infraestructura y se propaga como excepción, igual que ya hace
    `TestExecutor.run()` hoy — sin agregar un mecanismo de manejo nuevo para ese caso.
 
 ---
@@ -228,17 +230,30 @@ export class BuildExecutor {
    * Distingue 3 casos, no 2 (ronda 2 de validación técnica — el diseño original solo
    * distinguía "hay build script" sí/no, tratando un `package.json` corrupto igual que uno
    * ausente):
-   * - "missing": no existe `package.json` (o no se pudo leer) — no-op limpio.
+   * - "missing": no existe `package.json` — específicamente `ENOENT`, ver más abajo (ronda 3,
+   *   corrige una inconsistencia real con la Regla 8). No-op limpio.
    * - "invalid": existe pero `JSON.parse` falla — NO es "missing", ver arriba.
    * - "no-script": es JSON válido pero sin `scripts.build` (o vacío) — no-op limpio.
    * - "present": `scripts.build` es un string no vacío.
+   *
+   * **Corregido en la ronda 3 de validación técnica**: el `catch` de `readFile` original
+   * capturaba *cualquier* error (permisos, I/O, path inaccesible, etc.) y lo trataba igual que
+   * "no existe el archivo" — inconsistente con la propia Regla 8 de este documento, que ya
+   * establece que un error real de infraestructura debe propagarse como excepción, no leerse
+   * como "no hay build". Un error de lectura que no sea `ENOENT` (el archivo genuinamente no
+   * existe) ahora se re-lanza — llega al mismo manejo genérico de infraestructura que ya
+   * describe 6.1 para errores de `spawn`/Docker (`executePipelineRun`, `run_error` → `finishRun`
+   * status `"failed"`), sin agregar ningún mecanismo de manejo nuevo.
    */
   private async checkBuildScript(workingDirectory: string): Promise<"missing" | "invalid" | "no-script" | "present"> {
     let raw: string;
     try {
       raw = await readFile(path.join(workingDirectory, "package.json"), "utf8");
-    } catch {
-      return "missing";
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        return "missing";
+      }
+      throw error; // permisos, I/O, etc. — error real, no "no hay build" (Regla 8)
     }
     let pkg: unknown;
     try {
@@ -432,6 +447,8 @@ rechazo"):
 | Mutua exclusión de motivos (agregado en la ronda 2) | Intento 1: QA rechaza. Intento 2: Developer corrige pero rompe el build | El contexto del intento 3 incluye `buildFailureReason` del intento 2 — nunca junto con el `qaRejectionReason` viejo del intento 1 |
 | `package.json` corrupto (agregado en la ronda 2) | `package.json` presente pero no es JSON válido | Se trata como build fallido (Regla 8) — Developer recibe el error en el intento siguiente, consume un `attempt`, nunca se lee como "sin build" |
 | Timeout de build distinguido (agregado en la ronda 2) | Build supera el `timeoutMs` sin terminar | `buildFailureReason` menciona explícitamente el timeout, distinto de un `exitCode` de compilación real — mismo mecanismo de agotamiento si persiste en los 3 intentos |
+| `package.json` ausente (agregado en la ronda 3) | No existe `package.json` en el worktree (`ENOENT` al leerlo) | No-op limpio — mismo resultado que "sin `scripts.build`", cero eventos `build_executed` |
+| Error de lectura distinto de `ENOENT` (agregado en la ronda 3, corrige inconsistencia con la Regla 8) | `readFile` de `package.json` falla por permisos/I/O (no `ENOENT`) | `checkBuildScript` relanza el error — llega al manejo genérico de infraestructura de `executePipelineRun` (`run_error`), nunca se lee como "no hay build" |
 
 ### Validation Evidence
 
@@ -463,7 +480,7 @@ Implementación prohibida hasta aprobación humana explícita de este documento.
 
 ## Estado de la implementación
 
-Pendiente — 2 rondas de validación técnica realizadas (Go condicionado en ambas). Confirmado
+Pendiente — 3 rondas de validación técnica realizadas (Go condicionado en las 2 primeras). Confirmado
 contra `main` que no hubo cambios posteriores a FEATURE-020 que afecten
 `runDeveloperQaLoop`/`TestExecutor`/`qaPolicy.ts`/`qaRuntime.ts`, y que no existe ningún otro punto
 del pipeline con un build implícito.
@@ -485,8 +502,19 @@ nuevo para errores de `spawn`/Docker (se deja que se propague igual que ya hace 
 hoy, sin mecanismo adicional) — con la justificación de cada decisión documentada en 6.1/6.2 y
 Functional Rules.
 
-Nota de proceso: Discovery y el Architect no tienen acceso directo al repo en este momento — la
-ronda 1 la hizo Claude Code cumpliendo ese rol temporalmente, y la ronda 2 la revisó el Architect
-por fuera del repo (vía ChatGPT), validada por Claude Code contra el código real de `main` antes
-de incorporarla acá. Pendiente de que Discovery/Architect (o el owner) revisen esta versión
-directamente cuando puedan volver a acceder, antes del Approval Gate.
+Ronda 3 (mismo origen que la ronda 2): `checkBuildScript` trataba **cualquier** error de
+`readFile` (no solo "el archivo no existe") como `"missing"` — permisos, I/O, path inaccesible,
+etc. quedaban leídos como no-op, contradiciendo la Regla 8 (un error real de infraestructura debe
+propagarse, no leerse como "no hay build"). Corregido: solo `ENOENT` devuelve `"missing"`;
+cualquier otro error se relanza y llega al manejo genérico de infraestructura existente
+(`executePipelineRun`, `run_error`), sin agregar ningún mecanismo nuevo. No es una decisión nueva —
+es la Regla 8 ya acordada, aplicada correctamente al código que no la seguía del todo.
+
+**Go técnico** de mi parte tras esta ronda — no encontré más inconsistencias entre las Reglas
+Funcionales y los snippets de 6.1/6.2.
+
+Nota de proceso: Discovery y el Architect no tienen acceso directo al repo en este momento — las
+rondas 1 y 3 las hizo Claude Code cumpliendo ese rol temporalmente, y la ronda 2 la revisó el
+Architect por fuera del repo (vía ChatGPT), validada por Claude Code contra el código real de
+`main` antes de incorporarla acá. Pendiente de que Discovery/Architect (o el owner) revisen esta
+versión directamente cuando puedan volver a acceder, antes del Approval Gate.
