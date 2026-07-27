@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import path from "node:path";
 import type { AgentRole } from "../contracts/executor.js";
 import { pool } from "../db/pool.js";
 import {
   createRun,
+  getCurrentProjectConfig,
   getPipelineDefinitionById,
   getRunDetailForUser,
   recordRunConfigVersions,
@@ -15,16 +15,21 @@ import {
   assertRunWorktreeAvailable,
   commitAllChanges,
   createRunWorktree,
+  mergeFeatureBranchIntoBase,
   type RunWorktree,
 } from "../isolation/worktree.js";
 import {
   buildEscalationContext,
+  extractMergeApproval,
   isAgentRole,
+  isReleaseCompletionEscalation,
   isRoadmapApprovalPayload,
   parsePipelineDefinitionRow,
+  type MergeApprovalPayload,
   type RoadmapApprovalPayload,
 } from "./escalation.js";
-import { executePipelineRun, parseAuthMode, parseExecutorProvider } from "./commands/runStart.js";
+import { createPlanningToQaChildRun, executePipelineRun, parseAuthMode, parseExecutorProvider } from "./commands/runStart.js";
+import { PLANNING_TO_QA } from "../pipelines/definitions.js";
 import type { AgentConfig } from "../db/repository.js";
 
 export type EscalationResponseAction = { abort: true } | { solution: string };
@@ -32,6 +37,7 @@ export type EscalationResponseAction = { abort: true } | { solution: string };
 export type EscalationResponseResult =
   | { kind: "aborted" }
   | { kind: "conflict" }
+  | { kind: "project_closed" }
   | {
       kind: "solution";
       childRunId: string;
@@ -89,7 +95,6 @@ export async function respondToEscalation(params: {
     authMode: parseAuthMode(runStarted.authMode ?? "api_key"),
   };
   const model = runStarted.model ?? undefined;
-  const projectRepoRoot = path.resolve(runStarted.repoPath);
 
   if (!parentRun.branch_name || !parentRun.worktree_path) {
     throw new Error(`El run ${params.parentRunId} no tiene branch_name/worktree_path persistidos.`);
@@ -99,14 +104,17 @@ export async function respondToEscalation(params: {
     branchName: parentRun.branch_name,
     worktreePath: parentRun.worktree_path,
   };
-  await assertRunWorktreeAvailable(projectRepoRoot, parentWorktree);
+  // FEATURE-019, hallazgo de cierre: bug preexistente de FEATURE-018 — `runStarted.repoPath` (del
+  // evento run_started) es ambiguo entre las dos cleanupStrategy de FEATURE-017: para runs
+  // "standalone-clone" (el camino real de intake/UI) es la URL de git del caso, no una ruta de
+  // filesystem — `path.resolve()` sobre eso no tira, produce una ruta inexistente que rompía acá
+  // mismo, en el primer comando git (`assertRunWorktreeAvailable`). `parentWorktree.worktreePath`
+  // SÍ es siempre una ruta local válida de un repo git completo en los dos casos (clon standalone,
+  // o worktree linkeado de un repo compartido) — git worktree add/merge funcionan igual desde
+  // cualquiera de los dos, sin necesitar el repo "raíz" compartido.
+  const repoRoot = parentWorktree.worktreePath;
+  await assertRunWorktreeAvailable(repoRoot, parentWorktree);
   await commitAllChanges(parentWorktree, `chore: preserve escalated work (run ${params.parentRunId})`);
-
-  const pipelineDefinition = await getPipelineDefinitionById(parentRun.pipeline_definition_id);
-  if (!pipelineDefinition) {
-    throw new Error(`No existe pipeline_definition_id ${parentRun.pipeline_definition_id} para run ${params.parentRunId}.`);
-  }
-  const pipelineSpec = parsePipelineDefinitionRow(pipelineDefinition);
 
   if (!parentRun.project_id) {
     throw new Error(`El run ${params.parentRunId} no tiene project_id persistido.`);
@@ -115,6 +123,79 @@ export async function respondToEscalation(params: {
 
   const escalationArtifact = latestEscalationArtifact(parentDetail.artifacts);
   const escalationContent = escalationArtifactContent(escalationArtifact);
+
+  // FEATURE-019, sección 6.2b: aprobación de merge (Modo Manual) — camino totalmente aparte, no
+  // reusa el pipeline del run padre ni el patrón de reintento con humanSolution (no hay ninguna
+  // fase para re-ejecutar, la Feature ya fue aprobada por QA).
+  const mergeApproval = extractMergeApproval(escalationArtifact, escalationContent);
+  if (mergeApproval) {
+    return respondMergeApproval({
+      parentRunId: params.parentRunId,
+      userId: params.userId,
+      projectId,
+      repoRoot,
+      cliAgentOverride,
+      model,
+      mergeApproval,
+      rawSolution,
+    });
+  }
+
+  // FEATURE-019, sección 6.4: cierre de release — puede haber un release siguiente (cae al camino
+  // genérico de abajo, reusando exactamente el mismo mecanismo que la aprobación de roadmap de
+  // FEATURE-018) o no haberlo (el proyecto queda cerrado, sin child run).
+  let releaseClosureRoadmap: RoadmapApprovalPayload | null = null;
+  if (isReleaseCompletionEscalation(escalationArtifact, escalationContent)) {
+    const roadmapConfig = await getCurrentProjectConfig(projectId, "release_roadmap");
+    if (!isRoadmapApprovalPayload(roadmapConfig?.value)) {
+      throw new Error(`Run ${params.parentRunId}: no hay release_roadmap persistido — no se puede cerrar el release.`);
+    }
+    const roadmap = roadmapConfig!.value as RoadmapApprovalPayload;
+    const nextRelease = roadmap.releases.find((release) => release.estado === "Pendiente");
+    releaseClosureRoadmap = {
+      releases: roadmap.releases.map((release) => {
+        if (release.id === roadmap.activeReleaseId) return { ...release, estado: "Completado" as const };
+        if (nextRelease && release.id === nextRelease.id) return { ...release, estado: "Activo" as const };
+        return release;
+      }),
+      activeReleaseId: nextRelease ? nextRelease.id : roadmap.activeReleaseId,
+    };
+
+    if (!nextRelease) {
+      const client = await pool.connect();
+      try {
+        await client.query("begin");
+        const updated = await resolveEscalatedRunStatus(params.parentRunId, "resolved", client);
+        if (!updated) {
+          await client.query("rollback");
+          return { kind: "conflict" };
+        }
+        await setProjectConfig({
+          projectId,
+          configKey: "release_roadmap",
+          value: releaseClosureRoadmap,
+          changedByUserId: params.userId,
+          changedInRunId: params.parentRunId,
+          client,
+        });
+        await recordRunEvent(params.parentRunId, "project_closed", { roadmap: releaseClosureRoadmap }, client);
+        await client.query("commit");
+        return { kind: "project_closed" };
+      } catch (err) {
+        await client.query("rollback");
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+  }
+
+  const pipelineDefinition = await getPipelineDefinitionById(parentRun.pipeline_definition_id);
+  if (!pipelineDefinition) {
+    throw new Error(`No existe pipeline_definition_id ${parentRun.pipeline_definition_id} para run ${params.parentRunId}.`);
+  }
+  const pipelineSpec = parsePipelineDefinitionRow(pipelineDefinition);
+
   // FEATURE-018, sección 7.2: no hace falta un campo ni un tipo de acción nuevo para distinguir una
   // escalación de "aprobación de roadmap" de una escalación genérica — la señal ya está en el
   // propio artifact (ROADMAP con contenido, bolteado a outputArtifact igual que COMANDO_TEST). Si
@@ -123,7 +204,11 @@ export async function respondToEscalation(params: {
   // sin persistir nada nuevo.
   const roadmapApproval = extractRoadmapApproval(escalationArtifact, escalationContent);
 
-  const humanSolution = roadmapApproval ? buildRoadmapApprovalHumanSolution(rawSolution) : rawSolution;
+  const humanSolution = roadmapApproval
+    ? buildRoadmapApprovalHumanSolution(rawSolution)
+    : releaseClosureRoadmap
+      ? buildReleaseClosureHumanSolution(rawSolution)
+      : rawSolution;
   const retryContext = buildEscalationContext({
     escalationReason: escalationContent.escalationReason,
     rejectedArtifact: escalationContent.outputArtifact,
@@ -142,21 +227,21 @@ export async function respondToEscalation(params: {
       return { kind: "conflict" };
     }
 
-    if (roadmapApproval) {
+    if (roadmapApproval || releaseClosureRoadmap) {
       // Misma transacción que crea el child run (más abajo): si algo falla a mitad de camino, el
       // rollback del catch deshace ambas escrituras, no solo una — atomicidad real (ver 7.1/7.2 del
       // documento de la Feature).
       await setProjectConfig({
         projectId,
         configKey: "release_roadmap",
-        value: roadmapApproval,
+        value: roadmapApproval ?? releaseClosureRoadmap,
         changedByUserId: params.userId,
         changedInRunId: params.parentRunId,
         client,
       });
     }
 
-    childWorktree = await createRunWorktree(projectRepoRoot, childRunId, parentWorktree.branchName);
+    childWorktree = await createRunWorktree(repoRoot, childRunId, parentWorktree.branchName);
     const childRun = await createRun({
       id: childRunId,
       pipelineDefinitionId: parentRun.pipeline_definition_id,
@@ -180,7 +265,7 @@ export async function respondToEscalation(params: {
         model: model ?? null,
         pipeline: `${pipelineSpec.name}@${pipelineSpec.version}`,
         projectId: parentRun.project_id,
-        repoPath: projectRepoRoot,
+        repoPath: childWorktree.worktreePath,
         originatedFromRunId: params.parentRunId,
       },
       client
@@ -213,7 +298,7 @@ export async function respondToEscalation(params: {
     childRunId,
     execute: () =>
       executePipelineRun({
-        projectRepoRoot,
+        projectRepoRoot: (childWorktree as RunWorktree).worktreePath,
         runId: childRunId,
         projectId,
         worktree: childWorktree as RunWorktree,
@@ -314,4 +399,88 @@ function buildRoadmapApprovalHumanSolution(rawSolution: string): string {
     "No vuelvas a proponer el roadmap ni a escalar por este motivo — continuá tu fase declarando",
     "ESTADO: completed, usando el mismo ARTEFACTO y ROADMAP ya propuestos.",
   ].join(" ");
+}
+
+/** FEATURE-019: humanSolution para el reinicio en Architect tras aprobar el cierre de un release con release siguiente. */
+function buildReleaseClosureHumanSolution(rawSolution: string): string {
+  return [
+    "El cierre del release anterior fue aprobado, y el release siguiente del Roadmap ya quedó",
+    "marcado como Activo.",
+    `Comentario del humano: "${rawSolution}".`,
+    "Confirmá o ajustá tu diseño para este nuevo release — no vuelvas a proponer el roadmap desde",
+    "cero, ya existe una versión vigente aprobada.",
+  ].join(" ");
+}
+
+/**
+ * FEATURE-019, sección 6.2b: aprobación humana del merge de una Feature a la rama base del
+ * release (Modo Manual). No reusa el patrón genérico de reintento con `humanSolution` — no hay
+ * ninguna fase para re-ejecutar, la Feature ya fue aprobada por QA. Mergea directo y crea el run
+ * de continuación (`PLANNING_TO_QA`), mismas piezas que ya usa el camino de Modo Auto en
+ * `runStart.ts` (`mergeFeatureBranchIntoBase`, `createPlanningToQaChildRun`).
+ */
+async function respondMergeApproval(params: {
+  parentRunId: string;
+  userId: string;
+  projectId: string;
+  repoRoot: string;
+  cliAgentOverride: AgentConfig;
+  model?: string;
+  mergeApproval: MergeApprovalPayload;
+  rawSolution: string;
+}): Promise<EscalationResponseResult> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const updated = await resolveEscalatedRunStatus(params.parentRunId, "resolved", client);
+    if (!updated) {
+      await client.query("rollback");
+      return { kind: "conflict" };
+    }
+    await recordRunEvent(
+      params.parentRunId,
+      "escalation_human_response",
+      { solution: params.rawSolution, action: "merge_approved" },
+      client
+    );
+    await client.query("commit");
+  } catch (err) {
+    await client.query("rollback");
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  await mergeFeatureBranchIntoBase({
+    repoRoot: params.repoRoot,
+    baseBranch: params.mergeApproval.baseBranch,
+    featureBranch: params.mergeApproval.featureBranch,
+  });
+
+  const { childRunId, childWorktree } = await createPlanningToQaChildRun({
+    repoRoot: params.repoRoot,
+    parentRunId: params.parentRunId,
+    projectId: params.projectId,
+    baseBranch: params.mergeApproval.baseBranch,
+    userId: params.userId,
+    cliAgentOverride: params.cliAgentOverride,
+    model: params.model,
+  });
+
+  return {
+    kind: "solution",
+    childRunId,
+    execute: () =>
+      executePipelineRun({
+        projectRepoRoot: childWorktree.worktreePath,
+        runId: childRunId,
+        projectId: params.projectId,
+        worktree: childWorktree,
+        pipelineSpec: PLANNING_TO_QA,
+        initialContext: { featureJustCompleted: params.mergeApproval.featureActualId },
+        userId: params.userId,
+        cliAgentOverride: params.cliAgentOverride,
+        model: params.model,
+      }),
+  };
 }

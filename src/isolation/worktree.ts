@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { access, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -72,6 +73,62 @@ export async function pushRunBranch(worktree: RunWorktree): Promise<void> {
   await execFileAsync("git", ["push", "origin", worktree.branchName], {
     cwd: worktree.worktreePath,
   });
+}
+
+/**
+ * FEATURE-019: mergea la sub-rama ya pusheada de una Feature contra la rama base del release, y
+ * pushea la rama base actualizada. La rama base nunca tiene su propio worktree persistente (a
+ * diferencia de `run/<id>`, que sí vive en `createRunWorktree`) — se crea uno efímero puntual para
+ * el merge y se borra enseguida.
+ *
+ * Hallazgo real (verificado contra git, no solo en diseño): checkoutear `baseBranch` tal cual (sin
+ * `--detach`) revienta con "already used by worktree" en cuanto esa rama ya está checked out en
+ * OTRO worktree del mismo repo — algo que pasa seguido en la práctica, no es un edge case: el clon
+ * compartido original de un proyecto (`project.repo_path`, estrategia "shared-worktree") queda
+ * checked out en su rama default para siempre, y esa rama default suele ser exactamente
+ * `ramaBaseTrabajo` (default "main", FEATURE-017 Regla 4). Por eso el worktree efímero se crea
+ * `--detach` (apunta al commit de `baseBranch`, no a la rama en sí — no colisiona con nada) y el
+ * push usa el refspec explícito `HEAD:refs/heads/<baseBranch>` en vez de `git push origin
+ * <baseBranch>` (que asume una rama local con ese nombre checked out, inexistente en detached
+ * HEAD).
+ */
+export async function mergeFeatureBranchIntoBase(params: {
+  repoRoot: string;
+  baseBranch: string;
+  featureBranch: string;
+}): Promise<void> {
+  const baseWorktreePath = path.join(
+    process.env.WORKTREES_BASE_DIR ?? path.resolve(params.repoRoot, "..", "ai-orchestrator-worktrees"),
+    `base-${randomUUID()}`
+  );
+
+  await execFileAsync("git", ["worktree", "add", "--detach", baseWorktreePath, params.baseBranch], {
+    cwd: params.repoRoot,
+  });
+  try {
+    await execFileAsync(
+      "git",
+      [
+        "-c",
+        "user.name=ai-orchestrator-bot",
+        "-c",
+        "user.email=ai-orchestrator-bot@localhost",
+        "merge",
+        "--no-ff",
+        params.featureBranch,
+        "-m",
+        `merge: ${params.featureBranch} -> ${params.baseBranch}`,
+      ],
+      { cwd: baseWorktreePath }
+    );
+    await execFileAsync("git", ["push", "origin", `HEAD:refs/heads/${params.baseBranch}`], {
+      cwd: baseWorktreePath,
+    });
+  } finally {
+    await execFileAsync("git", ["worktree", "remove", baseWorktreePath, "--force"], {
+      cwd: params.repoRoot,
+    });
+  }
 }
 
 export async function assertRunWorktreeAvailable(repoRoot: string, worktree: RunWorktree): Promise<void> {

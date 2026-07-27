@@ -8,6 +8,7 @@ import { CodexExecutor } from "../../executor/codexExecutor.js";
 import {
   commitAllChanges,
   createRunWorktree,
+  mergeFeatureBranchIntoBase,
   pushRunBranch,
   removeRunClone,
   removeRunWorktree,
@@ -25,6 +26,7 @@ import {
   recordRunConfigVersions,
   recordRunEvent,
   resolveAgentConfig,
+  setProjectConfig,
   updateRunCurrentPhase,
   updateRunStatus,
   type AgentConfig,
@@ -34,11 +36,17 @@ import {
 } from "../../db/repository.js";
 import { pool } from "../../db/pool.js";
 import type { AgentRole, PhaseInvocation, PhaseResult } from "../../contracts/executor.js";
-import { PIPELINES, SINGLE_PHASE_ARCHITECT } from "../../pipelines/definitions.js";
+import { PIPELINES, PLANNING_TO_QA, SINGLE_PHASE_ARCHITECT } from "../../pipelines/definitions.js";
 import type { PipelineSpec } from "../../pipelines/definitions.js";
 import { extractTestCommand } from "../../pipelines/extractTestCommand.js";
 import { TestExecutor, parseTestCommand } from "../../testing/testExecutor.js";
-import { activeReleaseFromRoadmap, artifactsAreEquivalent, buildEscalationContext } from "../escalation.js";
+import {
+  activeReleaseFromRoadmap,
+  artifactsAreEquivalent,
+  buildEscalationContext,
+  extractReleasePlanDeclaration,
+  type MergeApprovalPayload,
+} from "../escalation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const orchestratorRoot = path.resolve(__dirname, "..", "..", "..");
@@ -321,6 +329,15 @@ export async function executePipelineRun(params: {
         content: artifactContentForResult(result),
       });
 
+      if (invocation.agentRole === "planning") {
+        await persistReleasePlanIfDeclared({
+          projectId,
+          runId,
+          result,
+          fallbackRamaBaseTrabajo: ramaBaseTrabajoFromBusinessCase(initialContext),
+        });
+      }
+
       previousResult = result;
 
       if (result.status === "completed") {
@@ -376,8 +393,22 @@ export async function executePipelineRun(params: {
         phaseTiming,
       });
 
-      const approved = finalResult.status === "completed";
-      await finishRun(projectRepoRoot, runId, worktree, finalResult, { pushAndClean: approved, cleanupStrategy });
+      if (finalResult.status === "completed") {
+        // FEATURE-019: en vez de finishRun con push+cleanup inmediato, la Feature aprobada
+        // continúa el release (merge a la rama base + run de continuación a Planning) — ver 6.2.
+        await continueReleaseAfterFeatureApproved({
+          projectId,
+          runId,
+          worktree,
+          userId,
+          cliAgentOverride,
+          model,
+          cleanupStrategy,
+        });
+        return;
+      }
+
+      await finishRun(projectRepoRoot, runId, worktree, finalResult, { pushAndClean: false, cleanupStrategy });
       return;
     }
 
@@ -486,6 +517,233 @@ async function withActiveReleaseContext(projectId: string, functionalArtifact: u
     functionalArtifact,
     activeRelease: activeReleaseFromRoadmap(roadmap?.value ?? null),
   };
+}
+
+/** FEATURE-019: `rama_base_trabajo` solo existe en el `business_case` crudo del run raíz (FEATURE-017) — nunca en el contexto ya envuelto de invocaciones posteriores (ej. `{ featureJustCompleted }`). */
+function ramaBaseTrabajoFromBusinessCase(value: unknown): string | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const raw = (value as { rama_base_trabajo?: unknown }).rama_base_trabajo;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+}
+
+/**
+ * FEATURE-019, sección 6.3: persiste el Release Plan que Planning declaró en `RELEASE_PLAN`
+ * (estado completo, no un diff) — el runtime solo le agrega `ramaBaseTrabajo`, que Planning no
+ * conoce. En la primera versión (todavía no hay `release_plan` persistido) se toma del
+ * `business_case` del run raíz; en versiones siguientes se conserva la ya persistida. No requiere
+ * aprobación humana — a diferencia de `release_roadmap`, esto es bookkeeping interno del ciclo de
+ * Features, no una decisión de negocio (la única decisión gateada es el cierre del release, ver
+ * `respondService.ts`).
+ */
+async function persistReleasePlanIfDeclared(params: {
+  projectId: string;
+  runId: string;
+  result: PhaseResult;
+  fallbackRamaBaseTrabajo: string | undefined;
+}): Promise<void> {
+  const declaration = extractReleasePlanDeclaration(
+    { phase: "planning" },
+    { outputArtifact: params.result.outputArtifact }
+  );
+  if (!declaration) return;
+
+  const existing = await getCurrentProjectConfig(params.projectId, "release_plan");
+  const existingRamaBase = (existing?.value as { ramaBaseTrabajo?: unknown } | undefined)?.ramaBaseTrabajo;
+  const ramaBaseTrabajo = typeof existingRamaBase === "string" ? existingRamaBase : params.fallbackRamaBaseTrabajo;
+  if (!ramaBaseTrabajo) {
+    throw new Error(
+      `Run ${params.runId}: Planning declaró RELEASE_PLAN pero no hay ramaBaseTrabajo disponible (ni en la versión previa ni en el business_case del run raíz).`
+    );
+  }
+
+  await setProjectConfig({
+    projectId: params.projectId,
+    configKey: "release_plan",
+    value: { ...declaration, ramaBaseTrabajo },
+    changedInRunId: params.runId,
+  });
+}
+
+/**
+ * FEATURE-019, sección 6.2/6.2b: al aprobar QA, la Feature ya no termina el run — commitea y
+ * pushea siempre su sub-rama (Regla Funcional 8), y según `approval_mode` (Regla 12, default
+ * Manual): en Modo Manual escala para aprobación humana del merge (artifact sintético atribuido a
+ * `phase: "developer"`, `mergeApproval: true`); en Modo Auto mergea directo a la rama base y crea
+ * el run de continuación (`PLANNING_TO_QA`) sin pasar por escalamiento.
+ */
+async function continueReleaseAfterFeatureApproved(params: {
+  projectId: string;
+  runId: string;
+  worktree: RunWorktree;
+  userId: string;
+  cliAgentOverride: AgentConfig | null;
+  model?: string;
+  cleanupStrategy: "shared-worktree" | "standalone-clone";
+}): Promise<void> {
+  const { projectId, runId, worktree, userId, cliAgentOverride, model, cleanupStrategy } = params;
+
+  // FEATURE-019, hallazgo de cierre: no usamos `projectRepoRoot` (bug preexistente de FEATURE-018
+  // — ver `respondService.ts`, ese valor es ambiguo entre las dos cleanupStrategy de FEATURE-017:
+  // para runs "standalone-clone" es la URL de git del caso, no una ruta de filesystem). El propio
+  // `worktree.worktreePath` de este run SÍ es siempre una ruta local válida de un repo git completo
+  // (clon standalone, o worktree linkeado de un repo compartido) — git worktree add/merge
+  // funcionan igual desde cualquiera de los dos, sin necesitar el repo "raíz" compartido.
+  const repoRoot = worktree.worktreePath;
+
+  const committed = await commitAllChanges(worktree, `feat: implementación aprobada por QA (run ${runId})`);
+  await recordRunEvent(runId, "run_committed", { committed });
+  await pushRunBranch(worktree);
+  await recordRunEvent(runId, "run_pushed", { branchName: worktree.branchName });
+  console.log(`[run:start] push real de la sub-rama "${worktree.branchName}" a origin.`);
+
+  const releasePlanConfig = await getCurrentProjectConfig(projectId, "release_plan");
+  const releasePlanValue = releasePlanConfig?.value as
+    | { ramaBaseTrabajo?: unknown; featureActualId?: unknown }
+    | undefined;
+  const baseBranch = typeof releasePlanValue?.ramaBaseTrabajo === "string" ? releasePlanValue.ramaBaseTrabajo : undefined;
+  if (!baseBranch) {
+    throw new Error(`Run ${runId}: no hay release_plan persistido con ramaBaseTrabajo — no se puede continuar el release.`);
+  }
+  const featureActualId = typeof releasePlanValue?.featureActualId === "string" ? releasePlanValue.featureActualId : null;
+
+  const approvalModeConfig = await getCurrentProjectConfig(projectId, "approval_mode");
+  const approvalModeValue = approvalModeConfig?.value as { mode?: unknown } | undefined;
+  const mode = approvalModeValue?.mode === "auto" ? "auto" : "manual";
+
+  if (mode === "manual") {
+    const mergeApprovalPayload: MergeApprovalPayload = {
+      mergeApproval: true,
+      baseBranch,
+      featureBranch: worktree.branchName,
+      featureActualId,
+    };
+    const summary =
+      "Feature aprobada por QA — pendiente de aprobación humana para mergear a la rama base del release.";
+    const escalationReason =
+      "Modo Manual: el merge de la sub-rama a la rama base requiere aprobación humana explícita.";
+    const artifact = await recordArtifact({
+      runId,
+      phase: "developer",
+      kind: "escalation",
+      content: { outputArtifact: mergeApprovalPayload, summary, escalationReason },
+    });
+    await finalizeRun(runId, {
+      status: "escalated",
+      outputArtifact: mergeApprovalPayload,
+      summary,
+      escalationReason,
+    });
+    await recordRunEvent(runId, "escalation_opened", { agentRole: "developer", artifactId: artifact.id, attempt: 1 });
+    console.log(`[run:start] Modo Manual: escalado para aprobación de merge de "${worktree.branchName}" a "${baseBranch}".`);
+    return;
+  }
+
+  // Modo Auto (Regla Funcional 10): merge directo, sin escalar.
+  await finalizeRun(runId, {
+    status: "completed",
+    outputArtifact: null,
+    summary: `Feature aprobada por QA, mergeada automáticamente a "${baseBranch}" (Modo Auto).`,
+    escalationReason: null,
+  });
+  await mergeFeatureBranchIntoBase({ repoRoot, baseBranch, featureBranch: worktree.branchName });
+  await recordRunEvent(runId, "feature_merged_to_base", {
+    baseBranch,
+    featureBranch: worktree.branchName,
+    mode: "auto",
+  });
+  console.log(`[run:start] Modo Auto: sub-rama "${worktree.branchName}" mergeada y pusheada a "${baseBranch}".`);
+
+  const { childRunId, childWorktree } = await createPlanningToQaChildRun({
+    repoRoot,
+    parentRunId: runId,
+    projectId,
+    baseBranch,
+    userId,
+    cliAgentOverride,
+    model,
+  });
+  console.log(`[run:start] run de continuación creado: ${childRunId} (Planning).`);
+  await executePipelineRun({
+    projectRepoRoot: childWorktree.worktreePath,
+    runId: childRunId,
+    projectId,
+    worktree: childWorktree,
+    pipelineSpec: PLANNING_TO_QA,
+    initialContext: { featureJustCompleted: featureActualId },
+    userId,
+    cliAgentOverride,
+    model,
+    cleanupStrategy,
+  });
+}
+
+/**
+ * FEATURE-019: crea el run hijo `PLANNING_TO_QA` que continúa el release tras una Feature
+ * aprobada — separado de la ejecución (`executePipelineRun`) para que `respondService.ts` pueda
+ * reusarlo en el camino de aprobación de merge en Modo Manual (crea el run y solo ENTONCES ejecuta,
+ * dentro de un `execute()` diferido, mismo patrón que ya usa `respondToEscalation`).
+ *
+ * `repoRoot`: cualquier ruta local válida de un repo git completo que ya tenga `baseBranch`
+ * disponible como ref local — el `worktree.worktreePath` de la Feature que se acaba de mergear
+ * (clon standalone o worktree linkeado, da igual), nunca `project.repo_path`/`business_case.repositorio`
+ * directamente (ver hallazgo de cierre de FEATURE-019 sobre el bug preexistente sobre esto en
+ * `respondService.ts`).
+ */
+export async function createPlanningToQaChildRun(params: {
+  repoRoot: string;
+  parentRunId: string;
+  projectId: string;
+  baseBranch: string;
+  userId: string;
+  cliAgentOverride: AgentConfig | null;
+  model?: string;
+}): Promise<{ childRunId: string; childWorktree: RunWorktree }> {
+  const childRunId = randomUUID();
+  const pipelineDefinition = await ensurePipelineDefinition(PLANNING_TO_QA);
+  const childWorktree = await createRunWorktree(params.repoRoot, childRunId, params.baseBranch);
+  const firstPhaseSelection: AgentConfig =
+    params.cliAgentOverride ?? (await resolveAgentConfig(params.userId, "planning"));
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await createRun({
+      id: childRunId,
+      pipelineDefinitionId: pipelineDefinition.id,
+      ownerId: params.userId,
+      projectId: params.projectId,
+      firstPhase: "planning",
+      branchName: childWorktree.branchName,
+      worktreePath: childWorktree.worktreePath,
+      originatedFromRunId: params.parentRunId,
+      client,
+    });
+    await recordRunConfigVersions(childRunId, client);
+    await recordRunEvent(
+      childRunId,
+      "run_started",
+      {
+        branchName: childWorktree.branchName,
+        worktreePath: childWorktree.worktreePath,
+        provider: firstPhaseSelection.executorProvider,
+        authMode: firstPhaseSelection.authMode,
+        model: params.model ?? null,
+        pipeline: `${PLANNING_TO_QA.name}@${PLANNING_TO_QA.version}`,
+        projectId: params.projectId,
+        repoPath: childWorktree.worktreePath,
+        originatedFromRunId: params.parentRunId,
+      },
+      client
+    );
+    await client.query("commit");
+  } catch (err) {
+    await client.query("rollback");
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  return { childRunId, childWorktree };
 }
 
 function outputArtifactOf(artifact: ArtifactRow): unknown {

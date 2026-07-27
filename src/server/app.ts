@@ -161,9 +161,15 @@ export function createApp(config: ServerConfig): express.Express {
         return;
       }
 
-      res.status(202).json({ childRunId: result.childRunId });
-      void result.execute().catch((err) => {
-        console.error(`[server] background escalation response failed for child run ${result.childRunId}`, err);
+      if (result.kind === "project_closed") {
+        res.status(202).json({ status: "project_closed" });
+        return;
+      }
+
+      const { childRunId, execute } = result;
+      res.status(202).json({ childRunId });
+      void execute().catch((err: unknown) => {
+        console.error(`[server] background escalation response failed for child run ${childRunId}`, err);
       });
     } catch (err) {
       if (err instanceof EscalationRunNotFoundError) {
