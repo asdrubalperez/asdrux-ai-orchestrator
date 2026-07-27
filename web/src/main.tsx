@@ -563,24 +563,24 @@ function EscalationResponseDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] min-w-0 max-w-2xl grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+        <DialogHeader className="min-w-0">
           <DialogTitle>Validar Ahora</DialogTitle>
           <DialogDescription>
             {escalationMotiveText(run.escalation.motive, run.escalation.agentRole)}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 text-sm">
+        <div className="min-h-0 min-w-0 space-y-4 overflow-y-auto overscroll-contain pr-1 text-sm">
           {run.escalation.reason ? (
-            <div>
+            <div className="min-w-0">
               <p className="font-medium">Motivo del agente</p>
-              <p className="mt-1 text-zinc-600">{run.escalation.reason}</p>
+              <p className="mt-1 break-words text-zinc-600">{run.escalation.reason}</p>
             </div>
           ) : null}
-          <div>
+          <div className="min-w-0">
             <p className="font-medium">Artifact rechazado</p>
-            <pre className="mt-1 max-h-56 overflow-auto rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
+            <pre className="mt-1 max-h-56 max-w-full min-w-0 overflow-auto whitespace-pre-wrap break-words rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
               {formatArtifact(run.escalation.outputArtifact)}
             </pre>
           </div>
@@ -596,7 +596,7 @@ function EscalationResponseDialog({
           {error ? <p className="text-sm text-rose-700">{error}</p> : null}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="min-w-0">
           {mode === "choice" ? (
             <>
               <Button variant="outline" disabled={loading} onClick={() => void submit({ abort: true })}>
