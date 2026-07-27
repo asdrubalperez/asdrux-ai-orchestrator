@@ -10,6 +10,7 @@ import {
   recordRunEvent,
   resolveEscalatedRunStatus,
   setProjectConfig,
+  type PipelineDefinitionRow,
 } from "../db/repository.js";
 import {
   assertRunWorktreeAvailable,
@@ -29,7 +30,7 @@ import {
   type RoadmapApprovalPayload,
 } from "./escalation.js";
 import { createPlanningToQaChildRun, executePipelineRun, parseAuthMode, parseExecutorProvider } from "./commands/runStart.js";
-import { PLANNING_TO_QA } from "../pipelines/definitions.js";
+import { FULL_PIPELINE, PLANNING_TO_QA } from "../pipelines/definitions.js";
 import type { AgentConfig } from "../db/repository.js";
 
 export type EscalationResponseAction = { abort: true } | { solution: string };
@@ -194,7 +195,7 @@ export async function respondToEscalation(params: {
   if (!pipelineDefinition) {
     throw new Error(`No existe pipeline_definition_id ${parentRun.pipeline_definition_id} para run ${params.parentRunId}.`);
   }
-  const pipelineSpec = parsePipelineDefinitionRow(pipelineDefinition);
+  const pipelineSpec = resolveChildPipelineSpec(releaseClosureRoadmap, pipelineDefinition);
 
   // FEATURE-018, sección 7.2: no hace falta un campo ni un tipo de acción nuevo para distinguir una
   // escalación de "aprobación de roadmap" de una escalación genérica — la señal ya está en el
@@ -390,6 +391,19 @@ export function extractRoadmapApproval(
   }
 
   return isRoadmapApprovalPayload(parsed) ? parsed : null;
+}
+
+/**
+ * FEATURE-019, sección 6.4: el child run de un cierre de release con release siguiente debe
+ * arrancar en Architect (FULL_PIPELINE), no reusar el pipeline del run padre — si el padre era
+ * PLANNING_TO_QA (Circuito 2), reusarlo hace que el child arranque de nuevo en Planning, el mismo
+ * rol que acaba de terminar. No afecta roadmapApproval: ese padre ya es FULL_PIPELINE.
+ */
+export function resolveChildPipelineSpec(
+  releaseClosureRoadmap: RoadmapApprovalPayload | null,
+  pipelineDefinition: PipelineDefinitionRow
+) {
+  return releaseClosureRoadmap ? FULL_PIPELINE : parsePipelineDefinitionRow(pipelineDefinition);
 }
 
 function buildRoadmapApprovalHumanSolution(rawSolution: string): string {
