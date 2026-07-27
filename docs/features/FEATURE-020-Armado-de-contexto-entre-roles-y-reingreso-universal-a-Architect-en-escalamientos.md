@@ -210,6 +210,17 @@ Architect. No hay ningún mecanismo que cruce de un run a otro para cumplir la r
    caso — no hay ningún rol anterior a él en el pipeline al que targetAgentRole pudiera apuntar.
 10. QA no participa como destino intermedio de este mecanismo — sigue siendo, como hoy, quien
     escala directo a humano cuando el loop Developer↔QA se agota o QA mismo no puede validar.
+10b. Planning nunca responde `notApplicable`, sea o no el `targetAgentRole` nominal — su
+    `outputArtifact` es lo único que alimenta al loop Developer↔QA (`extractTestCommand`,
+    `runStart.ts:768`), que no tiene ningún mecanismo de "paso" propio (Developer/QA no forman
+    parte de `pipelineSpec.definition.phases`, solo del `loop`). Cuando Planning recibe el
+    contexto de reingreso directamente (Architect y Functional ya pasaron, o Planning es el
+    `targetAgentRole`), siempre resuelve de verdad: reafirma el plan/`COMANDO_TEST` vigente sin
+    cambios si no hay nada que ajustar, o lo corrige si lo hay — nunca deja un stub
+    `notApplicable` en el lugar de donde el loop necesita un plan real. Ver 6.4.a para la
+    distinción completa entre esta situación y el flujo normal (Planning procesando un artefacto
+    real y nuevo de Functional, sin ningún contexto de reingreso de por medio) y para el impacto
+    de esta regla en la detección de "repetido" (Regla 7) cuando `targetAgentRole = "developer"`.
 11. Mientras un rol responde `notApplicable` (no le corresponde), el contexto que recibe la fase
     siguiente es **el mismo contexto de reingreso original** (`businessCase`, `escalationReason`,
     `rejectedArtifact`, `targetAgentRole`, etc.), nunca el `outputArtifact` de quien acaba de
@@ -365,6 +376,52 @@ reinicio dentro de `FULL_PIPELINE` (gratis, mismo run), cada recorrido completo 
 crea un run + worktree + rama nuevos — acotado a máximo 3 por escalación (Regla 8), pero es un
 costo real de tiempo/tokens que no existía para este camino. Ver 6.7.
 
+### 6.4.a Planning y el loop Developer↔QA — por qué Planning nunca pasa (hallazgo real,
+encontrado al implementar)
+
+Al implementar Corrección 1 apareció un caso que ninguna ronda de validación había ejercitado: el
+mecanismo de "paso" (`notApplicable`) solo está enganchado a las fases **lineales**
+(`pipelineSpec.definition.phases` — Architect, Functional, Planning). Developer y QA corren
+exclusivamente dentro de `runDeveloperQaLoop` (`runStart.ts:756`), con su propio armado de
+contexto (`{ plan, previousAttemptSummary, qaRejectionReason }`) — no tienen ningún lugar donde
+recibir el contexto de reingreso ni decidir "paso/no paso". El loop siempre necesita, de
+`planningResult.outputArtifact`, un plan real con `COMANDO_TEST` (`extractTestCommand`,
+`runStart.ts:768`) — si Planning "pasara" con `{ notApplicable: true }` (por ejemplo, en una
+escalación originada en QA, donde `targetAgentRole = "developer"` según `PREDECESSOR_ROLE`), el
+loop se queda sin plan y se rompe.
+
+**Resolución (decisión del owner)**: Planning nunca responde `notApplicable`, sea o no el
+`targetAgentRole` nominal — ver Regla 10b. Dos situaciones distintas para Planning, que no hay
+que confundir:
+
+- **Situación A — Planning recibe el contexto de reingreso directamente** (Architect y Functional
+  ya pasaron, o Planning es el primer destino real antes del loop — pasa con `targetAgentRole`
+  igual a `"planning"` o `"developer"`, los dos únicos valores donde Planning es quien sostiene el
+  contexto al llegarle). Acá aplica la Regla 10b: Planning siempre resuelve de verdad (reafirma el
+  plan/`COMANDO_TEST` vigente si no hay nada que ajustar, o lo corrige si lo hay) — nunca pasa,
+  porque alimenta al loop.
+- **Situación B — Planning recibe un artefacto real y nuevo de Functional** (Functional era el
+  `targetAgentRole`, resolvió, y el pipeline sigue de forma normal). Acá Planning **no** está en
+  modo "paso/resuelve" del mecanismo nuevo en absoluto — es el flujo lineal de siempre, sin ningún
+  contexto de reingreso de por medio: procesa el input real de Functional exactamente como lo hace
+  hoy. No aplica ninguna regla especial.
+
+**Impacto en la detección de "repetido" (Regla 7) para `targetAgentRole = "developer"`**: como
+Planning siempre escribe una versión nueva en la Situación A (aunque sea solo reafirmando), la
+comparación de `id` de versión (Regla 7) prácticamente nunca coincide con `originalVersionRef` en
+este camino específico — casi nunca se detecta "repetido" antes de tiempo. El tope de 3
+recorridos (Regla 8) deja de ser un respaldo adicional y pasa a ser **la única red de seguridad
+real** para este caso, a diferencia del resto de los caminos (donde "repetido" y "tope" actúan de
+forma independiente, como ya muestra el ejemplo de traza de la Regla 7).
+
+Traza concreta para este caso: Recorrido 1 (`attempt = 1`) — QA escala; Architect y Functional
+pasan; Planning resuelve (reafirma o ajusta), versión nueva; el loop retoma con Developer. Si QA
+no queda conforme, escala de nuevo. Recorrido 2 (`attempt = 2`) — mismo circuito; Planning
+resuelve de nuevo, otra versión nueva. Si QA sigue sin conformarse, escala de nuevo. Recorrido 3
+(`attempt = 3`, el último permitido) — mismo circuito; si QA todavía no queda conforme, el sistema
+**no** arranca un recorrido 4 — corta y escala directo al humano, aunque cada versión haya sido
+"distinta" cada vez (nunca se activó "repetido").
+
 ### 6.5 Detección de contenido repetido — comparación por `id` de versión
 
 Antes de crear **cada** run de reingreso (no solo el primero), se guarda `originalVersionRef`: el
@@ -466,7 +523,8 @@ Implementación prohibida hasta aprobación humana explícita de este documento.
 
 ## Estado de la implementación
 
-Pendiente — 3 rondas de validación técnica realizadas (Go condicionado en las 2 primeras, **Go
-técnico limpio en la ronda 3**, con 2 sugerencias menores de pulido ya incorporadas: snippet de
-`withRoleContext` actualizado con la rama condicional real, y escenario de aprobación de Roadmap
-vía camino genérico agregado a Validation Criteria). Listo para Approval Gate del owner.
+Aprobado por el owner (Go para implementar). 3 rondas de validación técnica realizadas (Go
+condicionado en las 2 primeras, Go técnico limpio en la ronda 3). Durante el arranque de la
+implementación apareció un hallazgo real no cubierto por ninguna ronda de validación (Planning y
+el loop Developer↔QA no tenían ningún enganche con el mecanismo de "paso") — resuelto por el owner
+(Regla 10b, sección 6.4.a) sin necesitar otra ronda completa. En curso.
