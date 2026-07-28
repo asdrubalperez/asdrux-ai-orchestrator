@@ -76,6 +76,11 @@ export interface ProjectConfigVersionRow {
   valid_to: string | null;
 }
 
+export interface ReleasePlanByReleaseRow {
+  release_id: string;
+  value: unknown;
+}
+
 export interface SessionRow {
   id: string;
   user_id: string;
@@ -396,6 +401,29 @@ export async function getProjectConfigHistory(
      where project_id = $1 and config_key = $2
      order by valid_from desc`,
     [projectId, configKey]
+  );
+  return result.rows;
+}
+
+/**
+ * Recupera la última versión del Release Plan asociada a cada release. El JSONB no contiene
+ * releaseId: la asociación se resuelve mediante el roadmap fijado para el run que escribió el plan.
+ */
+export async function getReleasePlansByRelease(projectId: string): Promise<ReleasePlanByReleaseRow[]> {
+  const result = await pool.query<ReleasePlanByReleaseRow>(
+    `select distinct on (roadmap.value ->> 'activeReleaseId')
+       roadmap.value ->> 'activeReleaseId' as release_id,
+       plan.value
+     from project_config_versions plan
+     join run_config_versions pinned on pinned.run_id = plan.changed_in_run_id
+     join project_config_versions roadmap
+       on roadmap.id = pinned.config_version_id
+      and roadmap.config_key = 'release_roadmap'
+     where plan.project_id = $1
+       and plan.config_key = 'release_plan'
+       and roadmap.value ->> 'activeReleaseId' is not null
+     order by roadmap.value ->> 'activeReleaseId', plan.valid_from desc`,
+    [projectId]
   );
   return result.rows;
 }

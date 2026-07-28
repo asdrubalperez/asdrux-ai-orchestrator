@@ -15,7 +15,7 @@ import {
   WEB_SESSION_TTL_MS,
   type AuthenticatedRequest,
 } from "../auth/webSession.js";
-import { getCurrentProjectConfig, getRunDetailForUser } from "../db/repository.js";
+import { getCurrentProjectConfig, getReleasePlansByRelease, getRunDetailForUser } from "../db/repository.js";
 import {
   EscalationRunNotFoundError,
   respondToEscalation,
@@ -446,6 +446,9 @@ function parseLastEventId(value: string | undefined): number {
  */
 async function resolveReleaseRoadmap(projectId: string | null) {
   if (!projectId) return null;
-  const config = await getCurrentProjectConfig(projectId, "release_roadmap");
-  return toReleaseRoadmapView(config?.value ?? null);
+  const [config, releasePlans] = await Promise.all([
+    getCurrentProjectConfig(projectId, "release_roadmap"),
+    getReleasePlansByRelease(projectId),
+  ]);
+  return toReleaseRoadmapView(config?.value ?? null, releasePlans);
 }

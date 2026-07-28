@@ -1,5 +1,9 @@
 import type { RunRow } from "../db/repository.js";
-import { isRoadmapApprovalPayload } from "../cli/escalation.js";
+import {
+  isReleasePlanDeclaration,
+  isRoadmapApprovalPayload,
+  type ReleasePlanFeatureEntry,
+} from "../cli/escalation.js";
 
 export type TimelineNodeId = "user" | "architect" | "functional" | "planning" | "developer" | "qa";
 export type TimelineNodeStatus =
@@ -34,13 +38,47 @@ export interface RunDetailViewInput {
 }
 
 export interface ReleaseRoadmapView {
-  releases: Array<{ id: string; nombre: string; alcanceResumen: string; estado: string }>;
+  releases: Array<{
+    id: string;
+    nombre: string;
+    alcanceResumen: string;
+    estado: "Activo" | "Pendiente" | "Completado";
+    features: ReleasePlanFeatureEntry[];
+  }>;
   activeReleaseId: string;
 }
 
-/** FEATURE-018: valida la forma de project_config_versions.value antes de exponerlo al frontend. */
-export function toReleaseRoadmapView(value: unknown): ReleaseRoadmapView | null {
-  return isRoadmapApprovalPayload(value) ? value : null;
+export interface ReleasePlanConfigViewInput {
+  release_id: string;
+  value: unknown;
+}
+
+/** Valida roadmap y planes versionados antes de exponerlos al frontend. */
+export function toReleaseRoadmapView(
+  value: unknown,
+  releasePlans: ReleasePlanConfigViewInput[] = []
+): ReleaseRoadmapView | null {
+  if (!isRoadmapApprovalPayload(value)) return null;
+
+  const featuresByRelease = new Map<string, ReleasePlanFeatureEntry[]>();
+  for (const plan of releasePlans) {
+    if (!isRecord(plan.value)) continue;
+    const declaration = {
+      features: plan.value.features,
+      featureActualId: plan.value.featureActualId,
+    };
+    if (typeof plan.value.ramaBaseTrabajo === "string" && isReleasePlanDeclaration(declaration)) {
+      featuresByRelease.set(plan.release_id, declaration.features);
+    }
+  }
+
+  return {
+    activeReleaseId: value.activeReleaseId,
+    releases: value.releases.map((release) => ({
+      ...release,
+      features: featuresByRelease.get(release.id) ?? [],
+    })),
+  };
 }
 
 export interface TimelineNode {
