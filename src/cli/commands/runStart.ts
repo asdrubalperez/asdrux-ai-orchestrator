@@ -524,6 +524,30 @@ function artifactContentForResult(result: PhaseResult): Record<string, unknown> 
   return content;
 }
 
+type PersistArtifact = (params: Parameters<typeof recordArtifact>[0]) => Promise<unknown>;
+
+/**
+ * Persiste el resultado sintético que cierra el loop Developer↔QA por agotamiento. A diferencia
+ * de una escalación emitida directamente por un agente, este resultado nace en el Orquestador y
+ * por eso no pasa por ninguno de los recordArtifact normales del loop.
+ */
+export async function persistLoopExhaustionArtifact(
+  params: {
+    runId: string;
+    phase: "developer" | "qa";
+    attempt: number;
+    result: PhaseResult;
+  },
+  persistArtifact: PersistArtifact = recordArtifact
+): Promise<void> {
+  await persistArtifact({
+    runId: params.runId,
+    phase: params.phase,
+    kind: "escalation",
+    content: { attempt: params.attempt, ...artifactContentForResult(params.result) },
+  });
+}
+
 /**
  * FEATURE-018, sección 7.3: Planning siempre opera dentro del release activo vigente al momento de
  * su invocación (Regla Funcional 5) — inyectado acá, no asumido por el propio rol. `activeRelease`
@@ -809,10 +833,26 @@ export async function runDeveloperQaLoop(params: {
   maxAttempts: number;
   /** Compartido con executePipelineRun — ver el comentario en su declaración. */
   phaseTiming: { agentRole: AgentRole | null; startedAt: number | null };
+  /** Seam acotado para probar el control del loop sin Postgres ni contenedores reales. */
+  services?: {
+    haltIfCancelledExternally?: typeof haltIfCancelledExternally;
+    updateRunCurrentPhase?: typeof updateRunCurrentPhase;
+    recordRunEvent?: typeof recordRunEvent;
+    persistArtifact?: PersistArtifact;
+    buildExecutor?: Pick<BuildExecutor, "runIfNeeded">;
+    testExecutor?: Pick<TestExecutor, "run">;
+  };
 }): Promise<PhaseResult> {
   const { executor, developerExecutor, readRole, runId, planningResult, maxAttempts, phaseTiming } = params;
-  const testExecutor = new TestExecutor();
-  const buildExecutor = new BuildExecutor();
+  const services = {
+    haltIfCancelledExternally,
+    updateRunCurrentPhase,
+    recordRunEvent,
+    persistArtifact: recordArtifact as PersistArtifact,
+    buildExecutor: new BuildExecutor() as Pick<BuildExecutor, "runIfNeeded">,
+    testExecutor: new TestExecutor() as Pick<TestExecutor, "run">,
+    ...params.services,
+  };
   const testCommand = extractTestCommand(planningResult.outputArtifact);
   console.log(`[run:start] COMANDO_TEST declarado por Planning: ${testCommand}`);
 
@@ -828,8 +868,8 @@ export async function runDeveloperQaLoop(params: {
   let lastBuildFailureSummary: string | null = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    await haltIfCancelledExternally(runId);
-    await updateRunCurrentPhase(runId, "developer");
+    await services.haltIfCancelledExternally(runId);
+    await services.updateRunCurrentPhase(runId, "developer");
 
     const developerContext =
       attempt === 1
@@ -853,16 +893,16 @@ export async function runDeveloperQaLoop(params: {
 
     phaseTiming.agentRole = "developer";
     phaseTiming.startedAt = Date.now();
-    await recordRunEvent(runId, "phase_started", { agentRole: "developer", attempt });
+    await services.recordRunEvent(runId, "phase_started", { agentRole: "developer", attempt });
     const developerResult = await developerExecutor.runPhase(developerInvocation, { timeoutMs: DEVELOPER_TIMEOUT_MS });
     const developerDurationMs = Date.now() - phaseTiming.startedAt;
-    await recordRunEvent(runId, "phase_finished", {
+    await services.recordRunEvent(runId, "phase_finished", {
       agentRole: "developer",
       attempt,
       result: developerResult,
       durationMs: developerDurationMs,
     });
-    await recordArtifact({
+    await services.persistArtifact({
       runId,
       phase: "developer",
       kind: developerResult.status === "escalated" ? "escalation" : "code",
@@ -876,16 +916,16 @@ export async function runDeveloperQaLoop(params: {
       return developerResult;
     }
 
-    await haltIfCancelledExternally(runId);
+    await services.haltIfCancelledExternally(runId);
 
     // FEATURE-021: build determinístico garantizado por el Orquestador, entre el turno de
     // Developer y el de QA — nunca por decisión de ningún agente. QA es intencionalmente
     // read-only (Regla 10, Ownership de Artefactos) y no puede recompilar; este paso corre en un
     // contenedor efímero propio, separado, con permiso de escritura, antes de que TestExecutor
     // monte el worktree en modo :ro para correr el test.
-    const buildResult = await buildExecutor.runIfNeeded(executor.options.workingDirectory, 120_000);
+    const buildResult = await services.buildExecutor.runIfNeeded(executor.options.workingDirectory, 120_000);
     if (buildResult.ran) {
-      await recordRunEvent(runId, "build_executed", { attempt, buildResult });
+      await services.recordRunEvent(runId, "build_executed", { attempt, buildResult });
     }
     if (buildResult.ran && buildResult.exitCode !== 0) {
       lastBuildFailureSummary = buildResult.timedOut
@@ -900,7 +940,11 @@ export async function runDeveloperQaLoop(params: {
           summary: `Se agotaron los ${maxAttempts} intentos sin lograr un build exitoso. Último error: ${lastBuildFailureSummary}`,
           escalationReason: `Límite de reintentos (${maxAttempts}) alcanzado — build roto en todos los intentos, QA nunca llegó a validar.`,
         };
-        await recordRunEvent(runId, "loop_exhausted", { maxAttempts, reason: "build", lastBuildResult: buildResult });
+        await persistLoopExhaustionArtifact(
+          { runId, phase: "developer", attempt, result: exhausted },
+          services.persistArtifact
+        );
+        await services.recordRunEvent(runId, "loop_exhausted", { maxAttempts, reason: "build", lastBuildResult: buildResult });
         console.log(`[run:start] Límite de ${maxAttempts} intentos alcanzado sin build exitoso — run escalado.`);
         return exhausted;
       }
@@ -911,18 +955,18 @@ export async function runDeveloperQaLoop(params: {
     }
     lastBuildFailureSummary = null; // se limpia apenas un build corre bien (o es no-op) en este intento
 
-    await updateRunCurrentPhase(runId, "qa");
+    await services.updateRunCurrentPhase(runId, "qa");
 
     // FEATURE-006 (resuelve H14): el TestExecutor —no el agente QA— corre el comando de test,
     // como executable + args estructurados, dentro de un contenedor sin red. QA nunca recibe Bash.
     const { executable, args: testArgs } = parseTestCommand(testCommand);
-    const testResult = await testExecutor.run({
+    const testResult = await services.testExecutor.run({
       executable,
       args: testArgs,
       workingDirectory: executor.options.workingDirectory,
       timeoutMs: 60_000,
     });
-    await recordRunEvent(runId, "test_executed", { attempt, testCommand, testResult });
+    await services.recordRunEvent(runId, "test_executed", { attempt, testCommand, testResult });
 
     const qaInvocation: PhaseInvocation = {
       agentRole: "qa",
@@ -933,11 +977,11 @@ export async function runDeveloperQaLoop(params: {
 
     phaseTiming.agentRole = "qa";
     phaseTiming.startedAt = Date.now();
-    await recordRunEvent(runId, "phase_started", { agentRole: "qa", attempt });
+    await services.recordRunEvent(runId, "phase_started", { agentRole: "qa", attempt });
     const qaResult = await executor.runPhase(qaInvocation, { timeoutMs: QA_TIMEOUT_MS });
     const qaDurationMs = Date.now() - phaseTiming.startedAt;
-    await recordRunEvent(runId, "phase_finished", { agentRole: "qa", attempt, result: qaResult, durationMs: qaDurationMs });
-    await recordArtifact({
+    await services.recordRunEvent(runId, "phase_finished", { agentRole: "qa", attempt, result: qaResult, durationMs: qaDurationMs });
+    await services.persistArtifact({
       runId,
       phase: "qa",
       kind:
@@ -971,7 +1015,11 @@ export async function runDeveloperQaLoop(params: {
         summary: `Se agotaron los ${maxAttempts} intentos del loop Developer↔QA sin aprobación. Último rechazo: ${qaResult.summary}`,
         escalationReason: `Límite de reintentos (${maxAttempts}) alcanzado — último rechazo de QA: ${qaResult.summary}`,
       };
-      await recordRunEvent(runId, "loop_exhausted", { maxAttempts, lastQaResult: qaResult });
+      await persistLoopExhaustionArtifact(
+        { runId, phase: "qa", attempt, result: exhausted },
+        services.persistArtifact
+      );
+      await services.recordRunEvent(runId, "loop_exhausted", { maxAttempts, lastQaResult: qaResult });
       console.log(`[run:start] Límite de ${maxAttempts} intentos alcanzado — run escalado, sin cuarto intento.`);
       return exhausted;
     }

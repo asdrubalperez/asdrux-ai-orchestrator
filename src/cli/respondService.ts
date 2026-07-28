@@ -425,7 +425,7 @@ function runStartedPayload(
   };
 }
 
-function latestEscalationArtifact(artifacts: unknown[]): { id: string; phase: AgentRole; content: unknown } {
+export function latestEscalationArtifact(artifacts: unknown[]): { id: string; phase: AgentRole; content: unknown } {
   for (let i = artifacts.length - 1; i >= 0; i--) {
     const item = artifacts[i] as { id?: unknown; phase?: unknown; kind?: unknown; content?: unknown };
     if (item.kind === "escalation" && typeof item.id === "string" && isAgentRole(item.phase)) {
