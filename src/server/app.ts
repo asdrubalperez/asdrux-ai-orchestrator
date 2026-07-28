@@ -32,6 +32,7 @@ import {
 import type { BusinessCaseValues } from "../intake/mapBusinessCase.js";
 import { buildRunViewModel, toReleaseRoadmapView } from "./runView.js";
 import { openRunEventsStream } from "./sse.js";
+import { getFeatureDocumentForRun } from "../features/lifecycle.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -122,8 +123,11 @@ export function createApp(config: ServerConfig): express.Express {
         res.status(404).json({ error: "run_not_found" });
         return;
       }
-      const releaseRoadmap = await resolveReleaseRoadmap(detail.run.project_id);
-      res.json(buildRunViewModel(detail, releaseRoadmap));
+      const [releaseRoadmap, featureDocument] = await Promise.all([
+        resolveReleaseRoadmap(detail.run.project_id),
+        getFeatureDocumentForRun(runId),
+      ]);
+      res.json(buildRunViewModel(detail, releaseRoadmap, featureDocument));
     } catch (err) {
       next(err);
     }

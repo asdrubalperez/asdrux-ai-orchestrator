@@ -9,6 +9,7 @@ import {
   getRunEventsAfterForUser,
 } from "../db/repository.js";
 import { buildRunViewModel, toReleaseRoadmapView } from "./runView.js";
+import { getFeatureDocumentForRun } from "../features/lifecycle.js";
 
 /** FEATURE-018: mismo criterio que resolveReleaseRoadmap en app.ts (no importado desde acá para no
  * crear un import circular app.ts <-> sse.ts). */
@@ -62,7 +63,11 @@ export async function openRunEventsStream(params: {
   };
   addClient(client);
 
-  writeEvent(params.response, "snapshot", buildRunViewModel(detail, await resolveReleaseRoadmap(detail.run.project_id)));
+  const [roadmap, featureDocument] = await Promise.all([
+    resolveReleaseRoadmap(detail.run.project_id),
+    getFeatureDocumentForRun(params.runId),
+  ]);
+  writeEvent(params.response, "snapshot", buildRunViewModel(detail, roadmap, featureDocument));
   await replayEvents(client);
 
   const heartbeat = setInterval(() => {
@@ -108,11 +113,11 @@ async function handleNotification(payload: string | undefined): Promise<void> {
         client.response.end();
         return;
       }
-      writeEvent(
-        client.response,
-        "snapshot",
-        buildRunViewModel(detail, await resolveReleaseRoadmap(detail.run.project_id))
-      );
+      const [roadmap, featureDocument] = await Promise.all([
+        resolveReleaseRoadmap(detail.run.project_id),
+        getFeatureDocumentForRun(client.runId),
+      ]);
+      writeEvent(client.response, "snapshot", buildRunViewModel(detail, roadmap, featureDocument));
       await replayEvents(client);
     })
   );

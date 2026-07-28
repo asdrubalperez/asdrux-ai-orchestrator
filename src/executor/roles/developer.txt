@@ -8,6 +8,10 @@ de filesystem en esta invocación es "workspace-write", acotado exclusivamente a
 run (tu directorio de trabajo actual) — nunca escribas fuera de él.
 
 Reglas de esta fase:
+0. Si el contexto contiene `readinessRequest: true`, este es el turno post-QA. NO modifiques
+   archivos ni vuelvas a implementar. Inspeccioná el estado recibido y declará exclusivamente
+   READINESS. `ready` o `ready_with_known_risks` exigen `requiresCodeChanges: false`; si todavía
+   hacen falta cambios declará `not_ready`.
 1. Implementá exactamente lo que el plan pide — no agregues alcance no solicitado.
 2. Creá el archivo de test en la ruta que Planning especificó, con contenido real que ejercite los
    casos de prueba declarados (no un archivo vacío ni un placeholder).
@@ -27,4 +31,6 @@ Formato de respuesta esperado (texto plano estricto: SIN Markdown de ningún tip
 ESTADO: completed | escalated
 RESUMEN: <resumen narrativo de qué se implementó y en qué archivos>
 ARTEFACTO: <lista de archivos creados/modificados con una descripción breve de cada uno>
+IMPLEMENTATION: <JSON estricto en una sola línea, sin propiedades adicionales, con la forma exacta {"implementationSummary":"...","filesChanged":["..."],"decisions":["..."],"technicalEvidence":["..."]}; null durante el turno post-QA>
+READINESS: <JSON estricto en una sola línea, sin propiedades adicionales, con la forma exacta {"readiness":"ready","summary":"...","knownRisks":["..."],"requiresCodeChanges":false,"finalNotes":["..."]}; readiness admite ready, not_ready o ready_with_known_risks; null durante el turno normal de implementación>
 RAZON_ESCALAMIENTO: <motivo específico si ESTADO=escalated, o null>

@@ -10,6 +10,7 @@ import {
   Code,
   Compass,
   Copy,
+  FileText,
   Loader2,
   LogOut,
   Radio,
@@ -78,6 +79,20 @@ interface RunViewModel {
     motive: "repeated" | "exhausted" | "user_cancel_requested" | null;
   };
   releaseRoadmap: ReleaseRoadmapView | null;
+  featureDocument: {
+    featureId: string;
+    featureCode: string;
+    name: string;
+    publicationState: "not_materialized" | "materialized" | "committed" | "pushed";
+    path: string;
+    commitSha: string | null;
+    canonicalArtifactId: string;
+    approvalMode: "manual" | "auto";
+    humanMergeAuthorization: "pending" | "not_required" | "approved" | "rejected";
+    markdown: string | null;
+    complete: boolean;
+    reason: "CONTENT_TOO_LARGE" | null;
+  } | null;
 }
 
 interface CurrentUser {
@@ -259,6 +274,7 @@ function RunDashboard(props: {
           {run ? (
             <>
               <RunOverview run={run} runId={props.runId} />
+              <FeatureDocumentPanel document={run.featureDocument} />
               {run.escalation.isEscalated ? (
                 <EscalationActionBanner run={run} onRefresh={query.refresh} onOpenRun={openRun} />
               ) : null}
@@ -435,6 +451,70 @@ function RunOverview({ run, runId }: { run: RunViewModel; runId: string }) {
       <Metric label="Eventos" value={String(run.narrative.length)} />
       <ConnectionPanel runId={runId} />
       <MetadataPanel run={run} />
+    </section>
+  );
+}
+
+function FeatureDocumentPanel({ document }: { document: RunViewModel["featureDocument"] }) {
+  const [open, setOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!document || document.publicationState !== "pushed") return;
+    const key = `feature-document-seen:${document.featureId}:${document.commitSha ?? "pending"}`;
+    if (window.sessionStorage.getItem(key)) return;
+    window.sessionStorage.setItem(key, "true");
+    setOpen(true);
+  }, [document]);
+
+  if (!document) return null;
+  const copy = async () => {
+    if (document.markdown) await navigator.clipboard.writeText(document.markdown);
+  };
+
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <FileText className="mt-0.5 h-5 w-5 text-zinc-500" />
+          <div>
+            <h2 className="text-sm font-semibold">
+              {document.featureCode} — {document.name}
+            </h2>
+            <p className="mt-1 text-xs text-zinc-500">
+              {document.publicationState} · {document.path}
+            </p>
+          </div>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+          Ver documento de Feature
+        </Button>
+      </div>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>{document.featureCode} — Documento canónico</DialogTitle>
+            <DialogDescription>
+              Estado: {document.publicationState}. Approval mode: {document.approvalMode}.
+            </DialogDescription>
+          </DialogHeader>
+          {document.markdown ? (
+            <pre className="max-h-[65vh] overflow-auto whitespace-pre-wrap rounded-md border border-zinc-200 bg-zinc-50 p-4 text-xs text-zinc-800">
+              {document.markdown}
+            </pre>
+          ) : (
+            <p className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              El documento supera 64 KiB. El contenido completo no está disponible en esta versión.
+            </p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => void copy()} disabled={!document.markdown}>
+              <Copy className="h-4 w-4" />
+              Copiar
+            </Button>
+            <Button onClick={() => setOpen(false)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

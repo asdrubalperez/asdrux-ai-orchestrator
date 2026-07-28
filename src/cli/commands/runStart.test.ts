@@ -146,6 +146,104 @@ test("runDeveloperQaLoop agota 3 rechazos de QA y deja la escalación después d
   assert.equal((latest.content as { attempt: number }).attempt, 3);
 });
 
+test("FEATURE-023: QA factual pasado requiere readiness estable de Developer antes de continuar", async () => {
+  const artifacts: unknown[] = [];
+  const contributions: Array<{ contribution: { purpose: string } }> = [];
+  let developerCalls = 0;
+  let eventId = 0;
+  const executor = {
+    options: { workingDirectory: "C:\\fake-worktree" },
+    runPhase: async () =>
+      ({
+        status: "completed",
+        outputArtifact: {
+          qaResult: {
+            testStatus: "passed",
+            testsExecuted: ["node --test fake.test.js"],
+            evidence: "1 test passed",
+            defects: [],
+            observations: [],
+            qualityRisks: [],
+          },
+        },
+        summary: "Tests pasados.",
+        escalationReason: null,
+      }) satisfies PhaseResult,
+  } as unknown as Parameters<typeof runDeveloperQaLoop>[0]["executor"];
+  const developerExecutor = {
+    options: { workingDirectory: "C:\\fake-worktree" },
+    runPhase: async () => {
+      developerCalls += 1;
+      return developerCalls === 1
+        ? ({
+            status: "completed",
+            outputArtifact: {
+              implementation: {
+                implementationSummary: "Cambio localizado.",
+                filesChanged: ["src/a.ts"],
+                decisions: [],
+                technicalEvidence: ["build"],
+              },
+            },
+            summary: "Implementado.",
+            escalationReason: null,
+          } satisfies PhaseResult)
+        : ({
+            status: "completed",
+            outputArtifact: {
+              readiness: {
+                readiness: "ready",
+                summary: "Listo.",
+                knownRisks: [],
+                requiresCodeChanges: false,
+                finalNotes: [],
+              },
+            },
+            summary: "Readiness declarado.",
+            escalationReason: null,
+          } satisfies PhaseResult);
+    },
+  } as unknown as Parameters<typeof runDeveloperQaLoop>[0]["developerExecutor"];
+  const baseServices = loopServices(artifacts, {
+    ran: false,
+    exitCode: null,
+    stdout: "",
+    stderr: "",
+    timedOut: false,
+  });
+
+  const result = await runDeveloperQaLoop({
+    executor,
+    developerExecutor,
+    readRole: async () => "instrucciones",
+    runId: "run-readiness",
+    planningResult: planningResult(),
+    maxAttempts: 3,
+    featureLifecycle: true,
+    phaseTiming: { agentRole: null, startedAt: null },
+    services: {
+      ...baseServices,
+      recordRunEvent: async () => ++eventId,
+      testExecutor: {
+        run: async () => ({ exitCode: 0, stdout: "pass", stderr: "", timedOut: false }),
+      },
+      persistFeatureContribution: async (value) => {
+        contributions.push(value as never);
+        return {} as never;
+      },
+      gitReadinessSnapshot: async () => ({ branch: "run/x", headSha: "abc", treeHash: "tree" }),
+    },
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(developerCalls, 2);
+  assert.deepEqual(contributions.map((item) => item.contribution.purpose), [
+    "developer-implementation",
+    "qa-result",
+    "developer-readiness",
+  ]);
+});
+
 function planningResult(): PhaseResult {
   return {
     status: "completed",

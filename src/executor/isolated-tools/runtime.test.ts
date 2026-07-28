@@ -117,6 +117,27 @@ test("worker executes filesystem tools with synthetic policy", async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
+test("Developer no puede escribir ni editar directamente docs/features", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "isolated-worker-protected-feature-"));
+  await fs.mkdir(path.join(root, "docs", "features"), { recursive: true });
+  await fs.writeFile(path.join(root, "docs", "features", "FEATURE-001.md"), "original\n");
+  const worker = new IsolatedToolWorker({ worktree: root, policy: policy() });
+  await assert.rejects(
+    worker.call("fs_write", { path: "docs/features/FEATURE-002.md", content: "x", createOnly: true }),
+    /PROTECTED_FEATURE_DOCUMENT_PATH/
+  );
+  await assert.rejects(
+    worker.call("fs_edit", {
+      path: "docs\\features\\FEATURE-001.md",
+      oldText: "original",
+      newText: "changed",
+    }),
+    /PROTECTED_FEATURE_DOCUMENT_PATH/
+  );
+  assert.equal(await fs.readFile(path.join(root, "docs", "features", "FEATURE-001.md"), "utf8"), "original\n");
+  await fs.rm(root, { recursive: true, force: true });
+});
+
 test("authenticated channel fails closed on bad token and replay", async () => {
   const channel = new AuthenticatedWorkerChannel("inv", "channel-canary", { call: async () => "SYNTHETIC_WORKER_RESULT" });
   const base = { version: 1 as const, type: "tool_call" as const, invocationId: "inv", callId: "1", tool: "fs_read" as const, args: {} };

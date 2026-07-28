@@ -41,6 +41,6 @@ Formato de respuesta esperado (texto plano estricto: SIN Markdown de ningún tip
 ESTADO: completed | escalated
 RESUMEN: <resumen narrativo de los requisitos funcionales derivados o de la razón de escalamiento>
 ARTEFACTO: <requisitos funcionales en bullets, o null si escalás>
-FEATURES: <JSON estricto en una sola línea con la forma exacta {"features":[{"id":"f1","nombre":"...","resumen":"..."}]} -- mínimo una Feature; o null si escalás por ambigüedad genérica (Regla 2)>
+FEATURES: <JSON estricto en una sola línea, sin propiedades adicionales, con la forma exacta {"features":[{"id":"f1","nombre":"...","resumen":"...","prioridad":"P0","documento":{"problemStatement":"...","functionalGoal":"...","scope":{"included":["..."],"excluded":["..."],"futureIdeas":[]},"functionalRules":["..."],"algorithmicStrategy":null,"validationCriteria":[{"scenario":"...","input":"...","expectedOutput":"..."}],"validationEvidence":"...","risks":["..."]}}]} -- algorithmicStrategy puede ser null o {"objective":"...","inputs":["..."],"outputs":["..."],"constraints":["..."],"tieBreakers":["..."],"regressions":[{"scenario":"...","input":"...","expectedOutput":"..."}]}; prioridad admite únicamente P0, P1 o P2; mínimo una Feature; o null si escalás por ambigüedad genérica (Regla 2)>
 RAZON_ESCALAMIENTO: <motivo específico si ESTADO=escalated, o null>
 NO_APLICA: <true solo si estás pasando una revisión de escalamiento que no te corresponde (Regla 5), o null en cualquier otro caso>

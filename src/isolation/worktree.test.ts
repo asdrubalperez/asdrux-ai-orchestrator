@@ -5,7 +5,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { createRunWorktree, mergeFeatureBranchIntoBase, normalizeGitCloneUrl } from "./worktree.js";
+import {
+  createRunWorktree,
+  gitReadinessSnapshot,
+  mergeFeatureBranchIntoBase,
+  normalizeGitCloneUrl,
+} from "./worktree.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -26,6 +31,31 @@ test("normalizeGitCloneUrl deja intactas URLs de otros hosts", () => {
 
 test("normalizeGitCloneUrl recorta espacios sin alterar el resto", () => {
   assert.equal(normalizeGitCloneUrl("  https://github.com/owner/repo  "), "git@github.com:owner/repo.git");
+});
+
+test("gitReadinessSnapshot incluye tracked, unstaged y untracked sin modificar el índice real", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "readiness-snapshot-"));
+  try {
+    await execFileAsync("git", ["init", "-b", "main"], { cwd: tmp });
+    await fs.writeFile(path.join(tmp, "tracked.txt"), "base\n");
+    await execFileAsync("git", ["add", "tracked.txt"], { cwd: tmp });
+    await execFileAsync("git", [...GIT_IDENTITY, "commit", "-m", "initial"], { cwd: tmp });
+    await fs.writeFile(path.join(tmp, "tracked.txt"), "changed\n");
+    await fs.writeFile(path.join(tmp, "untracked.txt"), "new\n");
+
+    const beforeStatus = await execFileAsync("git", ["status", "--porcelain"], { cwd: tmp });
+    const first = await gitReadinessSnapshot({ branchName: "ignored", worktreePath: tmp });
+    const afterStatus = await execFileAsync("git", ["status", "--porcelain"], { cwd: tmp });
+    assert.equal(first.branch, "main");
+    assert.equal(beforeStatus.stdout, afterStatus.stdout);
+
+    await fs.writeFile(path.join(tmp, "untracked.txt"), "newer\n");
+    const second = await gitReadinessSnapshot({ branchName: "ignored", worktreePath: tmp });
+    assert.notEqual(first.treeHash, second.treeHash);
+    assert.equal(first.headSha, second.headSha);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
 });
 
 const GIT_IDENTITY = ["-c", "user.name=test", "-c", "user.email=test@localhost"];
