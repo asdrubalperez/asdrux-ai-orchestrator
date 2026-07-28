@@ -105,3 +105,44 @@ test("mergeFeatureBranchIntoBase mergea y pushea usando el worktree de la Featur
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });
+
+/**
+ * fix/merge-approval-atomicity: hallazgo real en producción — `respondMergeApproval`
+ * (`respondService.ts`) marcaba el run como "resolved" en su propia transacción ANTES de intentar
+ * este merge; si el merge fallaba, el run quedaba "resolved" para siempre sin que el merge hubiera
+ * ocurrido realmente, sin ningún rastro de error. El fix reordena para que el merge corra primero
+ * — pero esa garantía solo vale si `mergeFeatureBranchIntoBase` efectivamente **lanza** ante un
+ * fallo real, en vez de colgarse o resolver en silencio. No hay DB en esta suite de tests (mismo
+ * comentario que el test de arriba), así que no se puede verificar acá que el run permanezca
+ * "escalated" — este test verifica la precondición de la que depende ese fix: un fallo de merge
+ * real (rama de Feature inexistente) se propaga como una excepción real y rápida, nunca en
+ * silencio ni colgado.
+ */
+test("mergeFeatureBranchIntoBase lanza una excepción real cuando la rama de la Feature no existe (precondición del fix de atomicidad de aprobación de merge)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "worktree-merge-fail-"));
+  const originPath = path.join(tmp, "origin.git");
+  const rootClonePath = path.join(tmp, "root-clone");
+  const originalWorktreesBaseDir = process.env.WORKTREES_BASE_DIR;
+  process.env.WORKTREES_BASE_DIR = path.join(tmp, "worktrees");
+
+  try {
+    await execFileAsync("git", ["init", "--bare", "-b", "main", originPath]);
+    await execFileAsync("git", ["clone", originPath, rootClonePath]);
+    await fs.writeFile(path.join(rootClonePath, "README.md"), "hola\n");
+    await execFileAsync("git", ["add", "-A"], { cwd: rootClonePath });
+    await execFileAsync("git", [...GIT_IDENTITY, "commit", "-m", "chore: initial"], { cwd: rootClonePath });
+    await execFileAsync("git", ["push", "origin", "main"], { cwd: rootClonePath });
+
+    await assert.rejects(() =>
+      mergeFeatureBranchIntoBase({
+        repoRoot: rootClonePath,
+        baseBranch: "main",
+        featureBranch: "run/rama-que-no-existe",
+      })
+    );
+  } finally {
+    if (originalWorktreesBaseDir === undefined) delete process.env.WORKTREES_BASE_DIR;
+    else process.env.WORKTREES_BASE_DIR = originalWorktreesBaseDir;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});

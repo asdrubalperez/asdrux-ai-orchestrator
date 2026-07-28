@@ -10,6 +10,20 @@ const execFileAsync = promisify(execFile);
 // Mecanismo confirmado en FEATURE-002 (docs/features/FEATURE-002-spike-results.md):
 // una rama + git worktree real por run, fuera del checkout principal.
 
+/**
+ * fix/merge-approval-atomicity: sin esto, cualquier operación git que necesite input interactivo
+ * (confirmación de host SSH nueva, prompt de credencial) queda colgada para siempre en un proceso
+ * no interactivo — sin error, sin timeout, sin más output (síntoma real observado: aprobación de
+ * merge de Modo Manual que nunca completó ni falló, `respondService.ts`, `respondMergeApproval`).
+ * `GIT_TERMINAL_PROMPT=0` hace que git falle al instante en vez de esperar input que nunca va a
+ * llegar; `GIT_ASKPASS=echo` bloquea también cualquier askpass gráfico configurado en el host.
+ * Antes de este fix, solo `cloneRunRepository` (más abajo) lo tenía — hallazgo real de FEATURE-017
+ * que no se había propagado al resto de las funciones de este archivo.
+ */
+function gitNoPromptEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "echo" };
+}
+
 export interface RunWorktree {
   branchName: string;
   worktreePath: string;
@@ -22,6 +36,7 @@ export async function createRunWorktree(repoRoot: string, runId: string, baseRef
 
   await execFileAsync("git", ["worktree", "add", "-b", branchName, worktreePath, baseRef], {
     cwd: repoRoot,
+    env: gitNoPromptEnv(),
   });
 
   return { branchName, worktreePath };
@@ -30,8 +45,9 @@ export async function createRunWorktree(repoRoot: string, runId: string, baseRef
 export async function removeRunWorktree(repoRoot: string, worktree: RunWorktree): Promise<void> {
   await execFileAsync("git", ["worktree", "remove", worktree.worktreePath, "--force"], {
     cwd: repoRoot,
+    env: gitNoPromptEnv(),
   });
-  await execFileAsync("git", ["branch", "-D", worktree.branchName], { cwd: repoRoot });
+  await execFileAsync("git", ["branch", "-D", worktree.branchName], { cwd: repoRoot, env: gitNoPromptEnv() });
 }
 
 /**
@@ -42,12 +58,15 @@ export async function removeRunWorktree(repoRoot: string, worktree: RunWorktree)
  * No-op (sin error) si no hay cambios para commitear.
  */
 export async function commitAllChanges(worktree: RunWorktree, message: string): Promise<boolean> {
-  const status = await execFileAsync("git", ["status", "--porcelain"], { cwd: worktree.worktreePath });
+  const status = await execFileAsync("git", ["status", "--porcelain"], {
+    cwd: worktree.worktreePath,
+    env: gitNoPromptEnv(),
+  });
   if (!status.stdout.trim()) {
     return false;
   }
 
-  await execFileAsync("git", ["add", "-A"], { cwd: worktree.worktreePath });
+  await execFileAsync("git", ["add", "-A"], { cwd: worktree.worktreePath, env: gitNoPromptEnv() });
   await execFileAsync(
     "git",
     [
@@ -59,7 +78,7 @@ export async function commitAllChanges(worktree: RunWorktree, message: string): 
       "-m",
       message,
     ],
-    { cwd: worktree.worktreePath }
+    { cwd: worktree.worktreePath, env: gitNoPromptEnv() }
   );
   return true;
 }
@@ -72,6 +91,7 @@ export async function commitAllChanges(worktree: RunWorktree, message: string): 
 export async function pushRunBranch(worktree: RunWorktree): Promise<void> {
   await execFileAsync("git", ["push", "origin", worktree.branchName], {
     cwd: worktree.worktreePath,
+    env: gitNoPromptEnv(),
   });
 }
 
@@ -104,6 +124,7 @@ export async function mergeFeatureBranchIntoBase(params: {
 
   await execFileAsync("git", ["worktree", "add", "--detach", baseWorktreePath, params.baseBranch], {
     cwd: params.repoRoot,
+    env: gitNoPromptEnv(),
   });
   try {
     await execFileAsync(
@@ -119,14 +140,16 @@ export async function mergeFeatureBranchIntoBase(params: {
         "-m",
         `merge: ${params.featureBranch} -> ${params.baseBranch}`,
       ],
-      { cwd: baseWorktreePath }
+      { cwd: baseWorktreePath, env: gitNoPromptEnv() }
     );
     await execFileAsync("git", ["push", "origin", `HEAD:refs/heads/${params.baseBranch}`], {
       cwd: baseWorktreePath,
+      env: gitNoPromptEnv(),
     });
   } finally {
     await execFileAsync("git", ["worktree", "remove", baseWorktreePath, "--force"], {
       cwd: params.repoRoot,
+      env: gitNoPromptEnv(),
     });
   }
 }

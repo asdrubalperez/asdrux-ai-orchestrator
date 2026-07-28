@@ -514,6 +514,21 @@ async function respondMergeApproval(params: {
   mergeApproval: MergeApprovalPayload;
   rawSolution: string;
 }): Promise<EscalationResponseResult> {
+  // fix/merge-approval-atomicity: el merge real corre PRIMERO, antes de tocar la DB. Antes de este
+  // fix, `resolveEscalatedRunStatus(..., "resolved", ...)` se commiteaba en su propia transacción
+  // ANTES de intentar este merge — si el merge fallaba (ej. un `git push` colgado esperando un
+  // prompt de credencial que nunca llega en un proceso no interactivo, ver `gitNoPromptEnv` en
+  // `worktree.ts`), el run quedaba "resolved" para siempre sin que el merge ni la continuación
+  // hubieran ocurrido realmente, sin ningún rastro de error. Con el merge primero, si falla, no se
+  // tocó la DB todavía — el run sigue "escalated", tal como estaba, sin ningún cambio de estado
+  // falso. Mismo patrón que ya usa el camino genérico de escalamiento (más arriba en este archivo):
+  // el paso que puede fallar corre antes de comprometer el estado del run.
+  await mergeFeatureBranchIntoBase({
+    repoRoot: params.repoRoot,
+    baseBranch: params.mergeApproval.baseBranch,
+    featureBranch: params.mergeApproval.featureBranch,
+  });
+
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -536,21 +551,31 @@ async function respondMergeApproval(params: {
     client.release();
   }
 
-  await mergeFeatureBranchIntoBase({
-    repoRoot: params.repoRoot,
-    baseBranch: params.mergeApproval.baseBranch,
-    featureBranch: params.mergeApproval.featureBranch,
-  });
-
-  const { childRunId, childWorktree } = await createPlanningToQaChildRun({
-    repoRoot: params.repoRoot,
-    parentRunId: params.parentRunId,
-    projectId: params.projectId,
-    baseBranch: params.mergeApproval.baseBranch,
-    userId: params.userId,
-    cliAgentOverride: params.cliAgentOverride,
-    model: params.model,
-  });
+  // El merge y el "resolved" ya están confirmados en este punto. `createPlanningToQaChildRun`
+  // tiene su propia transacción interna (rollback si falla) — pero si falla, el código de la
+  // Feature ya está mergeado de forma segura en la rama base; lo único que no arrancó es la
+  // continuación a Planning. Se distingue con un evento propio (`continuation_creation_failed`)
+  // para que quede visible que esto NO es un run "fantasma" silencioso — el merge sí ocurrió, solo
+  // falta que alguien retome la continuación del release.
+  let childRunId: string;
+  let childWorktree: RunWorktree;
+  try {
+    const created = await createPlanningToQaChildRun({
+      repoRoot: params.repoRoot,
+      parentRunId: params.parentRunId,
+      projectId: params.projectId,
+      baseBranch: params.mergeApproval.baseBranch,
+      userId: params.userId,
+      cliAgentOverride: params.cliAgentOverride,
+      model: params.model,
+    });
+    childRunId = created.childRunId;
+    childWorktree = created.childWorktree;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await recordRunEvent(params.parentRunId, "continuation_creation_failed", { error: message }).catch(() => {});
+    throw err;
+  }
 
   return {
     kind: "solution",
