@@ -142,7 +142,7 @@ test("FEATURE-018: releaseRoadmap es null por default, sin necesidad de DB en el
 
 test("FEATURE-018: releaseRoadmap refleja el valor ya resuelto que se le pasa", () => {
   const roadmap = {
-    releases: [{ id: "r1", nombre: "MVP", alcanceResumen: "Alcance mínimo.", estado: "Activo" }],
+    releases: [{ id: "r1", nombre: "MVP", alcanceResumen: "Alcance mínimo.", estado: "Activo" as const, features: [] }],
     activeReleaseId: "r1",
   };
   const view = buildRunViewModel(
@@ -151,6 +151,39 @@ test("FEATURE-018: releaseRoadmap refleja el valor ya resuelto que se le pasa", 
   );
 
   assert.deepEqual(view.releaseRoadmap, roadmap);
+});
+
+test("releaseRoadmap anida Features por release y conserva releases sin plan con lista vacía", () => {
+  const view = toReleaseRoadmapView(
+    {
+      releases: [
+        { id: "r1", nombre: "MVP", alcanceResumen: "Primero.", estado: "Activo" },
+        { id: "r2", nombre: "Futuro", alcanceResumen: "Después.", estado: "Pendiente" },
+      ],
+      activeReleaseId: "r1",
+    },
+    [
+      {
+        release_id: "r1",
+        value: {
+          ramaBaseTrabajo: "main",
+          featureActualId: "f2",
+          features: [
+            { id: "f1", nombre: "Lista", estado: "Completada" },
+            { id: "f2", nombre: "Actual", estado: "En curso" },
+            { id: "f3", nombre: "Luego", estado: "Pendiente" },
+          ],
+        },
+      },
+    ]
+  );
+
+  assert.deepEqual(view?.releases[0].features.map((feature) => feature.estado), [
+    "Completada",
+    "En curso",
+    "Pendiente",
+  ]);
+  assert.deepEqual(view?.releases[1].features, []);
 });
 
 test("FEATURE-018: toReleaseRoadmapView rechaza valores que no tienen la forma esperada", () => {

@@ -34,6 +34,7 @@ import { queryClient } from "./lib/queryClient";
 import { CasesList } from "./intake/CasesList";
 import { DisparoScreen } from "./intake/DisparoScreen";
 import { statusLabel as runStatusLabel, statusVariant as runStatusVariant } from "./intake/statusDisplay";
+import { ReleasePlanPanel, type ReleaseRoadmapView } from "./ReleasePlanPanel";
 import "./styles.css";
 
 type TimelineStatus =
@@ -76,10 +77,7 @@ interface RunViewModel {
     outputArtifact: unknown;
     motive: "repeated" | "exhausted" | "user_cancel_requested" | null;
   };
-  releaseRoadmap: {
-    releases: Array<{ id: string; nombre: string; alcanceResumen: string; estado: string }>;
-    activeReleaseId: string;
-  } | null;
+  releaseRoadmap: ReleaseRoadmapView | null;
 }
 
 interface CurrentUser {
@@ -717,55 +715,6 @@ function ConnectionPanel({ runId }: { runId: string }) {
         {runId ? "SSE activo" : "Sin run seleccionado"}
       </div>
     </section>
-  );
-}
-
-function ReleasePlanPanel({ releaseRoadmap }: { releaseRoadmap: RunViewModel["releaseRoadmap"] }) {
-  if (!releaseRoadmap) {
-    return (
-      <section className="h-full rounded-lg border border-zinc-200 bg-white p-4">
-        <CardLabel>Release Plan</CardLabel>
-        <p className="mt-2 text-sm text-zinc-600">
-          Todavía no hay un Roadmap de Releases aprobado para este proyecto.
-        </p>
-      </section>
-    );
-  }
-
-  return (
-    <section className="h-full rounded-lg border border-zinc-200 bg-white p-4">
-      <CardLabel>Release Plan</CardLabel>
-      <div className="mt-4 space-y-3 text-sm">
-        {releaseRoadmap.releases.map((release) => (
-          <ReleasePlanItem
-            key={release.id}
-            status={release.estado}
-            label={release.nombre}
-            isActive={release.id === releaseRoadmap.activeReleaseId}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function ReleasePlanItem({
-  status,
-  label,
-  isActive,
-}: {
-  status: string;
-  label: string;
-  isActive: boolean;
-}) {
-  const done = status === "Completado";
-  const Icon = done ? CheckCircle2 : Circle;
-  return (
-    <div className="flex items-center gap-2 text-zinc-700">
-      <Icon className={`h-4 w-4 ${done ? "text-emerald-600" : "text-zinc-400"}`} />
-      <span>{label}</span>
-      <Badge variant={isActive ? "success" : "secondary"}>{isActive ? "Activo" : status}</Badge>
-    </div>
   );
 }
 
