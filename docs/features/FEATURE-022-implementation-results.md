@@ -92,9 +92,10 @@ el volumen real crece materialmente.
 
 `docs/ROADMAP.md` incorpora FEATURE-022 y desplaza las Features posteriores:
 
-- Milestone 2 E2E: FEATURE-023.
-- Selección de provider/modelo/credenciales: FEATURE-024.
-- Credenciales git por usuario: FEATURE-025.
+- Lifecycle canónico de Features: FEATURE-023.
+- Milestone 2 E2E: FEATURE-024.
+- Selección de provider/modelo/credenciales: FEATURE-025.
+- Credenciales git por usuario: FEATURE-026.
 
 También se corrigieron las referencias históricas afectadas en FEATURE-019. No quedaron IDs
 duplicados, enlaces a nombres renumerados ni contradicciones adicionales sin resolver.

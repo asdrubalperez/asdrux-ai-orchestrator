@@ -74,24 +74,37 @@
   primera aprobación de merge en Modo Manual) — encontró un problema real y distinto en el paso de
   build de QA (no relacionado con el diseño de esta Feature), que derivó en FEATURE-021 (ver
   abajo). Ver Lecciones Aprendidas en `docs/features/FEATURE-020-*.md`.
+- FEATURE-021 — Build determinístico garantizado por el Orquestador entre Developer y QA:
+  build obligatorio separado del test, fallos devueltos a Developer, agotamiento explícito y
+  rechazo de operadores de shell en `COMANDO_TEST`. Implementada y cubierta por pruebas; el
+  contrato pendiente entre output compilado y ruta de test queda separado en FEATURE-029.
+- FEATURE-022 — Lectura universal de artifacts por todos los roles: todos los roles pueden
+  descubrir y leer bajo demanda cualquier artifact del proyecto del run actual mediante
+  `artifact_list` y `artifact_read`, con aislamiento por proyecto, acceso read-only y sin
+  acumulación automática de contexto. Implementada, validada técnicamente y publicada en
+  `codex/feature-022-artifact-read`; pendiente únicamente del merge final a `main`. Ver
+  `docs/features/FEATURE-022-Lectura-universal-de-artifacts-por-todos-los-roles.md` y
+  `docs/features/FEATURE-022-implementation-results.md`.
 
 **🟡 Confirmado**
-- FEATURE-021 — Build determinístico garantizado por el Orquestador entre Developer y QA: hoy
-  `COMANDO_TEST` puede incluir un paso de compilación que falla siempre en el sandbox de solo
-  lectura de QA (`EROFS`) y además expone un bug real en `parseTestCommand` (split ingenuo por
-  espacios, sin soporte de `&&`). Prioridad alta — bloqueó la validación end-to-end de FEATURE-020.
-  Ver detalle abajo. (Nota: el ítem "Adaptación de FEATURE-018 al mecanismo de FEATURE-019" que
-  tenía este número quedó absorbido sin trabajo propio por la implementación real de
-  FEATURE-019/020 — verificado en `08-CODE-SYSTEM-PROMPT.md`/`06-DELIVERY-WORKFLOW.md`, ya
-  reflejan el modelo nuevo. No se abre como Feature separada.)
-- FEATURE-022 — Lectura universal de artifacts por todos los roles: `artifact_list` y
-  `artifact_read` comunes a los cinco roles y ambos providers, con aislamiento por proyecto,
-  proxy host confiable por Unix socket y límite estricto de 64 KiB. Aprobada por el owner e
-  implementada y validada en la rama `codex/feature-022-artifact-read`, pendiente de revisión y merge.
-- FEATURE-023 (antes FEATURE-022, antes FEATURE-021, antes FEATURE-019, antes FEATURE-018, antes FEATURE-017, antes
+- FEATURE-023 — Lifecycle canónico de Features basado en
+  `docs/playbook/07-FEATURE-TEMPLATE.md`. **P0 y siguiente Feature a diseñar e implementar**;
+  primera validación funcional punta a punta de FEATURE-022.
+- FEATURE-024 (antes FEATURE-023, antes FEATURE-022, antes FEATURE-021, antes FEATURE-019, antes FEATURE-018, antes FEATURE-017, antes
   FEATURE-014) — Milestone 2 — Validación end-to-end con caso de negocio real
-- FEATURE-024 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
-- FEATURE-025 — Credenciales git por usuario para el Orquestador (promovida de ⚪ Tentativo)
+- FEATURE-025 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
+- FEATURE-026 — Credenciales git por usuario para el Orquestador (promovida de ⚪ Tentativo)
+- FEATURE-027 — Continuidad durable del loop Developer ↔ QA. Prioridad P0.
+- FEATURE-028 — Release Plan asociado inequívocamente al Release activo. Prioridad P1.
+- FEATURE-029 — Contrato determinístico entre build output y `COMANDO_TEST`. Prioridad P1;
+  complementa FEATURE-021 sin reabrir el build determinístico básico.
+- FEATURE-030 — Proyecto del Orquestador asociado correctamente al repositorio gestionado.
+  Prioridad P1.
+- FEATURE-031 — Mapping confiable de `tipo_solucion` y `canales` sin inventar valores. Prioridad P2.
+- FEATURE-032 — Instalación determinística de dependencias antes del build. Prioridad P2.
+- FEATURE-033 — Lifecycle canónico de `01-PROJECT-BRIEF-TEMPLATE`.
+- FEATURE-034 — Lifecycle canónico de `02-ARCHITECTURE-TEMPLATE`.
+- FEATURE-035 — Lifecycle canónico de `09-RELEASE-PLAN-TEMPLATE`.
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
@@ -333,7 +346,7 @@ esta Feature (el paso de compilación de `COMANDO_TEST` no puede correr en el sa
 lectura de QA), que derivó en FEATURE-021 (ver abajo). Ver Lecciones Aprendidas en
 `docs/features/FEATURE-020-*.md` para el detalle completo de los 3 hallazgos de implementación.
 
-### 🟡 FEATURE-021 — Build determinístico garantizado por el Orquestador entre Developer y QA
+### ✅ FEATURE-021 — Build determinístico garantizado por el Orquestador entre Developer y QA
 Surge de un hallazgo real durante la prueba E2E de FEATURE-020: `COMANDO_TEST` (declarado por
 Planning) incluía un paso de compilación (`npm run build && node --test dist/...`). El sandbox de
 QA es intencionalmente de solo lectura (`qaPolicy.ts`, `qaRuntime.ts`, Regla 10 — QA valida, no
@@ -368,9 +381,11 @@ Con esta opción, `COMANDO_TEST` deja de necesitar `&&` por construcción — el
 el alcance de esta misma Feature): que `parseTestCommand` rechace explícito (`throw`) si detecta
 `&&`/`;`/`|` en el string, en vez de pasarlo tal cual a `spawn` con resultados confusos.
 
-Pendiente de Discovery/Design formal antes de implementar (mismo criterio de Approval Gate que el
-resto de las Features) — este ítem del Roadmap resume el análisis ya hecho, no reemplaza el
-documento de diseño propio.
+Implementada y cubierta por pruebas. FEATURE-021 resolvió la ejecución obligatoria del build entre
+Developer y QA, la separación build/test, el rechazo de operadores de shell y el tratamiento del
+fallo de build como responsabilidad de Developer. No resolvió la coherencia semántica entre la
+ruta que genera el build y la ruta declarada en `COMANDO_TEST`; ese trabajo queda separado en
+FEATURE-029.
 
 **Nota de numeración**: este número (FEATURE-021) reemplaza al ítem viejo "Adaptación de
 FEATURE-018 al mecanismo de FEATURE-019" — verificado (owner + Architect) que ese trabajo quedó
@@ -379,24 +394,47 @@ absorbido sin trabajo propio por la implementación real de FEATURE-019/020
 nuevo: continuación automática a Planning, "Modo Manual" renombrado, cierre de release escalando a
 Architect vía humano). No se abre como Feature separada; el número se reutiliza acá.
 
-### 🟡 FEATURE-022 — Lectura universal de artifacts por todos los roles
-Aprobada por el owner el 2026-07-28 e implementada en la rama
-`codex/feature-022-artifact-read`. Suite completa, integración PostgreSQL/Docker y smokes reales
-Claude/Codex validados; pendiente de revisión del owner y merge a `main`.
+### ✅ FEATURE-022 — Lectura universal de artifacts por todos los roles
+Implementada, validada técnicamente y publicada en `codex/feature-022-artifact-read`; pendiente
+únicamente del merge final a `main`.
 
-Agrega `artifact_list` y `artifact_read` al catálogo cerrado de Architect, Functional, Planning,
-Developer y QA para Claude Code y Codex. El Orquestador liga internamente el run solicitante y un
-proxy host confiable consulta PostgreSQL por Unix socket efímero; los workers no reciben
-credenciales DB, `project_id` ni un `requestingRunId` controlable. La consulta queda aislada por
-proyecto y devuelve `ARTIFACT_NOT_FOUND` tanto para IDs inexistentes como para artifacts de otro
-proyecto.
-
-La v1 lista metadata paginada con cursor opaco `(created_at, id)`, límite default 20/máximo 100,
-resúmenes de hasta 2 KiB y lectura completa sólo hasta 64 KiB. No agrega migraciones, índices,
-tablas de auditoría ni `run_event` por lectura; Feature/Release y lectura parcial quedan fuera de
-alcance. Diseño y contrato en
+Todos los roles pueden descubrir y leer bajo demanda cualquier artifact del proyecto del run
+actual mediante `artifact_list` y `artifact_read`, con aislamiento por proyecto, acceso read-only
+y sin acumulación automática de contexto. Diseño y contrato en
 `docs/features/FEATURE-022-Lectura-universal-de-artifacts-por-todos-los-roles.md`.
 Resultados en `docs/features/FEATURE-022-implementation-results.md`.
+
+### 🟡 FEATURE-023 — Lifecycle canónico de Features basado en el Runbook
+
+**Estado:** Confirmada.
+
+**Prioridad:** P0.
+
+**Orden:** siguiente Feature a diseñar e implementar.
+
+Debe implementar el lifecycle del documento canónico de Feature usando obligatoriamente
+`docs/playbook/07-FEATURE-TEMPLATE.md`:
+
+1. Functional crea la versión original.
+2. Planning la perfecciona según el Release y agrega el plan técnico.
+3. Developer implementa y actualiza evidencia técnica y decisiones reales.
+4. QA registra validación, evidencia y veredicto.
+5. Developer aplica correcciones y consolida la versión final.
+6. El Orquestador valida el documento contra el template activo del Runbook.
+7. La versión final se guarda obligatoriamente en `docs/features/`.
+8. El documento se incluye en el commit y push de la rama de la Feature.
+9. Después del push confirmado, la UI muestra un modal con el Markdown completo para revisión y
+   copia.
+
+FEATURE-023 será la primera validación funcional punta a punta de FEATURE-022. La prueba E2E
+conjunta deberá cubrir artifacts operativos en DB, evolución del documento canónico, persistencia
+del Markdown en repo, commit y push, descubrimiento desde otro rol, lectura bajo demanda y
+continuidad real entre Features. La validación técnica aislada de FEATURE-022 ya está completa; lo
+diferido es el flujo funcional conjunto DB + archivos.
+
+La primera implementación se centra en `07-FEATURE-TEMPLATE`. Los lifecycles de
+`01-PROJECT-BRIEF-TEMPLATE`, `02-ARCHITECTURE-TEMPLATE` y `09-RELEASE-PLAN-TEMPLATE` quedan fuera
+de su alcance inicial y registrados separadamente en FEATURE-033, FEATURE-034 y FEATURE-035.
 
 ### ✅ Feature 09 — Runbook para el Orquestador AI automático
 Diseño completo y cerrado: 12 archivos en `docs/runbook/` (equivalente al `docs/playbook/` actual
@@ -453,7 +491,7 @@ recorre secuencialmente los pasos intermedios aunque no tengan nada que resolver
 optimización futura: permitir que el circuito llegue directo al dueño real sin recorrer los pasos
 intermedios, cuando el costo de la v1 secuencial resulte un problema real en la práctica.
 
-### 🟡 FEATURE-024 — Selección de proveedor/modelo/credenciales por rol
+### 🟡 FEATURE-025 — Selección de proveedor/modelo/credenciales por rol
 Promovido de ⚪ Tentativo a 🟡 Confirmado.
 Ítem ampliado en la sesión de FEATURE-007, cubre tres superficies de configuración, todas parte de
 la misma pantalla de Disparo de la UI:
@@ -473,7 +511,7 @@ la misma pantalla de Disparo de la UI:
   que el resto de los roles, no quedar como excepción fija. Pendiente de diseño técnico (el mapeo no
   usa Executor/holder-worker hoy, por no necesitar tools — ver FEATURE-017 Regla 5 y Risks).
 
-### 🟡 FEATURE-025 — Credenciales git por usuario para el Orquestador
+### 🟡 FEATURE-026 — Credenciales git por usuario para el Orquestador
 Promovido de ⚪ Tentativo a 🟡 Confirmado.
 Hoy el clonado de repos (FEATURE-017, `cloneRunRepository`) usa una única identidad git fija a
 nivel de servidor — la clave SSH del usuario del sistema que corre el proceso del Orquestador.
@@ -485,6 +523,86 @@ pero aplicada al acceso a Git: cada usuario debería poder autenticar su propia 
 (patrón tipo GitHub App, o al menos una clave SSH/token por usuario en vez de una fija del
 servidor), de forma similar a como ya se pide autenticación de cuenta personal para Claude/Codex.
 No diseñado todavía — Discovery pendiente.
+
+### 🟡 FEATURE-027 — Continuidad durable del loop Developer ↔ QA
+
+**Estado:** Confirmada. Prioridad P0.
+
+El loop conserva en memoria el intento actual y su causa inmediata. Los artifacts persistidos
+permiten auditoría, pero no reconstruir ni continuar el ciclo después de una caída del proceso.
+La Feature deberá hacer reanudables y auditables el intento actual, el último resultado de
+Developer, el último veredicto de QA, el último fallo de build y el motivo inmediato del retry.
+
+### 🟡 FEATURE-028 — Release Plan asociado al Release activo
+
+**Estado:** Confirmada. Prioridad P1.
+
+Hoy existe un único `release_plan` vigente por proyecto y, al avanzar de Release, Planning puede
+recibir temporalmente el plan anterior. La Feature deberá garantizar que el Release Plan
+entregado a Planning corresponda inequívocamente al Release activo.
+
+### 🟡 FEATURE-029 — Contrato determinístico entre build output y `COMANDO_TEST`
+
+**Estado:** Confirmada. Prioridad P1.
+
+No duplica FEATURE-021: el build obligatorio, su separación del test, el rechazo de operadores de
+shell y los retries por fallo ya están resueltos. El pendiente es garantizar que `COMANDO_TEST`
+apunte al output realmente generado por el build —por ejemplo, evitar `src/example.test.ts`
+cuando el compilado ejecutable es `dist/example.test.js`.
+
+Discovery deberá decidir entre exigir comandos contra el output compilado, validar
+semánticamente la existencia de la ruta después del build, permitir TypeScript directo sólo con
+runtime explícito o una combinación acotada de esas alternativas.
+
+### 🟡 FEATURE-030 — Proyecto asociado correctamente al repositorio gestionado
+
+**Estado:** Confirmada. Prioridad P1.
+
+El Orquestador puede reutilizar el proyecto más antiguo del usuario para casos dirigidos a
+repositorios distintos, mezclando Roadmaps, Release Plans y estado persistido. La identidad del
+proyecto deberá distinguir correctamente el repositorio gestionado y evitar esa reutilización
+accidental.
+
+### 🟡 FEATURE-031 — Mapping confiable de `tipo_solucion` y `canales`
+
+**Estado:** Confirmada. Prioridad P2.
+
+Estos campos del intake se mapean con menor confiabilidad que el resto; son los casos `select` y
+`list` sujetos a reglas conservadoras del modelo. Se requiere diagnosticar y corregir el contrato
+de mapping sin inventar valores.
+
+### 🟡 FEATURE-032 — Instalación determinística de dependencias antes del build
+
+**Estado:** Confirmada. Prioridad P2.
+
+El pipeline asume que `node_modules` está disponible. Ya se observó un intento sin `tsc` porque la
+instalación no preparó correctamente las dependencias con `HOME` de solo lectura. Discovery deberá
+determinar si la garantía pertenece a la preparación del worktree, a `BuildExecutor` o a una etapa
+previa del pipeline, incluyendo una caché escribible y reproducible.
+
+### 🟡 FEATURE-033 — Lifecycle de `01-PROJECT-BRIEF-TEMPLATE`
+
+**Estado:** Confirmada; posterior a FEATURE-023, prioridad por definir.
+
+Deberá definir rol creador, roles actualizadores, validación, persistencia DB, ubicación canónica
+en repo, versionado, lectura mediante FEATURE-022 y exposición en UI cuando corresponda. No se
+diseña en detalle en esta actualización.
+
+### 🟡 FEATURE-034 — Lifecycle de `02-ARCHITECTURE-TEMPLATE`
+
+**Estado:** Confirmada; posterior a FEATURE-023, prioridad por definir.
+
+Deberá definir el lifecycle del documento de arquitectura que incluye el Roadmap de Releases:
+creación, actualización, validación, persistencia DB, ubicación, versionado, lectura mediante
+FEATURE-022 y exposición en UI. No se diseña en detalle en esta actualización.
+
+### 🟡 FEATURE-035 — Lifecycle de `09-RELEASE-PLAN-TEMPLATE`
+
+**Estado:** Confirmada; posterior a FEATURE-023, prioridad por definir.
+
+Deberá definir creación, actualización, validación, persistencia DB, ubicación canónica,
+versionado, lectura mediante FEATURE-022 y exposición en UI del Release Plan. No se diseña en
+detalle en esta actualización.
 
 ### ⚪ Approval Model por Release
 Feature 09 (`06-DELIVERY-WORKFLOW.md`, Stage 6) ya diseñó la v1: Modo Manual (default — automático
@@ -590,7 +708,7 @@ primera opción porque, a esfuerzo comparable, una UI mínima de solo lectura da
 reusable hacia la Capa de UI completa. Queda como complemento futuro si hace falta alertas push
 (fase completada/fallida) fuera de cuando alguien está mirando la UI activamente.
 
-### 🟡 FEATURE-023 (antes FEATURE-022, antes FEATURE-021, antes FEATURE-019, antes FEATURE-018, antes FEATURE-017,
+### 🟡 FEATURE-024 (antes FEATURE-023, antes FEATURE-022, antes FEATURE-021, antes FEATURE-019, antes FEATURE-018, antes FEATURE-017,
 antes FEATURE-014) — Milestone 2 — Validación end-to-end con caso de negocio real
 Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
 Confirmado y no Tentativo.
