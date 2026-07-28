@@ -27,8 +27,8 @@ test("policy matrix rejects mutating tools in read-only policy", () => {
   }), /Read-only/);
 });
 
-test("all eight schemas are closed objects", () => {
-  assert.equal(Object.keys(TOOL_SCHEMAS).length, 8);
+test("all ten schemas are closed objects", () => {
+  assert.equal(Object.keys(TOOL_SCHEMAS).length, 10);
   for (const name of TOOL_NAMES) {
     assert.equal(TOOL_SCHEMAS[name].args.additionalProperties, false);
     assert.equal(TOOL_SCHEMAS[name].result.additionalProperties, false);
@@ -78,9 +78,31 @@ test("Tavily proxy keeps key in trusted proxy request", async () => {
   assert.doesNotMatch(String(captured?.body), /extract/);
 });
 
-test("worker refuses OAuth and Tavily credentials", () => {
+test("worker refuses provider, search and database credentials", () => {
   assert.throws(() => new IsolatedToolWorker({ worktree: ".", policy: policy(), env: { CODEX_API_KEY: "oauth-canary" } }), /SECRET_IN_WORKER_ENV/);
   assert.throws(() => new IsolatedToolWorker({ worktree: ".", policy: policy(), env: { TAVILY_API_KEY: "tavily-canary" } }), /SECRET_IN_WORKER_ENV/);
+  assert.throws(() => new IsolatedToolWorker({ worktree: ".", policy: policy(), env: { DATABASE_URL_DEV: "postgres-canary" } }), /SECRET_IN_WORKER_ENV/);
+});
+
+test("worker dispatches artifact tools only through the read proxy", async () => {
+  const calls: string[] = [];
+  const worker = new IsolatedToolWorker({
+    worktree: ".",
+    policy: policy(["artifact_list", "artifact_read"]),
+    artifactProxy: {
+      list: async () => {
+        calls.push("list");
+        return { items: [], truncated: false, nextCursor: null };
+      },
+      read: async ({ artifactId }) => {
+        calls.push(`read:${artifactId}`);
+        return {} as never;
+      },
+    },
+  });
+  assert.deepEqual(await worker.call("artifact_list", {}), { items: [], truncated: false, nextCursor: null });
+  await worker.call("artifact_read", { artifactId: "22222222-2222-4222-8222-222222222222" });
+  assert.deepEqual(calls, ["list", "read:22222222-2222-4222-8222-222222222222"]);
 });
 
 test("worker executes filesystem tools with synthetic policy", async () => {

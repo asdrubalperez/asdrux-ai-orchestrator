@@ -316,7 +316,7 @@ export async function executePipelineRun(params: {
         phase.agentRole === "planning" ? await withRoleContext(projectId, baseContext) : baseContext;
       const roleInstructions = await readRole(phase.agentRole);
       const selection = await resolveSelection(phase.agentRole);
-      const executor = buildExecutor(selection, worktree.worktreePath, model);
+      const executor = buildExecutor(selection, worktree.worktreePath, runId, model);
 
       const invocation: PhaseInvocation = {
         agentRole: phase.agentRole,
@@ -396,8 +396,8 @@ export async function executePipelineRun(params: {
     if (pipelineSpec.definition.loop) {
       const developerSelection = await resolveSelection("developer");
       const qaSelection = await resolveSelection("qa");
-      const developerExecutor = buildExecutor(developerSelection, worktree.worktreePath, model, { sandbox: "container" });
-      const qaExecutor = buildExecutor(qaSelection, worktree.worktreePath, model);
+      const developerExecutor = buildExecutor(developerSelection, worktree.worktreePath, runId, model, { sandbox: "container" });
+      const qaExecutor = buildExecutor(qaSelection, worktree.worktreePath, runId, model);
       const finalResult = await runDeveloperQaLoop({
         executor: qaExecutor,
         developerExecutor,
@@ -1085,12 +1085,13 @@ export function parseAuthMode(value: string): AuthMode {
 function buildExecutor(
   selection: AgentConfig,
   workingDirectory: string,
+  requestingRunId: string,
   model: string | undefined,
   opts: { sandbox?: "host" | "container" } = {}
 ): RunExecutor {
   if (selection.executorProvider === "codex") {
-    return new CodexExecutor({ workingDirectory, model, authMode: selection.authMode, ...opts });
+    return new CodexExecutor({ workingDirectory, requestingRunId, model, authMode: selection.authMode, ...opts });
   }
 
-  return new ClaudeCodeExecutor({ workingDirectory, model, authMode: selection.authMode, ...opts });
+  return new ClaudeCodeExecutor({ workingDirectory, requestingRunId, model, authMode: selection.authMode, ...opts });
 }

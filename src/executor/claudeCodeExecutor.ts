@@ -57,6 +57,8 @@ type ClaudeAuth =
 export interface ClaudeCodeExecutorOptions {
   /** Directorio de trabajo del run (el worktree). Todas las invocaciones de esta instancia corren ahí. */
   workingDirectory: string;
+  /** Run real ligado por el Orquestador; nunca proviene de argumentos del agente. */
+  requestingRunId: string;
   /**
    * Alias de modelo (--model, ej. "haiku") a usar en esta instancia. Pensado para pruebas de
    * spikes/Features: usar un modelo económico por default y solo justificar explícitamente uno
@@ -162,6 +164,7 @@ export class ClaudeCodeExecutor implements Executor {
       invocation.agentRole,
       this.options.workingDirectory,
       process.env.TAVILY_API_KEY,
+      this.options.requestingRunId,
       options.signal,
       (event) => {
         if (event.type === "isolated_tool_call") {

@@ -7,11 +7,13 @@ import {
 } from "./contracts.js";
 import { assertPublicHttpsUrl, resolveWorktreePath } from "./security.js";
 import type { TavilySearchProxy } from "./tavily.js";
+import type { UnixArtifactProxyClient } from "./artifactProxyClient.js";
 
 export interface WorkerOptions {
   worktree: string;
   policy: IsolatedToolPolicy;
   searchProxy?: Pick<TavilySearchProxy, "search">;
+  artifactProxy?: Pick<UnixArtifactProxyClient, "list" | "read">;
   fetchImpl?: typeof fetch;
   env?: NodeJS.ProcessEnv;
 }
@@ -19,7 +21,10 @@ export interface WorkerOptions {
 export class IsolatedToolWorker {
   #calls = 0;
   constructor(private readonly options: WorkerOptions) {
-    for (const secret of ["ANTHROPIC_API_KEY", "CODEX_API_KEY", "TAVILY_API_KEY"]) {
+    for (const secret of [
+      "ANTHROPIC_API_KEY", "CODEX_API_KEY", "TAVILY_API_KEY", "DATABASE_URL", "DATABASE_URL_DEV",
+      "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD",
+    ]) {
       if (options.env?.[secret]) throw new Error(`SECRET_IN_WORKER_ENV:${secret}`);
     }
   }
@@ -39,6 +44,12 @@ export class IsolatedToolWorker {
         if (!this.options.searchProxy) throw new Error("WORKER_UNAVAILABLE");
         return this.options.searchProxy.search(args as unknown as { query: string; maxResults?: number }, signal);
       case "web_fetch": return this.webFetch(args, signal);
+      case "artifact_list":
+        if (!this.options.artifactProxy) throw new Error("WORKER_UNAVAILABLE");
+        return this.options.artifactProxy.list(args, signal);
+      case "artifact_read":
+        if (!this.options.artifactProxy) throw new Error("WORKER_UNAVAILABLE");
+        return this.options.artifactProxy.read(args as unknown as { artifactId: string }, signal);
     }
   }
 

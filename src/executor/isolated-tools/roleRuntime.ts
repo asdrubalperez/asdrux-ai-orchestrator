@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import type { AgentRole } from "../../contracts/executor.js";
 import type { IsolatedToolName } from "./contracts.js";
 import { resolveRolePolicy } from "./rolePolicy.js";
+import { startArtifactProxy, type ArtifactProxyHandle } from "./artifactProxy.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(moduleDirectory, "..", "..", "..");
@@ -27,6 +28,7 @@ export async function startRoleWorker(
   role: AgentRole,
   worktree: string,
   tavilyApiKey: string | undefined,
+  requestingRunId: string,
   signal?: AbortSignal,
   onEvent?: (event: Record<string, unknown>) => void,
 ): Promise<RoleWorkerHandle> {
@@ -36,14 +38,23 @@ export async function startRoleWorker(
   }
   const channelToken = randomBytes(32).toString("base64url");
   const searchToken = randomBytes(32).toString("base64url");
+  const artifactToken = randomBytes(32).toString("base64url");
   const socketDirectory = await mkdtemp(path.join(os.tmpdir(), `isolated-${role}-channel-`));
   await chmod(socketDirectory, 0o700);
   const socketPath = path.join(socketDirectory, "worker.sock");
   const searchSocketPath = path.join(socketDirectory, "search.sock");
+  const artifactSocketPath = path.join(socketDirectory, "artifact.sock");
   const output: string[] = [];
   let searchProxy: ChildProcess | undefined;
+  let artifactProxy: ArtifactProxyHandle | undefined;
   let worker: ChildProcess | undefined;
   try {
+    artifactProxy = await startArtifactProxy({
+      socketPath: artifactSocketPath,
+      token: artifactToken,
+      requestingRunId,
+      role,
+    });
     if (policy.tools.includes("web_search")) {
       searchProxy = spawn(process.execPath, [
         "--import", path.join(repositoryRoot, "node_modules", "tsx", "dist", "loader.mjs"),
@@ -62,6 +73,7 @@ export async function startRoleWorker(
     }
     const containerWorkerSocket = "/channel/worker.sock";
     const containerSearchSocket = "/channel/search.sock";
+    const containerArtifactSocket = "/channel/artifact.sock";
     worker = spawn("docker", [
       "run", "--rm", "-i",
       ...(policy.egress === "none" ? ["--network", "none"] : []),
@@ -74,9 +86,11 @@ export async function startRoleWorker(
       "-e", "ISOLATED_AGENT_ROLE",
       "-e", "ISOLATED_CHANNEL_TOKEN",
       "-e", "SEARCH_PROXY_TOKEN",
+      "-e", "ARTIFACT_PROXY_TOKEN",
       "-e", "ISOLATED_WORKTREE=/workspace",
       "-e", `ISOLATED_WORKER_SOCKET=${containerWorkerSocket}`,
       "-e", `SEARCH_PROXY_SOCKET=${containerSearchSocket}`,
+      "-e", `ARTIFACT_PROXY_SOCKET=${containerArtifactSocket}`,
       DEFAULT_WORKER_IMAGE,
       "node", "--import", "/runtime/node_modules/tsx/dist/loader.mjs",
       "/runtime/src/executor/isolated-tools/roleWorkerServer.ts",
@@ -86,6 +100,7 @@ export async function startRoleWorker(
         ISOLATED_AGENT_ROLE: role,
         ISOLATED_CHANNEL_TOKEN: channelToken,
         SEARCH_PROXY_TOKEN: searchToken,
+        ARTIFACT_PROXY_TOKEN: artifactToken,
       },
       stdio: ["ignore", "pipe", "pipe"],
       signal,
@@ -107,12 +122,14 @@ export async function startRoleWorker(
         closed = true;
         await stopChild(worker);
         await stopChild(searchProxy);
+        await artifactProxy?.close();
         await rm(socketDirectory, { recursive: true, force: true });
       },
     };
   } catch (error) {
     await stopChild(worker);
     await stopChild(searchProxy);
+    await artifactProxy?.close();
     await rm(socketDirectory, { recursive: true, force: true });
     throw error;
   }

@@ -104,8 +104,8 @@ aplicando uniformemente sin importar en qué circuito ocurra el problema.
   igual que en FEATURE-018.
 - Cualquier columna o estado nuevo de "proyecto cerrado" — se deriva de que todos los releases del
   roadmap vigente queden en estado `"Completado"`, sin persistencia adicional.
-- Selección de proveedor/modelo/credenciales (FEATURE-022) y credenciales git por usuario
-  (FEATURE-023) — Features separadas.
+- Selección de proveedor/modelo/credenciales (FEATURE-024) y credenciales git por usuario
+  (FEATURE-025) — Features separadas.
 - Generalizar el loop interno del motor de fases — decisión explícita del owner de no tocar esa
   pieza (FEATURE-005), se resuelve con cadena de runs en su lugar.
 

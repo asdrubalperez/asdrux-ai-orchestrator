@@ -84,10 +84,14 @@
   tenía este número quedó absorbido sin trabajo propio por la implementación real de
   FEATURE-019/020 — verificado en `08-CODE-SYSTEM-PROMPT.md`/`06-DELIVERY-WORKFLOW.md`, ya
   reflejan el modelo nuevo. No se abre como Feature separada.)
-- FEATURE-022 (antes FEATURE-021, antes FEATURE-019, antes FEATURE-018, antes FEATURE-017, antes
+- FEATURE-022 — Lectura universal de artifacts por todos los roles: `artifact_list` y
+  `artifact_read` comunes a los cinco roles y ambos providers, con aislamiento por proyecto,
+  proxy host confiable por Unix socket y límite estricto de 64 KiB. Aprobada por el owner e
+  implementada y validada en la rama `codex/feature-022-artifact-read`, pendiente de revisión y merge.
+- FEATURE-023 (antes FEATURE-022, antes FEATURE-021, antes FEATURE-019, antes FEATURE-018, antes FEATURE-017, antes
   FEATURE-014) — Milestone 2 — Validación end-to-end con caso de negocio real
-- FEATURE-023 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
-- FEATURE-024 — Credenciales git por usuario para el Orquestador (promovida de ⚪ Tentativo)
+- FEATURE-024 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
+- FEATURE-025 — Credenciales git por usuario para el Orquestador (promovida de ⚪ Tentativo)
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
@@ -375,6 +379,25 @@ absorbido sin trabajo propio por la implementación real de FEATURE-019/020
 nuevo: continuación automática a Planning, "Modo Manual" renombrado, cierre de release escalando a
 Architect vía humano). No se abre como Feature separada; el número se reutiliza acá.
 
+### 🟡 FEATURE-022 — Lectura universal de artifacts por todos los roles
+Aprobada por el owner el 2026-07-28 e implementada en la rama
+`codex/feature-022-artifact-read`. Suite completa, integración PostgreSQL/Docker y smokes reales
+Claude/Codex validados; pendiente de revisión del owner y merge a `main`.
+
+Agrega `artifact_list` y `artifact_read` al catálogo cerrado de Architect, Functional, Planning,
+Developer y QA para Claude Code y Codex. El Orquestador liga internamente el run solicitante y un
+proxy host confiable consulta PostgreSQL por Unix socket efímero; los workers no reciben
+credenciales DB, `project_id` ni un `requestingRunId` controlable. La consulta queda aislada por
+proyecto y devuelve `ARTIFACT_NOT_FOUND` tanto para IDs inexistentes como para artifacts de otro
+proyecto.
+
+La v1 lista metadata paginada con cursor opaco `(created_at, id)`, límite default 20/máximo 100,
+resúmenes de hasta 2 KiB y lectura completa sólo hasta 64 KiB. No agrega migraciones, índices,
+tablas de auditoría ni `run_event` por lectura; Feature/Release y lectura parcial quedan fuera de
+alcance. Diseño y contrato en
+`docs/features/FEATURE-022-Lectura-universal-de-artifacts-por-todos-los-roles.md`.
+Resultados en `docs/features/FEATURE-022-implementation-results.md`.
+
 ### ✅ Feature 09 — Runbook para el Orquestador AI automático
 Diseño completo y cerrado: 12 archivos en `docs/runbook/` (equivalente al `docs/playbook/` actual
 de este mismo repo, pero pensado para que el Orquestador AI automático los consuma y opere sobre
@@ -430,7 +453,7 @@ recorre secuencialmente los pasos intermedios aunque no tengan nada que resolver
 optimización futura: permitir que el circuito llegue directo al dueño real sin recorrer los pasos
 intermedios, cuando el costo de la v1 secuencial resulte un problema real en la práctica.
 
-### 🟡 FEATURE-023 — Selección de proveedor/modelo/credenciales por rol
+### 🟡 FEATURE-024 — Selección de proveedor/modelo/credenciales por rol
 Promovido de ⚪ Tentativo a 🟡 Confirmado.
 Ítem ampliado en la sesión de FEATURE-007, cubre tres superficies de configuración, todas parte de
 la misma pantalla de Disparo de la UI:
@@ -450,7 +473,7 @@ la misma pantalla de Disparo de la UI:
   que el resto de los roles, no quedar como excepción fija. Pendiente de diseño técnico (el mapeo no
   usa Executor/holder-worker hoy, por no necesitar tools — ver FEATURE-017 Regla 5 y Risks).
 
-### 🟡 FEATURE-024 — Credenciales git por usuario para el Orquestador
+### 🟡 FEATURE-025 — Credenciales git por usuario para el Orquestador
 Promovido de ⚪ Tentativo a 🟡 Confirmado.
 Hoy el clonado de repos (FEATURE-017, `cloneRunRepository`) usa una única identidad git fija a
 nivel de servidor — la clave SSH del usuario del sistema que corre el proceso del Orquestador.
@@ -567,7 +590,7 @@ primera opción porque, a esfuerzo comparable, una UI mínima de solo lectura da
 reusable hacia la Capa de UI completa. Queda como complemento futuro si hace falta alertas push
 (fase completada/fallida) fuera de cuando alguien está mirando la UI activamente.
 
-### 🟡 FEATURE-022 (antes FEATURE-021, antes FEATURE-019, antes FEATURE-018, antes FEATURE-017,
+### 🟡 FEATURE-023 (antes FEATURE-022, antes FEATURE-021, antes FEATURE-019, antes FEATURE-018, antes FEATURE-017,
 antes FEATURE-014) — Milestone 2 — Validación end-to-end con caso de negocio real
 Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
 Confirmado y no Tentativo.
