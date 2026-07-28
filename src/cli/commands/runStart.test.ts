@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ramaBaseTrabajoFromBusinessCase } from "./runStart.js";
+import type { PhaseResult } from "../../contracts/executor.js";
+import { latestEscalationArtifact } from "../respondService.js";
+import { ramaBaseTrabajoFromBusinessCase, runDeveloperQaLoop } from "./runStart.js";
 
 test("ramaBaseTrabajoFromBusinessCase lee rama_base_trabajo del business_case crudo de un run raíz", () => {
   assert.equal(ramaBaseTrabajoFromBusinessCase({ rama_base_trabajo: "release/mvp" }), "release/mvp");
@@ -41,3 +43,134 @@ test("ramaBaseTrabajoFromBusinessCase devuelve undefined si el ReentryContext no
   };
   assert.equal(ramaBaseTrabajoFromBusinessCase(reentryContext), undefined);
 });
+
+test("runDeveloperQaLoop agota 3 builds rotos y deja el artifact respondible", async () => {
+  const artifacts: unknown[] = [];
+  let developerCalls = 0;
+  let qaCalls = 0;
+  const completedDeveloper: PhaseResult = {
+    status: "completed",
+    outputArtifact: { patch: "intentado" },
+    summary: "Developer terminó.",
+    escalationReason: null,
+  };
+  const executor = {
+    options: { workingDirectory: "C:\\fake-worktree" },
+    runPhase: async () => {
+      qaCalls += 1;
+      throw new Error("QA no debe invocarse cuando el build falla.");
+    },
+  } as unknown as Parameters<typeof runDeveloperQaLoop>[0]["executor"];
+  const developerExecutor = {
+    options: { workingDirectory: "C:\\fake-worktree" },
+    runPhase: async () => {
+      developerCalls += 1;
+      return completedDeveloper;
+    },
+  } as unknown as Parameters<typeof runDeveloperQaLoop>[0]["developerExecutor"];
+
+  const result = await runDeveloperQaLoop({
+    executor,
+    developerExecutor,
+    readRole: async () => "instrucciones",
+    runId: "run-build-loop",
+    planningResult: planningResult(),
+    maxAttempts: 3,
+    phaseTiming: { agentRole: null, startedAt: null },
+    services: loopServices(artifacts, {
+      ran: true,
+      exitCode: 2,
+      stdout: "",
+      stderr: "tsc: error persistente",
+      timedOut: false,
+    }),
+  });
+
+  assert.equal(result.status, "escalated");
+  assert.equal(developerCalls, 3);
+  assert.equal(qaCalls, 0);
+  assert.equal(latestEscalationArtifact(artifacts).phase, "developer");
+});
+
+test("runDeveloperQaLoop agota 3 rechazos de QA y deja la escalación después del último verdict", async () => {
+  const artifacts: unknown[] = [];
+  let developerCalls = 0;
+  let qaCalls = 0;
+  const executor = {
+    options: { workingDirectory: "C:\\fake-worktree" },
+    runPhase: async () => {
+      qaCalls += 1;
+      return {
+        status: "rejected",
+        outputArtifact: { finding: `rechazo-${qaCalls}` },
+        summary: `QA rechazó intento ${qaCalls}.`,
+        escalationReason: null,
+      } satisfies PhaseResult;
+    },
+  } as unknown as Parameters<typeof runDeveloperQaLoop>[0]["executor"];
+  const developerExecutor = {
+    options: { workingDirectory: "C:\\fake-worktree" },
+    runPhase: async () => {
+      developerCalls += 1;
+      return {
+        status: "completed",
+        outputArtifact: { patch: `intento-${developerCalls}` },
+        summary: `Developer intento ${developerCalls}.`,
+        escalationReason: null,
+      } satisfies PhaseResult;
+    },
+  } as unknown as Parameters<typeof runDeveloperQaLoop>[0]["developerExecutor"];
+
+  const result = await runDeveloperQaLoop({
+    executor,
+    developerExecutor,
+    readRole: async () => "instrucciones",
+    runId: "run-qa-loop",
+    planningResult: planningResult(),
+    maxAttempts: 3,
+    phaseTiming: { agentRole: null, startedAt: null },
+    services: loopServices(artifacts, {
+      ran: false,
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      timedOut: false,
+    }),
+  });
+
+  assert.equal(result.status, "escalated");
+  assert.equal(developerCalls, 3);
+  assert.equal(qaCalls, 3);
+  const latest = latestEscalationArtifact(artifacts);
+  assert.equal(latest.phase, "qa");
+  assert.equal((latest.content as { attempt: number }).attempt, 3);
+});
+
+function planningResult(): PhaseResult {
+  return {
+    status: "completed",
+    outputArtifact: { comandoTest: "node --test fake.test.js" },
+    summary: "Planning listo.",
+    escalationReason: null,
+  };
+}
+
+function loopServices(
+  artifacts: unknown[],
+  buildResult: { ran: boolean; exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }
+): NonNullable<Parameters<typeof runDeveloperQaLoop>[0]["services"]> {
+  let artifactId = 0;
+  return {
+    haltIfCancelledExternally: async () => undefined,
+    updateRunCurrentPhase: async () => undefined,
+    recordRunEvent: async () => undefined,
+    persistArtifact: async (artifact: { runId: string; phase: string; kind: string; content: unknown }) => {
+      artifactId += 1;
+      artifacts.push({ id: `artifact-${artifactId}`, ...artifact });
+    },
+    buildExecutor: { runIfNeeded: async () => buildResult },
+    testExecutor: {
+      run: async () => ({ exitCode: 1, stdout: "", stderr: "tests fallan", timedOut: false }),
+    },
+  } as unknown as NonNullable<Parameters<typeof runDeveloperQaLoop>[0]["services"]>;
+}
