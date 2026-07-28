@@ -7,6 +7,8 @@ export const TOOL_NAMES = [
   "command_exec",
   "web_search",
   "web_fetch",
+  "artifact_list",
+  "artifact_read",
 ] as const;
 
 export type IsolatedToolName = (typeof TOOL_NAMES)[number];
@@ -52,6 +54,7 @@ const closedObject = (
 
 const string = { type: "string" };
 const boolean = { type: "boolean" };
+const nullableString = { type: ["string", "null"] };
 const integer = (minimum?: number, maximum?: number) => ({
   type: "integer",
   ...(minimum === undefined ? {} : { minimum }),
@@ -102,6 +105,62 @@ export const TOOL_SCHEMAS: Record<IsolatedToolName, {
     description: "Fetch a public HTTPS URL without credentials",
     args: closedObject({ url: string, method: { type: "string", enum: ["GET", "HEAD"] }, timeoutMs: integer(1, 120_000), maxBytes: integer(1) }, ["url"]),
     result: closedObject({ finalUrl: string, status: integer(100, 599), headers: { type: "object" }, contentType: string, body: string, truncated: boolean }, ["finalUrl", "status", "headers", "contentType", "body", "truncated"]),
+  },
+  artifact_list: {
+    description: "List artifact metadata from the current run's project without returning artifact content",
+    args: closedObject({
+      runId: string,
+      kind: string,
+      phase: { type: "string", enum: ["architect", "functional", "planning", "developer", "qa"] },
+      createdAfter: string,
+      createdBefore: string,
+      limit: integer(1, 100),
+      cursor: string,
+    }, []),
+    result: closedObject({
+      items: {
+        type: "array",
+        items: closedObject({
+          artifactId: string,
+          runId: string,
+          phase: string,
+          producerRole: nullableString,
+          kind: string,
+          createdAt: string,
+          summary: nullableString,
+          summaryTruncated: boolean,
+          commitRef: nullableString,
+          contentBytes: integer(0),
+        }, [
+          "artifactId", "runId", "phase", "producerRole", "kind", "createdAt", "summary",
+          "summaryTruncated", "commitRef", "contentBytes",
+        ]),
+      },
+      truncated: boolean,
+      nextCursor: nullableString,
+    }, ["items", "truncated", "nextCursor"]),
+  },
+  artifact_read: {
+    description: "Read one artifact from the current run's project, subject to the 64 KiB content limit",
+    args: closedObject({ artifactId: string }, ["artifactId"]),
+    result: closedObject({
+      artifactId: string,
+      runId: string,
+      phase: string,
+      producerRole: nullableString,
+      kind: string,
+      createdAt: string,
+      summary: nullableString,
+      summaryTruncated: boolean,
+      commitRef: nullableString,
+      contentBytes: integer(0),
+      content: {},
+      complete: boolean,
+      reason: { type: ["string", "null"], enum: ["CONTENT_TOO_LARGE", null] },
+    }, [
+      "artifactId", "runId", "phase", "producerRole", "kind", "createdAt", "summary",
+      "summaryTruncated", "commitRef", "contentBytes", "content", "complete", "reason",
+    ]),
   },
 };
 

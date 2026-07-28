@@ -3,6 +3,7 @@ import type { AgentRole } from "../../contracts/executor.js";
 import { resolveRolePolicy } from "./rolePolicy.js";
 import { UnixSearchProxyClient } from "./searchProxyClient.js";
 import { IsolatedToolWorker } from "./worker.js";
+import { UnixArtifactProxyClient } from "./artifactProxyClient.js";
 
 const worktree = process.env.ISOLATED_WORKTREE;
 const channelToken = process.env.ISOLATED_CHANNEL_TOKEN;
@@ -12,7 +13,10 @@ if (!worktree || !channelToken || !workerSocket || !role) {
   throw new Error("Isolated worker configuration is required");
 }
 const policy = resolveRolePolicy(role);
-for (const secret of ["ANTHROPIC_API_KEY", "CODEX_API_KEY", "TAVILY_API_KEY"]) {
+for (const secret of [
+  "ANTHROPIC_API_KEY", "CODEX_API_KEY", "TAVILY_API_KEY", "DATABASE_URL", "DATABASE_URL_DEV",
+  "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD",
+]) {
   if (process.env[secret]) throw new Error(`SECRET_IN_WORKER_ENV:${secret}`);
 }
 
@@ -22,11 +26,17 @@ const searchProxy = policy.tools.includes("web_search")
       process.env.SEARCH_PROXY_TOKEN ?? "",
     )
   : undefined;
+const artifactProxy = policy.tools.includes("artifact_list")
+  ? new UnixArtifactProxyClient(
+      process.env.ARTIFACT_PROXY_SOCKET ?? "",
+      process.env.ARTIFACT_PROXY_TOKEN ?? "",
+    )
+  : undefined;
 const commandEnv: NodeJS.ProcessEnv = {};
 for (const name of ["PATH", "HOME", "LANG", "LC_ALL", "NODE_PATH"]) {
   if (process.env[name] !== undefined) commandEnv[name] = process.env[name];
 }
-const worker = new IsolatedToolWorker({ worktree, policy, searchProxy, env: commandEnv });
+const worker = new IsolatedToolWorker({ worktree, policy, searchProxy, artifactProxy, env: commandEnv });
 const calls: string[] = [];
 const server = http.createServer(async (request, response) => {
   if (request.method !== "POST" || request.url !== "/tool") {
@@ -64,6 +74,7 @@ server.listen(workerSocket, () => {
     role,
     tools: policy.tools,
     credentialCanaryPresent: false,
+    databaseCredentialPresent: false,
   })}\n`);
 });
 

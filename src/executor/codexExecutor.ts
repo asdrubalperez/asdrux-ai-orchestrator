@@ -75,6 +75,8 @@ type CodexAuth =
 export interface CodexExecutorOptions {
   /** Directorio de trabajo del run (el worktree). Todas las invocaciones de esta instancia corren ahi. */
   workingDirectory: string;
+  /** Run real ligado por el Orquestador; nunca proviene de argumentos del agente. */
+  requestingRunId: string;
   /** Modelo a pasar explicitamente con `--model`. */
   model?: string;
   /**
@@ -175,6 +177,7 @@ export class CodexExecutor implements Executor {
       invocation.agentRole,
       this.options.workingDirectory,
       process.env.TAVILY_API_KEY,
+      this.options.requestingRunId,
       options.signal,
       (event) => {
         if (event.type === "isolated_tool_call") {

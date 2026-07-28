@@ -1,6 +1,6 @@
 import type { IsolatedToolPolicy, SyntheticPolicyId } from "./contracts.js";
 
-export const QA_ISOLATED_TOOL_NAMES = ["fs_read", "fs_search", "fs_glob"] as const;
+export const QA_ISOLATED_TOOL_NAMES = ["fs_read", "fs_search", "fs_glob", "artifact_list", "artifact_read"] as const;
 
 export const QA_ISOLATED_POLICY: IsolatedToolPolicy = Object.freeze({
   id: "qa-pilot" as SyntheticPolicyId,

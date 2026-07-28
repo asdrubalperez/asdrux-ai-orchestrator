@@ -16,7 +16,7 @@ Versión de plantilla usada: v2.1 (`docs/playbook/07-FEATURE-TEMPLATE.md`)
 - **Type**: Backend (motor de pipeline, `runDeveloperQaLoop`, nuevo componente `BuildExecutor`,
   `parseTestCommand`)
 - **Owner**: asdru
-- **Status**: 🟡 En Diseño
+- **Status**: ✅ Implementada e integrada en `main`
 - **Priority**: Alta — bloqueó la validación end-to-end de FEATURE-020
 
 ---
@@ -518,10 +518,7 @@ rondas 1 y 3 las hizo Claude Code cumpliendo ese rol temporalmente, y la ronda 2
 Architect por fuera del repo (vía ChatGPT), validada por Claude Code contra el código real de
 `main` antes de incorporarla acá.
 
-**Implementada** (commit `bfe70d7`, rama `feature/021-build-deterministico`) — el owner dio el Go
-para implementar tras la ronda 3. `tsc --noEmit` (backend y frontend), `npm run build` y suite
-completa verificados (116 pass / 3 skipped — 2 por Docker no disponible en este entorno, mismo
-criterio que otras Features, y 1 escenario `ENOTDIR` que solo aplica en POSIX, ver
-`buildExecutor.test.ts`). Validación real end-to-end contra la VPS (Docker disponible, caso de
-negocio real con paso de compilación) todavía pendiente — sin mergear a `main`, a la espera de que
-el owner la pruebe en su entorno.
+**Implementada** (commit `bfe70d7`, rama `feature/021-build-deterministico`) e integrada en
+`main`. `tsc --noEmit` (backend y frontend), `npm run build` y la suite completa fueron
+verificados. La coherencia entre la ruta generada por el build y la ruta declarada en
+`COMANDO_TEST` no formó parte de este alcance y queda registrada separadamente como FEATURE-029.
