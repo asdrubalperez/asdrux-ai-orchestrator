@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { access, rm } from "node:fs/promises";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -27,6 +27,12 @@ function gitNoPromptEnv(): NodeJS.ProcessEnv {
 export interface RunWorktree {
   branchName: string;
   worktreePath: string;
+}
+
+export interface GitReadinessSnapshot {
+  branch: string;
+  headSha: string;
+  treeHash: string;
 }
 
 export async function createRunWorktree(repoRoot: string, runId: string, baseRef = "HEAD"): Promise<RunWorktree> {
@@ -93,6 +99,85 @@ export async function pushRunBranch(worktree: RunWorktree): Promise<void> {
     cwd: worktree.worktreePath,
     env: gitNoPromptEnv(),
   });
+}
+
+export async function gitReadinessSnapshot(worktree: RunWorktree): Promise<GitReadinessSnapshot> {
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "orchestrator-git-index-"));
+  const temporaryIndex = path.join(temporaryDirectory, "index");
+  const env = { ...gitNoPromptEnv(), GIT_INDEX_FILE: temporaryIndex };
+  try {
+    const [branch, headSha] = await Promise.all([
+      execFileAsync("git", ["branch", "--show-current"], { cwd: worktree.worktreePath, env: gitNoPromptEnv() }),
+      execFileAsync("git", ["rev-parse", "HEAD"], { cwd: worktree.worktreePath, env: gitNoPromptEnv() }),
+    ]);
+    await execFileAsync("git", ["read-tree", "HEAD"], { cwd: worktree.worktreePath, env });
+    await execFileAsync("git", ["add", "-A"], { cwd: worktree.worktreePath, env });
+    const tree = await execFileAsync("git", ["write-tree"], { cwd: worktree.worktreePath, env });
+    return {
+      branch: branch.stdout.trim(),
+      headSha: headSha.stdout.trim(),
+      treeHash: tree.stdout.trim(),
+    };
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+export async function assertFeatureDocsUnchanged(
+  worktree: RunWorktree,
+  baseCommitSha: string,
+  allowedPath?: string
+): Promise<void> {
+  const [committed, working] = await Promise.all([
+    execFileAsync("git", ["diff", "--name-only", `${baseCommitSha}..HEAD`, "--", "docs/features"], {
+      cwd: worktree.worktreePath,
+      env: gitNoPromptEnv(),
+    }),
+    execFileAsync("git", ["status", "--porcelain", "--untracked-files=all", "--", "docs/features"], {
+      cwd: worktree.worktreePath,
+      env: gitNoPromptEnv(),
+    }),
+  ]);
+  const paths = [
+    ...committed.stdout.split(/\r?\n/).filter(Boolean),
+    ...working.stdout
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => line.slice(3)),
+  ].map((value) => value.replaceAll("\\", "/"));
+  const unexpected = paths.filter((value) => !allowedPath || value !== allowedPath);
+  if (unexpected.length > 0) {
+    throw new Error(`Cambios no autorizados bajo docs/features/: ${[...new Set(unexpected)].join(", ")}`);
+  }
+}
+
+export async function headSha(worktree: RunWorktree): Promise<string> {
+  const result = await execFileAsync("git", ["rev-parse", "HEAD"], {
+    cwd: worktree.worktreePath,
+    env: gitNoPromptEnv(),
+  });
+  return result.stdout.trim();
+}
+
+export async function fileAtCommit(worktree: RunWorktree, commitSha: string, relativePath: string): Promise<string> {
+  const result = await execFileAsync("git", ["show", `${commitSha}:${relativePath}`], {
+    cwd: worktree.worktreePath,
+    env: gitNoPromptEnv(),
+    encoding: "utf8",
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return result.stdout;
+}
+
+export async function remoteBranchSha(worktree: RunWorktree): Promise<string> {
+  const result = await execFileAsync(
+    "git",
+    ["ls-remote", "--heads", "origin", `refs/heads/${worktree.branchName}`],
+    { cwd: worktree.worktreePath, env: gitNoPromptEnv() }
+  );
+  const sha = result.stdout.trim().split(/\s+/)[0];
+  if (!sha) throw new Error(`La rama remota ${worktree.branchName} no existe.`);
+  return sha;
 }
 
 /**

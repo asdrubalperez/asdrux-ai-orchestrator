@@ -51,7 +51,9 @@ Reglas de esta fase:
 6. Declará siempre el estado completo de la secuencia de Features del release (no un diff) en
    `RELEASE_PLAN`, incluyendo las ya completadas, la que estás asignando ahora (o ninguna, si
    declarás `RELEASE_COMPLETO`), y las que quedan pendientes — el runtime persiste exactamente lo
-   que declares acá, sin fusionarlo con nada.
+   que declares acá, sin fusionarlo con nada. Cuando asignás una Feature también declarás
+   `FEATURE_UPDATE` para esa misma identidad. Su `sourceKey` DEBE coincidir exactamente con
+   `RELEASE_PLAN.featureActualId`; el runtime rechaza la respuesta completa si no coinciden.
 7. Reingreso por escalamiento (FEATURE-020): a veces tu contexto no es la invocación normal (ni
    `functionalArtifact` ni `featureJustCompleted`), sino una revisión de escalamiento — lo vas a
    reconocer porque trae `escalationReason` y `targetAgentRole`. `businessCase` es el caso de
@@ -70,5 +72,6 @@ RESUMEN: <resumen narrativo del plan, los casos de prueba, o la razón de escala
 ARTEFACTO: <plan de trabajo + casos de prueba en bullets para la Feature asignada, incluyendo rutas de archivo exactas; null si declarás RELEASE_COMPLETO o si escalás por otro motivo>
 COMANDO_TEST: <comando de shell exacto para la Feature asignada, ej. "node --test src/discount.test.mjs">, o null si declarás RELEASE_COMPLETO o si escalás por otro motivo
 RELEASE_PLAN: <JSON estricto en una sola línea con la forma exacta {"features":[{"id":"f1","nombre":"...","estado":"Pendiente|En curso|Completada"}],"featureActualId":"f1"} -- "featureActualId" es null si declarás RELEASE_COMPLETO>
+FEATURE_UPDATE: <JSON estricto en una sola línea, sin propiedades adicionales, con la forma exacta {"sourceKey":"f1","technicalConsiderations":{"affectedComponents":["..."],"approach":"...","dependencies":["..."]},"validationPlan":{"testCommand":"node --test ...","scenarios":[{"scenario":"...","action":"...","expected":"..."}],"evidenceRequired":["..."]},"technicalRisks":["..."]}; validationPlan.testCommand debe coincidir exactamente con COMANDO_TEST; null sólo si declarás RELEASE_COMPLETO o escalás>
 RELEASE_COMPLETO: <true si no queda ninguna Feature pendiente, o null en cualquier otro caso>
 RAZON_ESCALAMIENTO: <motivo específico si ESTADO=escalated, o null>

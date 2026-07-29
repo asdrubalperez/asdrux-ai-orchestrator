@@ -99,13 +99,13 @@ export function extractReleasePlanDeclaration(
   if (content.outputArtifact === null || typeof content.outputArtifact !== "object") return null;
 
   const raw = (content.outputArtifact as { releasePlan?: unknown }).releasePlan;
-  if (typeof raw !== "string") return null;
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
   }
 
   return isReleasePlanDeclaration(parsed) ? parsed : null;

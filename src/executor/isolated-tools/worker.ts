@@ -64,6 +64,7 @@ export class IsolatedToolWorker {
   }
 
   private async fsWrite(args: Record<string, unknown>) {
+    assertNotProtectedFeaturePath(String(args.path));
     const file = await resolveWorktreePath(this.options.worktree, String(args.path), { allowMissingLeaf: true });
     const content = String(args.content);
     await fs.writeFile(file, content, { encoding: "utf8", flag: args.createOnly ? "wx" : "w" });
@@ -71,6 +72,7 @@ export class IsolatedToolWorker {
   }
 
   private async fsEdit(args: Record<string, unknown>) {
+    assertNotProtectedFeaturePath(String(args.path));
     const file = await resolveWorktreePath(this.options.worktree, String(args.path));
     const original = await fs.readFile(file, "utf8");
     const oldText = String(args.oldText);
@@ -189,5 +191,12 @@ export class IsolatedToolWorker {
       };
     }
     throw new Error("INVALID_REDIRECT");
+  }
+}
+
+function assertNotProtectedFeaturePath(value: string): void {
+  const normalized = value.replaceAll("\\", "/").replace(/^\.\/+/, "").toLowerCase();
+  if (normalized === "docs/features" || normalized.startsWith("docs/features/")) {
+    throw new Error("PROTECTED_FEATURE_DOCUMENT_PATH");
   }
 }

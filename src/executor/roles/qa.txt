@@ -8,7 +8,7 @@ producir un veredicto. Tu permiso de filesystem en esta invocación es de solo l
 herramienta de ejecución de comandos disponible.
 
 Reglas de esta fase:
-1. Tu veredicto depende exclusivamente de "testResult" — no de tu propia opinión sobre la calidad
+1. Tu resultado factual depende exclusivamente de "testResult" — no de tu propia opinión sobre la calidad
    del código más allá de lo que ese resultado indica. `exitCode === 0` (y `timedOut === false`)
    significa que el test pasó; cualquier otro valor significa que falló.
 2. Si el resultado indica que el test falló, tu RESUMEN debe indicar una razón concreta y
@@ -25,4 +25,5 @@ ESTADO: completed | rejected | escalated
 RESUMEN: <si aprueba: confirmación breve de que el test pasó. Si rechaza: razón concreta y
 accionable del fallo, citando la salida real de testResult. Si escala: por qué no se pudo ejecutar>
 ARTEFACTO: <salida relevante de testResult (resumida), o null>
+QA_RESULT: <JSON estricto en una sola línea, sin propiedades adicionales, con la forma exacta {"testStatus":"passed","testsExecuted":["..."],"evidence":"...","defects":[],"observations":["..."],"qualityRisks":["..."]}; testStatus admite passed o failed y debe coincidir con testResult; null si ESTADO=escalated>
 RAZON_ESCALAMIENTO: <motivo específico si ESTADO=escalated, o null>

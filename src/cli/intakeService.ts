@@ -15,7 +15,7 @@ import {
   resolveAgentConfig,
   type RunRow,
 } from "../db/repository.js";
-import { cloneRunRepository, removeRunClone, RunRepoCloneError } from "../isolation/worktree.js";
+import { cloneRunRepository, headSha, removeRunClone, RunRepoCloneError } from "../isolation/worktree.js";
 import { FULL_PIPELINE, PIPELINES } from "../pipelines/definitions.js";
 import { parsePipelineDefinitionRow } from "./escalation.js";
 import { executePipelineRun } from "./commands/runStart.js";
@@ -176,6 +176,7 @@ export async function startPendingRun(params: { runId: string; userId: string })
   }
 
   const agentSelection = await resolveAgentConfig(params.userId, firstPhase);
+  const baseCommitSha = await headSha(worktree);
   await recordRunConfigVersions(run.id);
   await recordRunEvent(run.id, "run_started", {
     branchName: worktree.branchName,
@@ -187,6 +188,7 @@ export async function startPendingRun(params: { runId: string; userId: string })
     projectId: run.project_id,
     repoPath: repositorio,
     baseRef: ramaBase,
+    baseCommitSha,
   });
 
   return {

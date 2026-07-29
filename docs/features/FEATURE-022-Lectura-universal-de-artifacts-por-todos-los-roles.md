@@ -6,7 +6,8 @@
 * **Type:** Arquitectura / Plataforma del Orquestador
 * **Owner:** Asdru — Product Owner
 * **Implementation Owner:** DAIA
-* **Status:** Implementada y validada — pendiente de revisión del owner y merge
+* **Status:** Implementada, validada y mergeada a `main` (`4e4f209`); validación funcional conjunta
+  pendiente con FEATURE-023 Parte 1 y Parte 2
 * **Priority:** P0
 
 ---

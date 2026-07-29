@@ -369,6 +369,10 @@ export class ClaudeCodeExecutor implements Executor {
     if (parsed.roadmap) extras.roadmap = parsed.roadmap;
     if (parsed.features) extras.features = parsed.features;
     if (parsed.releasePlan) extras.releasePlan = parsed.releasePlan;
+    if (parsed.featureUpdate) extras.featureUpdate = parsed.featureUpdate;
+    if (parsed.implementation) extras.implementation = parsed.implementation;
+    if (parsed.qaResult) extras.qaResult = parsed.qaResult;
+    if (parsed.readiness) extras.readiness = parsed.readiness;
     if (parsed.releaseCompleto) extras.releaseCompleto = parsed.releaseCompleto;
     if (parsed.notApplicable) extras.notApplicable = parsed.notApplicable;
     const outputArtifact =
@@ -402,6 +406,10 @@ export class ClaudeCodeExecutor implements Executor {
     roadmap: string | null;
     features: string | null;
     releasePlan: string | null;
+    featureUpdate: string | null;
+    implementation: string | null;
+    qaResult: string | null;
+    readiness: string | null;
     releaseCompleto: string | null;
     notApplicable: string | null;
   } {
@@ -425,6 +433,10 @@ export class ClaudeCodeExecutor implements Executor {
     const roadmap = extract("ROADMAP");
     const features = extract("FEATURES");
     const releasePlan = extract("RELEASE_PLAN");
+    const featureUpdate = extract("FEATURE_UPDATE");
+    const implementation = extract("IMPLEMENTATION");
+    const qaResult = extract("QA_RESULT");
+    const readiness = extract("READINESS");
     const releaseCompleto = extract("RELEASE_COMPLETO");
     // FEATURE-020, Regla 5: marcador de "paso" — un rol que recibe una revisión de escalamiento
     // que no le corresponde declara NO_APLICA: true en vez de un ARTEFACTO real (mismo patrón que
@@ -441,6 +453,10 @@ export class ClaudeCodeExecutor implements Executor {
       razonEscalamiento: razon && razon !== "null" ? razon : null,
       features: features && features !== "null" ? features : null,
       releasePlan: releasePlan && releasePlan !== "null" ? releasePlan : null,
+      featureUpdate: featureUpdate && featureUpdate !== "null" ? featureUpdate : null,
+      implementation: implementation && implementation !== "null" ? implementation : null,
+      qaResult: qaResult && qaResult !== "null" ? qaResult : null,
+      readiness: readiness && readiness !== "null" ? readiness : null,
       releaseCompleto: releaseCompleto && releaseCompleto !== "null" ? releaseCompleto : null,
       comandoTest: comandoTest && comandoTest !== "null" ? comandoTest : null,
       roadmap: roadmap && roadmap !== "null" ? roadmap : null,

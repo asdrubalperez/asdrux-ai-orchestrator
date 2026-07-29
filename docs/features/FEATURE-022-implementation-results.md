@@ -4,7 +4,8 @@ Fecha: 2026-07-28
 
 Rama: `codex/feature-022-artifact-read`
 
-Estado: implementada y validada; pendiente de revisión del owner y merge a `main`.
+Estado: implementada, validada y mergeada a `main` (`4e4f209`). La validación funcional conjunta
+continuará con FEATURE-023 Parte 1 y FEATURE-023 Parte 2.
 
 ## 1. Resultado
 

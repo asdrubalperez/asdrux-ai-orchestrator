@@ -16,6 +16,7 @@ import {
   assertRunWorktreeAvailable,
   commitAllChanges,
   createRunWorktree,
+  headSha,
   mergeFeatureBranchIntoBase,
   type RunWorktree,
 } from "../isolation/worktree.js";
@@ -307,6 +308,7 @@ export async function respondToEscalation(params: {
     }
 
     childWorktree = await createRunWorktree(repoRoot, childRunId, parentWorktree.branchName);
+    const baseCommitSha = await headSha(childWorktree);
     const childRun = await createRun({
       id: childRunId,
       pipelineDefinitionId: pipelineDefinitionRow.id,
@@ -332,6 +334,7 @@ export async function respondToEscalation(params: {
         projectId: parentRun.project_id,
         repoPath: childWorktree.worktreePath,
         originatedFromRunId: params.parentRunId,
+        baseCommitSha,
       },
       client
     );

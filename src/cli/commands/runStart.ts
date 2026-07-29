@@ -8,8 +8,13 @@ import { CodexExecutor } from "../../executor/codexExecutor.js";
 import {
   commitAllChanges,
   createRunWorktree,
+  assertFeatureDocsUnchanged,
+  fileAtCommit,
+  gitReadinessSnapshot,
+  headSha,
   mergeFeatureBranchIntoBase,
   pushRunBranch,
+  remoteBranchSha,
   removeRunClone,
   removeRunWorktree,
   type RunWorktree,
@@ -51,6 +56,25 @@ import {
   isReentryContext,
   type MergeApprovalPayload,
 } from "../escalation.js";
+import {
+  parseDeveloperImplementation,
+  parseDeveloperReadiness,
+  parseFeaturesPayload,
+  parseFeatureUpdatePayload,
+  parseQaResult,
+} from "../../features/contracts.js";
+import {
+  materializeActiveFeatureDocument,
+  getApprovalModeForRun,
+  getActiveFeatureForRun,
+  FeatureLifecycleEscalationError,
+  persistActiveFeatureContribution,
+  persistFunctionalFeatureBatch,
+  persistPlanningFeatureSelection,
+  recordFeatureCommit,
+  recordFeaturePush,
+} from "../../features/lifecycle.js";
+import { sha256 } from "../../features/document.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const orchestratorRoot = path.resolve(__dirname, "..", "..", "..");
@@ -180,6 +204,7 @@ export async function runStart(args: string[]): Promise<void> {
   // overrides en user_agent_config (FEATURE-016).
   const firstPhaseSelection: AgentConfig =
     cliAgentOverride ?? (await resolveAgentConfig(user.id, pipelineSpec.definition.phases[0].agentRole));
+  const baseCommitSha = await headSha(worktree);
 
   const client = await pool.connect();
   let run: RunRow;
@@ -209,6 +234,7 @@ export async function runStart(args: string[]): Promise<void> {
         pipeline: `${pipelineSpec.name}@${pipelineSpec.version}`,
         projectId: project.id,
         repoPath: projectRepoRoot,
+        baseCommitSha,
       },
       client
     );
@@ -330,7 +356,11 @@ export async function executePipelineRun(params: {
       await recordRunEvent(runId, "phase_started", { agentRole: invocation.agentRole });
       const result = await executor.runPhase(invocation, { timeoutMs: timeoutForLinearPhase(phase.agentRole) });
       const durationMs = Date.now() - phaseTiming.startedAt;
-      await recordRunEvent(runId, "phase_finished", { agentRole: invocation.agentRole, result, durationMs });
+      const phaseFinishedEventId = await recordRunEvent(
+        runId,
+        "phase_finished",
+        { agentRole: invocation.agentRole, result, durationMs }
+      );
       // FEATURE-020, Regla 5/10b: Planning nunca pasa (alimenta al loop Developer↔QA, ver 6.4.a) —
       // el marcador solo aplica a Architect/Functional acá.
       const isPass = phase.agentRole !== "planning" && result.status === "completed" && isNotApplicableOutput(result.outputArtifact);
@@ -347,6 +377,23 @@ export async function executePipelineRun(params: {
           runId,
           result,
           fallbackRamaBaseTrabajo: ramaBaseTrabajoFromBusinessCase(initialContext),
+          phaseFinishedEventId,
+        });
+      }
+
+      if (invocation.agentRole === "functional" && result.status === "completed" && !isPass) {
+        const roadmap = await getCurrentProjectConfig(projectId, "release_roadmap");
+        const activeRelease = activeReleaseFromRoadmap(roadmap?.value);
+        if (!activeRelease) {
+          throw new Error(`Run ${runId}: Functional completó sin release activo fijado.`);
+        }
+        await persistFunctionalFeatureBatch({
+          projectId,
+          runId,
+          worktreePath: worktree.worktreePath,
+          releaseKey: activeRelease.id,
+          phaseFinishedEventId,
+          payload: parseFeaturesPayload(result.outputArtifact),
         });
       }
 
@@ -406,6 +453,7 @@ export async function executePipelineRun(params: {
         planningResult: previousResult as PhaseResult,
         maxAttempts: pipelineSpec.definition.loop.maxAttempts,
         phaseTiming,
+        featureLifecycle: true,
       });
 
       if (finalResult.status === "completed") {
@@ -437,6 +485,32 @@ export async function executePipelineRun(params: {
       // que este chequeo corriera — no llamar finishRun/finalizeRun acá, o se sobreescribiría ese
       // status ya correcto.
       console.log(`[run:start] ${err.message}`);
+      return;
+    }
+
+    if (err instanceof FeatureLifecycleEscalationError) {
+      const role = phaseTiming.agentRole ?? "planning";
+      const escalation: PhaseResult = {
+        status: "escalated",
+        outputArtifact: null,
+        summary: err.message,
+        escalationReason: err.message,
+      };
+      const artifact = await recordArtifact({
+        runId,
+        phase: role,
+        kind: "escalation",
+        content: artifactContentForResult(escalation),
+      });
+      await recordRunEvent(runId, "escalation_opened", {
+        agentRole: role,
+        artifactId: artifact.id,
+        reason: "feature_lifecycle_validation",
+      });
+      await finishRun(projectRepoRoot, runId, worktree, escalation, {
+        pushAndClean: false,
+        cleanupStrategy,
+      });
       return;
     }
 
@@ -611,6 +685,7 @@ async function persistReleasePlanIfDeclared(params: {
   runId: string;
   result: PhaseResult;
   fallbackRamaBaseTrabajo: string | undefined;
+  phaseFinishedEventId: string | number;
 }): Promise<void> {
   const declaration = extractReleasePlanDeclaration(
     { phase: "planning" },
@@ -627,11 +702,32 @@ async function persistReleasePlanIfDeclared(params: {
     );
   }
 
-  await setProjectConfig({
+  const releasePlan = { ...declaration, ramaBaseTrabajo };
+  if (declaration.featureActualId === null) {
+    await setProjectConfig({
+      projectId: params.projectId,
+      configKey: "release_plan",
+      value: releasePlan,
+      changedInRunId: params.runId,
+    });
+    return;
+  }
+
+  const roadmap = await getCurrentProjectConfig(params.projectId, "release_roadmap");
+  const activeRelease = activeReleaseFromRoadmap(roadmap?.value);
+  if (!activeRelease) throw new Error(`Run ${params.runId}: Planning completó sin release activo fijado.`);
+  const update = parseFeatureUpdatePayload(params.result.outputArtifact);
+  if (update.validationPlan.testCommand !== extractTestCommand(params.result.outputArtifact)) {
+    throw new Error("FEATURE_UPDATE.validationPlan.testCommand no coincide con COMANDO_TEST.");
+  }
+  await persistPlanningFeatureSelection({
     projectId: params.projectId,
-    configKey: "release_plan",
-    value: { ...declaration, ramaBaseTrabajo },
-    changedInRunId: params.runId,
+    runId: params.runId,
+    releaseKey: activeRelease.id,
+    phaseFinishedEventId: params.phaseFinishedEventId,
+    releasePlan,
+    featureActualId: declaration.featureActualId,
+    update,
   });
 }
 
@@ -661,10 +757,82 @@ async function continueReleaseAfterFeatureApproved(params: {
   // funcionan igual desde cualquiera de los dos, sin necesitar el repo "raíz" compartido.
   const repoRoot = worktree.worktreePath;
 
-  const committed = await commitAllChanges(worktree, `feat: implementación aprobada por QA (run ${runId})`);
-  await recordRunEvent(runId, "run_committed", { committed });
-  await pushRunBranch(worktree);
-  await recordRunEvent(runId, "run_pushed", { branchName: worktree.branchName });
+  const baseCommitSha = await baseCommitShaForRun(runId);
+  let feature = await getActiveFeatureForRun(runId);
+  if (!feature) throw new Error(`Run ${runId} sin Feature activa.`);
+  let documentHash = feature.document_hash;
+  let commitSha = feature.final_commit_sha;
+  let committed = false;
+
+  if (!documentHash) {
+    await assertFeatureDocsUnchanged(worktree, baseCommitSha);
+    const materialized = await materializeActiveFeatureDocument({
+      runId,
+      worktreePath: worktree.worktreePath,
+    });
+    feature = materialized.feature;
+    documentHash = materialized.hash;
+  }
+
+  if (!commitSha) {
+    const currentHead = await headSha(worktree);
+    let reconciled = false;
+    try {
+      const candidate = await fileAtCommit(worktree, currentHead, feature.final_document_path);
+      reconciled = sha256(candidate) === documentHash;
+    } catch {
+      reconciled = false;
+    }
+    if (reconciled) {
+      commitSha = currentHead;
+    } else {
+      const materialized = await materializeActiveFeatureDocument({
+        runId,
+        worktreePath: worktree.worktreePath,
+      });
+      documentHash = materialized.hash;
+      await assertFeatureDocsUnchanged(worktree, baseCommitSha, feature.final_document_path);
+      committed = await commitAllChanges(worktree, `feat: implementación lista (run ${runId})`);
+      commitSha = await headSha(worktree);
+    }
+    const committedDocument = await fileAtCommit(worktree, commitSha, feature.final_document_path);
+    if (sha256(committedDocument) !== documentHash) {
+      throw new Error("El documento commiteado no coincide con el hash materializado.");
+    }
+    await assertFeatureDocsUnchanged(worktree, baseCommitSha, feature.final_document_path);
+    await recordFeatureCommit({ featureId: feature.id, commitSha, documentHash });
+    await recordRunEvent(runId, "run_committed", {
+      committed,
+      reconciled: !committed,
+      commitSha,
+      featureId: feature.id,
+      documentPath: feature.final_document_path,
+      documentHash,
+    });
+  }
+
+  let remoteSha: string | null = null;
+  try {
+    remoteSha = await remoteBranchSha(worktree);
+  } catch {
+    remoteSha = null;
+  }
+  if (remoteSha !== commitSha) {
+    await pushRunBranch(worktree);
+    remoteSha = await remoteBranchSha(worktree);
+  }
+  if (remoteSha !== commitSha) {
+    throw new Error(`SHA remoto inesperado: esperado ${commitSha}, recibido ${remoteSha}.`);
+  }
+  if (!feature.pushed_at) {
+    await recordFeaturePush({ featureId: feature.id, branch: worktree.branchName, commitSha });
+    await recordRunEvent(runId, "run_pushed", {
+      branchName: worktree.branchName,
+      commitSha,
+      remoteSha,
+      featureId: feature.id,
+    });
+  }
   console.log(`[run:start] push real de la sub-rama "${worktree.branchName}" a origin.`);
 
   const releasePlanConfig = await getCurrentProjectConfig(projectId, "release_plan");
@@ -677,9 +845,7 @@ async function continueReleaseAfterFeatureApproved(params: {
   }
   const featureActualId = typeof releasePlanValue?.featureActualId === "string" ? releasePlanValue.featureActualId : null;
 
-  const approvalModeConfig = await getCurrentProjectConfig(projectId, "approval_mode");
-  const approvalModeValue = approvalModeConfig?.value as { mode?: unknown } | undefined;
-  const mode = approvalModeValue?.mode === "auto" ? "auto" : "manual";
+  const mode = await getApprovalModeForRun(runId);
 
   if (mode === "manual") {
     const mergeApprovalPayload: MergeApprovalPayload = {
@@ -689,7 +855,7 @@ async function continueReleaseAfterFeatureApproved(params: {
       featureActualId,
     };
     const summary =
-      "Feature aprobada por QA — pendiente de aprobación humana para mergear a la rama base del release.";
+      "Feature con tests pasados y readiness de Developer — pendiente de autorización humana para el merge.";
     const escalationReason =
       "Modo Manual: el merge de la sub-rama a la rama base requiere aprobación humana explícita.";
     const artifact = await recordArtifact({
@@ -709,18 +875,18 @@ async function continueReleaseAfterFeatureApproved(params: {
     return;
   }
 
-  // Modo Auto (Regla Funcional 10): merge directo, sin escalar.
-  await finalizeRun(runId, {
-    status: "completed",
-    outputArtifact: null,
-    summary: `Feature aprobada por QA, mergeada automáticamente a "${baseBranch}" (Modo Auto).`,
-    escalationReason: null,
-  });
+  // Modo auto: el run sólo queda completed después del merge y push reales.
   await mergeFeatureBranchIntoBase({ repoRoot, baseBranch, featureBranch: worktree.branchName });
   await recordRunEvent(runId, "feature_merged_to_base", {
     baseBranch,
     featureBranch: worktree.branchName,
     mode: "auto",
+  });
+  await finalizeRun(runId, {
+    status: "completed",
+    outputArtifact: null,
+    summary: `Feature lista, mergeada a "${baseBranch}" en modo auto.`,
+    escalationReason: null,
   });
   console.log(`[run:start] Modo Auto: sub-rama "${worktree.branchName}" mergeada y pusheada a "${baseBranch}".`);
 
@@ -772,6 +938,7 @@ export async function createPlanningToQaChildRun(params: {
   const childRunId = randomUUID();
   const pipelineDefinition = await ensurePipelineDefinition(PLANNING_TO_QA);
   const childWorktree = await createRunWorktree(params.repoRoot, childRunId, params.baseBranch);
+  const baseCommitSha = await headSha(childWorktree);
   const firstPhaseSelection: AgentConfig =
     params.cliAgentOverride ?? (await resolveAgentConfig(params.userId, "planning"));
 
@@ -803,6 +970,7 @@ export async function createPlanningToQaChildRun(params: {
         projectId: params.projectId,
         repoPath: childWorktree.worktreePath,
         originatedFromRunId: params.parentRunId,
+        baseCommitSha,
       },
       client
     );
@@ -831,16 +999,19 @@ export async function runDeveloperQaLoop(params: {
   runId: string;
   planningResult: PhaseResult;
   maxAttempts: number;
+  featureLifecycle?: boolean;
   /** Compartido con executePipelineRun — ver el comentario en su declaración. */
   phaseTiming: { agentRole: AgentRole | null; startedAt: number | null };
   /** Seam acotado para probar el control del loop sin Postgres ni contenedores reales. */
   services?: {
     haltIfCancelledExternally?: typeof haltIfCancelledExternally;
     updateRunCurrentPhase?: typeof updateRunCurrentPhase;
-    recordRunEvent?: typeof recordRunEvent;
+    recordRunEvent?: (runId: string, eventType: string, payload: unknown) => Promise<string | number | void>;
     persistArtifact?: PersistArtifact;
     buildExecutor?: Pick<BuildExecutor, "runIfNeeded">;
     testExecutor?: Pick<TestExecutor, "run">;
+    persistFeatureContribution?: typeof persistActiveFeatureContribution;
+    gitReadinessSnapshot?: typeof gitReadinessSnapshot;
   };
 }): Promise<PhaseResult> {
   const { executor, developerExecutor, readRole, runId, planningResult, maxAttempts, phaseTiming } = params;
@@ -851,6 +1022,8 @@ export async function runDeveloperQaLoop(params: {
     persistArtifact: recordArtifact as PersistArtifact,
     buildExecutor: new BuildExecutor() as Pick<BuildExecutor, "runIfNeeded">,
     testExecutor: new TestExecutor() as Pick<TestExecutor, "run">,
+    persistFeatureContribution: persistActiveFeatureContribution,
+    gitReadinessSnapshot,
     ...params.services,
   };
   const testCommand = extractTestCommand(planningResult.outputArtifact);
@@ -896,7 +1069,7 @@ export async function runDeveloperQaLoop(params: {
     await services.recordRunEvent(runId, "phase_started", { agentRole: "developer", attempt });
     const developerResult = await developerExecutor.runPhase(developerInvocation, { timeoutMs: DEVELOPER_TIMEOUT_MS });
     const developerDurationMs = Date.now() - phaseTiming.startedAt;
-    await services.recordRunEvent(runId, "phase_finished", {
+    const developerPhaseFinishedEventId = await services.recordRunEvent(runId, "phase_finished", {
       agentRole: "developer",
       attempt,
       result: developerResult,
@@ -914,6 +1087,21 @@ export async function runDeveloperQaLoop(params: {
     if (developerResult.status !== "completed") {
       console.log(`[run:start] Developer (intento ${attempt}) terminó con status "${developerResult.status}" — loop detenido.`);
       return developerResult;
+    }
+
+    if (params.featureLifecycle) {
+      await services.persistFeatureContribution({
+        runId,
+        phaseFinishedEventId: String(developerPhaseFinishedEventId),
+        role: "developer",
+        attempt,
+        contribution: {
+          purpose: "developer-implementation",
+          sectionKey: "developer_implementation",
+          operation: "append_entry",
+          content: parseDeveloperImplementation(developerResult.outputArtifact),
+        },
+      });
     }
 
     await services.haltIfCancelledExternally(runId);
@@ -980,24 +1168,133 @@ export async function runDeveloperQaLoop(params: {
     await services.recordRunEvent(runId, "phase_started", { agentRole: "qa", attempt });
     const qaResult = await executor.runPhase(qaInvocation, { timeoutMs: QA_TIMEOUT_MS });
     const qaDurationMs = Date.now() - phaseTiming.startedAt;
-    await services.recordRunEvent(runId, "phase_finished", { agentRole: "qa", attempt, result: qaResult, durationMs: qaDurationMs });
+    const qaPhaseFinishedEventId = await services.recordRunEvent(
+      runId,
+      "phase_finished",
+      { agentRole: "qa", attempt, result: qaResult, durationMs: qaDurationMs }
+    );
     await services.persistArtifact({
       runId,
       phase: "qa",
       kind:
         qaResult.status === "completed"
-          ? "verdict_approved"
+          ? "qa_result_passed"
           : qaResult.status === "rejected"
-            ? "verdict_rejected"
+            ? "qa_result_failed"
             : "escalation",
       content: { attempt, ...artifactContentForResult(qaResult) },
     });
 
     lastQaResult = qaResult;
 
+    if (params.featureLifecycle && (qaResult.status === "completed" || qaResult.status === "rejected")) {
+      const qaPayload = parseQaResult(qaResult.outputArtifact);
+      const expectedTestStatus = testResult.exitCode === 0 && !testResult.timedOut ? "passed" : "failed";
+      if (qaPayload.testStatus !== expectedTestStatus) {
+        throw new Error(
+          `QA_RESULT.testStatus=${qaPayload.testStatus} contradice TestExecutor=${expectedTestStatus}.`
+        );
+      }
+        await services.persistFeatureContribution({
+        runId,
+        phaseFinishedEventId: String(qaPhaseFinishedEventId),
+        role: "qa",
+        attempt,
+        contribution: {
+          purpose: "qa-result",
+          sectionKey: "qa_result",
+          operation: "record_qa_result",
+          content: qaPayload,
+        },
+      });
+    }
+
     if (qaResult.status === "completed") {
-      console.log(`[run:start] QA aprobó en el intento ${attempt}.`);
-      return qaResult;
+      if (!params.featureLifecycle) {
+        console.log(`[run:start] QA aprobó en el intento ${attempt}.`);
+        return qaResult;
+      }
+
+      const readinessWorktree: RunWorktree = {
+        branchName: "",
+        worktreePath: developerExecutor.options.workingDirectory,
+      };
+      const snapshotBefore = await services.gitReadinessSnapshot(readinessWorktree);
+      await services.updateRunCurrentPhase(runId, "developer");
+      const readinessInvocation: PhaseInvocation = {
+        agentRole: "developer",
+        roleInstructions: developerRoleInstructions,
+        context: {
+          readinessRequest: true,
+          plan: planningResult.outputArtifact,
+          qaResult: qaResult.outputArtifact,
+          testResult,
+          gitSnapshot: snapshotBefore,
+        },
+        permissions: {
+          filesystem: "workspace-write",
+          writableRoots: [developerExecutor.options.workingDirectory],
+        },
+      };
+      phaseTiming.agentRole = "developer";
+      phaseTiming.startedAt = Date.now();
+      await services.recordRunEvent(runId, "phase_started", {
+        agentRole: "developer",
+        attempt,
+        purpose: "readiness",
+      });
+      const readinessResult = await developerExecutor.runPhase(readinessInvocation, {
+        timeoutMs: DEVELOPER_TIMEOUT_MS,
+      });
+      const readinessDurationMs = Date.now() - phaseTiming.startedAt;
+      const readinessEventId = await services.recordRunEvent(runId, "phase_finished", {
+        agentRole: "developer",
+        attempt,
+        purpose: "readiness",
+        result: readinessResult,
+        durationMs: readinessDurationMs,
+      });
+      if (readinessResult.status !== "completed") return readinessResult;
+      const readiness = parseDeveloperReadiness(readinessResult.outputArtifact);
+      const snapshotAfter = await services.gitReadinessSnapshot(readinessWorktree);
+      const snapshotChanged =
+        snapshotBefore.branch !== snapshotAfter.branch ||
+        snapshotBefore.headSha !== snapshotAfter.headSha ||
+        snapshotBefore.treeHash !== snapshotAfter.treeHash;
+      await services.persistFeatureContribution({
+        runId,
+        phaseFinishedEventId: String(readinessEventId),
+        role: "developer",
+        attempt,
+        contribution: {
+          purpose: "developer-readiness",
+          sectionKey: "developer_readiness",
+          operation: "record_readiness",
+          content: readiness,
+        },
+      });
+
+      if (!snapshotChanged && readiness.readiness !== "not_ready" && !readiness.requiresCodeChanges) {
+        console.log(`[run:start] Developer declaró readiness en el intento ${attempt}.`);
+        return readinessResult;
+      }
+      lastQaResult = {
+        status: "rejected",
+        outputArtifact: readiness,
+        summary: snapshotChanged
+          ? "Readiness invalidado: branch, HEAD o tree hash cambiaron durante el turno post-QA."
+          : readiness.summary,
+        escalationReason: null,
+      };
+      if (attempt === maxAttempts) {
+        return {
+          status: "escalated",
+          outputArtifact: readiness,
+          summary: `Se agotaron ${maxAttempts} intentos sin readiness estable.`,
+          escalationReason: `Límite de reintentos (${maxAttempts}) alcanzado durante readiness.`,
+        };
+      }
+      continue;
     }
 
     if (qaResult.status === "escalated") {
@@ -1064,6 +1361,20 @@ async function finishRun(
 
   console.log(`[run:start] status final: ${finalResult.status}`);
   console.log(`[run:start] run ${runId} persistido. Consultar con: npm run cli -- run:status --run ${runId}`);
+}
+
+async function baseCommitShaForRun(runId: string): Promise<string> {
+  const result = await pool.query<{ payload: unknown }>(
+    `select payload from run_events
+     where run_id = $1 and event_type = 'run_started'
+     order by id asc limit 1`,
+    [runId]
+  );
+  const payload = result.rows[0]?.payload as { baseCommitSha?: unknown } | undefined;
+  if (typeof payload?.baseCommitSha !== "string") {
+    throw new Error(`Run ${runId} sin baseCommitSha persistido.`);
+  }
+  return payload.baseCommitSha;
 }
 
 function getFlag(args: string[], name: string): string | undefined {

@@ -25,6 +25,7 @@ export interface RunRow {
    * padre si no. NULL para runs creados antes de esta Feature (sin backfill, Regla 13).
    */
   root_run_id: string | null;
+  active_feature_id: string | null;
   business_case: unknown;
   created_at: string;
   updated_at: string;
@@ -574,13 +575,13 @@ export async function recordRunEvent(
   eventType: string,
   payload: unknown,
   client?: PoolClient
-): Promise<void> {
+): Promise<string> {
   const db = client ?? pool;
-  await db.query("insert into run_events (run_id, event_type, payload) values ($1, $2, $3)", [
-    runId,
-    eventType,
-    payload,
-  ]);
+  const result = await db.query<{ id: string | number }>(
+    "insert into run_events (run_id, event_type, payload) values ($1, $2, $3) returning id",
+    [runId, eventType, payload]
+  );
+  return String(result.rows[0].id);
 }
 
 export async function recordArtifact(params: {
@@ -588,8 +589,10 @@ export async function recordArtifact(params: {
   phase: string;
   kind: string;
   content: unknown;
+  client?: PoolClient;
 }): Promise<ArtifactRow> {
-  const result = await pool.query<ArtifactRow>(
+  const db = params.client ?? pool;
+  const result = await db.query<ArtifactRow>(
     "insert into artifacts (run_id, phase, kind, content) values ($1, $2, $3, $4) returning *",
     [params.runId, params.phase, params.kind, params.content]
   );

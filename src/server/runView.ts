@@ -4,6 +4,7 @@ import {
   isRoadmapApprovalPayload,
   type ReleasePlanFeatureEntry,
 } from "../cli/escalation.js";
+import type { FeatureDocumentView } from "../features/lifecycle.js";
 
 export type TimelineNodeId = "user" | "architect" | "functional" | "planning" | "developer" | "qa";
 export type TimelineNodeStatus =
@@ -113,6 +114,7 @@ export interface RunViewModel {
    * (mismo criterio que su test suite actual, sobre objetos literales sin DB).
    */
   releaseRoadmap: ReleaseRoadmapView | null;
+  featureDocument: FeatureDocumentView | null;
 }
 
 const AGENT_NODES: Array<{ id: Exclude<TimelineNodeId, "user">; label: string }> = [
@@ -126,7 +128,8 @@ const TIMELINE_NODE_ORDER: TimelineNodeId[] = ["user", "architect", "functional"
 
 export function buildRunViewModel(
   detail: RunDetailViewInput,
-  releaseRoadmap: ReleaseRoadmapView | null = null
+  releaseRoadmap: ReleaseRoadmapView | null = null,
+  featureDocument: FeatureDocumentView | null = null
 ): RunViewModel {
   const timeline = buildTimeline(detail.run, detail.events);
   return {
@@ -135,6 +138,7 @@ export function buildRunViewModel(
     narrative: buildNarrative(detail.events),
     escalation: buildEscalationBanner(detail.run, detail.events, detail.artifacts),
     releaseRoadmap,
+    featureDocument,
   };
 }
 
