@@ -7,79 +7,56 @@
 * **Type:** Arquitectura / Runtime / Distribución de assets
 * **Owner:** Asdru — Product Owner
 * **Design Owner:** DAIA
-* **Implementation Owner:** Pendiente de Approval Gate
-* **Status:** Diseño en elaboración
+* **Implementation Owner:** DAIA
+* **Status:** Implementada en rama — pendiente de validación del owner
 * **Priority:** P0
 * **Playbook Mode:** Full
-* **Approval Gate:** Pendiente
-* **Implementation:** Prohibida hasta aprobación explícita del owner
-* **Branch de diseño:** `codex/feature-023-runbook-runtime-part-2`
+* **Approval Gate:** Aprobado por el owner el 2026-07-28
+* **Implementation:** Completada en la rama autorizada
+* **Branch de implementación:** `codex/feature-023-runbook-runtime-part-2`
 * **Checkout de origen:** `main` en `639426e`
 
 ---
 
 # 2. Problem Statement
 
-## Separación de responsabilidades
+Asdrux AI Orchestrator trabaja sobre un repositorio proporcionado por el usuario. Ese repositorio
+gestionado es distinto del código y de los activos internos del Orquestador.
 
-Asdrux AI Orchestrator opera sobre un repositorio que el usuario proporciona para desarrollar su
-caso de negocio. Ese repositorio gestionado es distinto del código y de los activos internos del
-Orquestador.
+El Runbook es la guía de ejecución propia de Asdrux AI Orchestrator. Hoy vive en
+`docs/runbook/` del repositorio del Orquestador porque el producto todavía se ejecuta desde un
+checkout de desarrollo. Esto no define cómo estará disponible en una instalación productiva.
 
-El Runbook es la guía de ejecución propia de Asdrux AI Orchestrator. Actualmente su copia de
-referencia vive en:
+La primera prueba E2E de FEATURE-023 Parte 1 intentó leer
+`docs/runbook/07-FEATURE-TEMPLATE.md` desde el worktree de `tempo-auto-planner`. La ruta no existía
+y el run falló con `ENOENT`.
 
-```text
-docs/runbook/
-```
+El defecto inmediato es:
 
-dentro de `asdrubalperez/asdrux-ai-orchestrator`, porque el producto todavía se desarrolla y
-ejecuta desde un checkout Git.
+> El Orquestador debe resolver y leer su propio Runbook desde una ubicación perteneciente a la
+> instalación del producto, independientemente del `cwd`, del worktree y del repositorio
+> gestionado.
 
-Ese detalle de desarrollo no define cómo el producto encontrará el Runbook cuando se distribuya o
-ejecute en producción.
-
-## Fallo observado
-
-La primera prueba E2E de FEATURE-023 Parte 1 intentó leer:
-
-```text
-docs/runbook/07-FEATURE-TEMPLATE.md
-```
-
-desde el worktree de `tempo-auto-planner`, el repositorio gestionado. La ruta no existía y el run
-falló después de Functional con `ENOENT`.
-
-## Limitación estructural
-
-Hoy no existe un contrato explícito y verificable que determine:
-
-* cómo se distribuye el Runbook con el producto;
-* cuál es su fuente autoritativa en una instalación;
-* cómo se resuelve su ubicación sin depender del `cwd`;
-* cómo se identifica su versión;
-* cómo se valida su integridad y compatibilidad;
-* cómo evoluciona al desplegar una nueva versión;
-* qué parte es baseline global y qué parte corresponde a configuración o artifacts por proyecto.
-
-`docs/runbook/BOOTSTRAP.md` declara esta ubicación técnica como pendiente ya registrado en el
-Roadmap, pero antes de esta Parte 2 no existía un ítem inequívoco que lo cubriera.
+La v1 no debe convertirse en una plataforma genérica de distribución, un sistema remoto de
+Runbooks ni un framework de upgrades.
 
 ---
 
 # 3. Functional Goal
 
-Asdrux AI Orchestrator debe poder resolver y consumir siempre un Runbook completo, compatible,
-versionado y verificable como activo propio del producto, independientemente:
+Asdrux AI Orchestrator debe distribuir su Runbook como assets read-only del producto y consumirlos
+mediante un único proveedor interno.
 
-* del repositorio gestionado;
-* de la rama o worktree del caso;
-* del directorio actual del proceso;
-* de si el runtime se ejecuta desde un checkout, paquete, imagen o instalación desplegada.
+El runtime debe:
 
-Cuando el Runbook requerido no esté disponible, esté incompleto o sea incompatible, el
-Orquestador debe fallar de forma controlada antes de invocar agentes o persistir resultados
-parciales dependientes de ese Runbook.
+* localizar los assets respecto de la instalación;
+* validar disponibilidad, lectura, path seguro y versión;
+* calcular SHA-256 sobre el template realmente leído;
+* entregar contenido y metadata validada a FEATURE-023 Parte 1;
+* fallar sin buscar copias alternativas en el repositorio gestionado.
+
+El repositorio del usuario debe contener únicamente los documentos propios del producto gestionado
+en las rutas canónicas definidas por esta Feature.
 
 ---
 
@@ -87,121 +64,249 @@ parciales dependientes de ese Runbook.
 
 ## Included
 
-* Definir la fuente autoritativa del Runbook instalada con Asdrux AI Orchestrator.
-* Definir el mecanismo único de resolución de assets del Runbook en runtime.
-* Eliminar dependencias del `cwd` y del repositorio gestionado.
-* Definir versionado, manifiesto, integridad y compatibilidad.
-* Definir el contrato para desarrollo local, VPS y futura instalación productiva.
-* Definir el comportamiento fail-closed cuando el Runbook no pueda validarse.
-* Separar baseline global, configuraciones versionadas por proyecto y documentos materializados.
-* Integrar el proveedor del Runbook con FEATURE-023 Parte 1.
-* Corregir la contradicción de `docs/runbook/BOOTSTRAP.md`.
-* Definir pruebas automatizadas y evidencia E2E conjunta para FEATURE-022 y ambas partes de
-  FEATURE-023.
+* Runbook empaquetado como assets read-only de Asdrux AI Orchestrator.
+* Resolución respecto de la instalación, independiente del `cwd` y del worktree.
+* Una única abstracción interna `RunbookProvider`.
+* Validación de archivos obligatorios, legibilidad, path seguro y versión explícita.
+* Hash del asset efectivamente leído.
+* Integración mínima con FEATURE-023 Parte 1.
+* Persistencia existente de `template_version`, `template_hash` y `template_snapshot`.
+* Pertenencia, cardinalidad y rutas canónicas iniciales de documentos gestionados.
+* Validación completa de los assets obligatorios durante el startup del servidor.
+* Validación transversal del template antes de toda transacción documental.
+* Pruebas proporcionales y E2E conjunto de FEATURE-022 y ambas partes de FEATURE-023.
+* Actualización de `docs/runbook/BOOTSTRAP.md` como parte de la implementación de esta Feature.
 
 ## Excluded
 
-* Lifecycle de Project Brief, Architecture y Release Plan, reservado para FEATURE-033,
-  FEATURE-034 y FEATURE-035.
-* Rediseño del contenido funcional del Runbook.
-* Solución de FEATURE-028 sobre Release Plan stale.
-* Solución de FEATURE-030 sobre asociación entre proyecto y repositorio gestionado.
-* Diseño completo de CI/CD o separación dev/staging/prod.
-* Edición del baseline del Runbook por usuarios finales.
-* Sincronización bidireccional entre Runbook global y documentos de repositorios gestionados.
-* Reanudación del E2E antes de completar diseño, implementación y Approval Gate de esta Parte 2.
+* Distribución remota o descarga dinámica.
+* Múltiples fuentes, fallbacks u overrides complejos.
+* Firmas criptográficas y almacenamiento administrado.
+* Manifiesto general con hashes de todos los archivos.
+* Rangos sofisticados de compatibilidad.
+* Framework de upgrades, rollback o migración de runs activos.
+* Health checks avanzados.
+* Nuevos mounts o permisos para workers.
+* Lifecycle de Project Brief, Architecture o Release Plan.
+* FEATURE-028, FEATURE-030 y el diseño completo de deployment.
+* Reanudación del E2E antes de aprobar e implementar esta Parte 2.
 
-## Future ideas
+## Future Ideas
 
-* Firma criptográfica de paquetes del Runbook.
-* Distribución remota centralizada para múltiples instalaciones.
-* Política de upgrade coordinado entre runtime y Runbook.
+* Firma del paquete.
+* Distribución remota y descarga dinámica.
+* Múltiples fuentes, fallbacks y overrides operativos.
+* Manifiesto completo y rangos de compatibilidad.
+* Upgrades coordinados, rollback y pinning general.
+* Health checks avanzados.
+* Acceso directo de workers, solo ante una necesidad futura demostrada.
 
-Estas ideas no forman parte automáticamente de la primera versión.
+Estas ideas no forman parte de la v1.
+
+## Mapa canónico de assets y documentos
+
+### Activos de Asdrux AI Orchestrator
+
+Pertenecen a la instalación del Orquestador:
+
+* Runbook;
+* templates;
+* descriptores estructurales;
+* instrucciones internas de los roles.
+
+No se buscan en el repositorio gestionado, no se resuelven respecto del `cwd` y no pueden ser
+reemplazados por archivos homónimos externos.
+
+### Documentos del producto gestionado
+
+| Documento | Ruta canónica | Cardinalidad | Lifecycle |
+|---|---|---|---|
+| Project Brief | `docs/project/PROJECT-BRIEF.md` | Uno por proyecto | FEATURE-033 |
+| Architecture, incluido el Roadmap | `docs/architecture/ARCHITECTURE.md` | Uno por proyecto | FEATURE-034 |
+| Release Plan | `docs/releases/<release-key>/RELEASE-PLAN.md` | Uno por release | FEATURE-035 |
+| Feature | `docs/features/<feature-code>-<slug>.md` | Múltiples por proyecto | FEATURE-023 Parte 1 |
+
+El Roadmap de Releases forma parte de `ARCHITECTURE.md`; no es un documento independiente.
+
+Esta Parte 2 fija pertenencia y rutas. No absorbe los lifecycles de FEATURE-033, FEATURE-034 o
+FEATURE-035.
 
 ---
 
 # 5. Functional Rules
 
-## Rule 1 — Ownership
+## Rule 1 — Fuente autoritativa
 
-El Runbook pertenece a Asdrux AI Orchestrator. Ningún repositorio gestionado es su fuente
-autoritativa.
+La fuente v1 son los assets read-only distribuidos con la instalación del Orquestador. El
+repositorio gestionado nunca es fuente del Runbook.
 
-## Rule 2 — Disponibilidad
+## Rule 2 — Raíz confiable
 
-Toda operación que dependa del Runbook debe resolverlo mediante un componente propio del runtime,
-nunca concatenando rutas sobre el worktree del caso.
+La raíz del Runbook puede inyectarse por composición para tests, desarrollo, empaquetado, VPS o
+producción, pero debe provenir exclusivamente de configuración confiable del proceso o de la
+instalación.
 
-## Rule 3 — Independencia del directorio de ejecución
+No puede provenir de:
 
-La resolución debe producir el mismo resultado para cualquier `cwd`.
+* agentes;
+* repositorio gestionado;
+* configuración editable del proyecto;
+* business case;
+* headers o payloads de usuario;
+* `process.cwd()`.
 
-## Rule 4 — Versión explícita
+## Rule 3 — Proveedor único
 
-El runtime debe conocer la versión del Runbook que consume. No se admite una carpeta sin identidad
-de versión verificable.
+Toda lectura usa `RunbookProvider`. FEATURE-023 Parte 1 no puede construir una ruta de template
+sobre `worktreePath`.
 
-## Rule 5 — Integridad
+## Rule 4 — API mínima
 
-Los archivos obligatorios y su integridad deben poder validarse antes del uso.
+El proveedor ofrece operaciones equivalentes a:
 
-## Rule 6 — Compatibilidad
+```text
+readText(relativeAssetPath)
+assertAvailable(requiredAssetPaths)
+getRunbookVersion()
+```
 
-La relación entre versión del runtime, versión del Runbook y versión de cada template debe tener
-un contrato cerrado.
+La lectura entrega:
 
-## Rule 7 — Fail-closed
+```text
+runbookVersion
+assetRelativePath
+assetHash
+content
+```
 
-Si falta un archivo obligatorio, el manifiesto es inválido o la versión es incompatible, el run no
-debe continuar con defaults implícitos ni buscar el archivo en el repositorio gestionado.
+El hash se calcula sobre los bytes realmente leídos.
 
-## Rule 8 — Validación temprana
+## Rule 5 — Path seguro
 
-El error debe detectarse antes de invocar el primer rol que requiera el asset y, cuando sea
-posible, durante el arranque o health check del servicio.
+Solo se aceptan paths relativos dentro de la raíz del Runbook. Paths absolutos, `..`, traversal o
+resolución fuera de la raíz deben rechazarse.
 
-## Rule 9 — Baseline y estado por proyecto
+## Rule 6 — Versionado mínimo
 
-El baseline global del Runbook no se mezcla con:
+La v1 usa una versión explícita, por ejemplo `RUNBOOK_VERSION = "1.0"`, implementada como
+constante, archivo pequeño de metadata o metadata generada durante build.
 
-* configuraciones editables persistidas en `project_config_versions`;
-* artifacts inmutables del proyecto;
-* documentos materializados dentro del repositorio gestionado.
+No se requiere un manifiesto general.
 
-## Rule 10 — Destino documental
+## Rule 7 — Catálogo obligatorio por funcionalidad
 
-FEATURE-023 Parte 1 puede escribir el documento final de Feature en `docs/features/` del
-repositorio gestionado. Esa escritura no convierte al repositorio gestionado en fuente del
-template.
+Solo son obligatorios los assets consumidos por funcionalidades implementadas y habilitadas.
 
-## Rule 11 — Desarrollo y producción
+El catálogo cerrado v1 incluye como mínimo:
 
-Desarrollo local, VPS y producción deben usar el mismo contrato de resolución. Puede variar la
-ubicación física, pero no la semántica ni las validaciones.
+```text
+VERSION
+07-FEATURE-TEMPLATE.md
+```
 
-## Rule 12 — Actualización controlada
+Debe agregar cualquier otro asset realmente consumido durante la validación conjunta de
+FEATURE-022 y ambas partes de FEATURE-023. Archivos futuros no bloquean el startup solo porque
+existan en `docs/runbook/`.
 
-Una nueva versión del Runbook se activa como parte de una actualización explícita del producto; no
-se descarga ni cambia silenciosamente durante un run.
+Cuando se implementen FEATURE-033, FEATURE-034 y FEATURE-035, sus templates se incorporarán al
+catálogo obligatorio.
 
-## Rule 13 — Observabilidad sin contenido sensible
+## Rule 8 — Validación completa en startup
 
-Los errores y logs deben identificar versión, asset y causa técnica sin registrar business cases,
-contenido generado por agentes ni secretos.
+Antes de considerar operativo el servidor, `RunbookProvider` debe validar:
 
-## Rule 14 — Pruebas suspendidas
+1. raíz válida y segura;
+2. `VERSION` existente, legible y soportada;
+3. catálogo obligatorio actual completo;
+4. todos los assets obligatorios legibles y dentro de la raíz;
+5. SHA-256 calculable para cada asset obligatorio.
 
-El E2E de FEATURE-023 Parte 1 permanece suspendido hasta que esta Parte 2 sea aprobada e
-implementada.
+Si falla cualquier punto, el servidor no queda operativo ni acepta nuevos runs. No se requiere un
+sistema avanzado de health checks: esta validación forma parte del startup normal.
+
+## Rule 9 — Validación previa a persistencia documental
+
+Todo template debe resolverse y validarse antes de abrir la transacción que persiste Project Brief,
+Architecture, Release Plan o Features.
+
+La validación previa:
+
+* obtiene contenido, versión, path relativo y hash exactos;
+* evita usar un asset desaparecido o alterado después del startup;
+* entrega metadata confiable a la transacción.
+
+FEATURE-033, FEATURE-034 y FEATURE-035 deberán heredar este contrato cuando implementen sus
+lifecycles.
+
+## Rule 10 — Fail-closed
+
+Raíz inválida, versión ausente o no soportada, asset ausente o ilegible, path inválido, resolución
+fuera de raíz o fallo de hash detienen el startup o la operación correspondiente.
+
+No existe búsqueda respecto del `cwd`, fallback, contenido vacío, default, template alternativo,
+persistencia parcial ni fase completada si dependía del asset.
+
+Los errores deben seguir la convención existente o distinguir conceptualmente:
+
+```text
+RUNBOOK_ROOT_INVALID
+RUNBOOK_VERSION_NOT_FOUND
+RUNBOOK_ASSET_NOT_FOUND
+RUNBOOK_ASSET_UNREADABLE
+RUNBOOK_VERSION_UNSUPPORTED
+RUNBOOK_ASSET_PATH_INVALID
+```
+
+## Rule 11 — Caso concreto de FEATURE-023 Parte 1
+
+Antes de abrir la transacción del lote Functional:
+
+1. solicitar `07-FEATURE-TEMPLATE.md`;
+2. validar raíz, path, versión y lectura;
+3. calcular SHA-256;
+4. obtener `runbookVersion`, `assetRelativePath`, `assetHash` y `content`;
+5. construir el descriptor o snapshot requerido por Parte 1.
+
+Solo entonces se abre la transacción que persiste identities, revisions y artifacts.
+
+Si falla la resolución, no se crean filas en `features` o `feature_revisions`, no se crean
+artifacts canónicos y Functional no se registra como completado de forma engañosa. El error usa los
+estados y eventos existentes.
+
+`worktreePath` queda limitado a colisiones, destino documental, materialización y operaciones Git.
+Nunca localiza el template.
+
+Debe seguir persistiendo `template_version`, `template_hash` y `template_snapshot`.
+
+## Rule 12 — Actualización
+
+El Runbook cambia únicamente con una actualización explícita del producto, nunca silenciosamente
+durante un run. Features existentes conservan snapshot, versión y hash.
+
+No hay descarga remota, fallback de versión, rollback, migración de runs activos ni pinning
+general en v1.
+
+## Rule 13 — Workers
+
+El host confiable resuelve el Runbook. La v1 no agrega mounts, permisos ni acceso directo a
+workers.
+
+## Rule 14 — BOOTSTRAP
+
+La implementación debe actualizar `docs/runbook/BOOTSTRAP.md` para indicar:
+
+* Runbook distribuido con la instalación;
+* consumo mediante `RunbookProvider`;
+* independencia del `cwd` y del repositorio gestionado;
+* rutas canónicas de documentos del usuario;
+* startup bloqueado solo por assets de funcionalidades habilitadas.
+
+No debe quedar como una corrección futura ni como ubicación pendiente.
 
 ## Rule 15 — Validación conjunta
 
-La siguiente validación funcional debe cubrir conjuntamente:
-
-1. FEATURE-022;
-2. FEATURE-023 Parte 1;
-3. FEATURE-023 Parte 2.
+El E2E de Parte 1 continúa suspendido. La próxima validación funcional cubre FEATURE-022,
+FEATURE-023 Parte 1 y FEATURE-023 Parte 2.
 
 ---
 
@@ -209,237 +314,221 @@ La siguiente validación funcional debe cubrir conjuntamente:
 
 No aplica como algoritmo de optimización.
 
-El diseño sí deberá fijar una secuencia determinista de resolución:
+La resolución es determinista:
 
 ```text
 runtime
-  → proveedor de Runbook
-  → manifiesto y versión
-  → validación de compatibilidad
-  → validación de archivos e integridad
-  → entrega de asset solicitado
+  → RunbookProvider
+  → raíz de assets de la instalación
+  → versión y path validados
+  → lectura
+  → SHA-256
+  → contenido y metadata
 ```
 
-No se permiten fallbacks implícitos hacia el `cwd`, el worktree del run o una ruta relativa
-aportada por un agente.
+No existen fallbacks hacia el `cwd`, el worktree o el repositorio gestionado.
 
 ---
 
 # 7. Technical Considerations
 
-## Decisiones de diseño pendientes
+## 7.1 Distribución
 
-### 7.1 Forma de distribución
+El build o deployment incluye una copia read-only equivalente a:
 
-Evaluar y decidir entre:
+```text
+<installation-root>/
+└── assets/
+    └── runbook/
+        ├── VERSION
+        ├── BOOTSTRAP.md
+        ├── 07-FEATURE-TEMPLATE.md
+        └── demás archivos obligatorios
+```
 
-* assets empaquetados con la aplicación o imagen;
-* directorio absoluto instalado y configurado por deployment;
-* almacenamiento persistente administrado por el producto;
-* combinación acotada con una fuente primaria y un override operativo explícito.
+La ruta física puede adaptarse al empaquetado. El contrato estable es:
 
-### 7.2 Resolución de ubicación
+```text
+RunbookProvider → asset interno de la instalación
+```
 
-Definir una API única, por ejemplo un `RunbookProvider`, que evite lecturas directas mediante
-`path.join(worktreePath, "docs", "runbook", ...)`.
+## 7.2 Resolución
 
-### 7.3 Manifiesto
+La raíz se deriva desde una referencia confiable del producto, no desde `process.cwd()`. Puede
+inyectarse en composición para tests y empaquetado, pero no ser controlada por agentes, usuarios,
+business cases, proyectos ni repositorios gestionados.
 
-Definir si el Runbook requiere un manifiesto con:
+## 7.3 Metadata y catálogo mínimos
 
-* versión del Runbook;
-* versión mínima/máxima compatible del runtime;
-* catálogo cerrado de archivos obligatorios;
-* hash por archivo;
-* versión de templates individuales.
+La opción preferida es `assets/runbook/VERSION`. Una constante o metadata de build es aceptable si
+preserva el mismo contrato observable.
 
-### 7.4 Lifecycle de actualización
+El catálogo obligatorio se mantiene cerrado en código y refleja únicamente funcionalidades
+habilitadas. Inicialmente contiene `VERSION`, `07-FEATURE-TEMPLATE.md` y cualquier otro asset
+realmente consumido por la validación conjunta.
 
-Definir cuándo se instala una nueva versión, cómo se valida antes de activarla y qué ocurre con
-runs ya iniciados.
+No se introduce un manifest extensible.
 
-### 7.5 Contenedores y workers
+## 7.4 Startup y operación
 
-Definir si los workers necesitan acceso directo a archivos del Runbook o si el host confiable debe
-inyectar únicamente instrucciones/assets ya validados. No se ampliarán mounts ni permisos sin
-necesidad demostrada.
+El servidor ejecuta `assertAvailable` sobre el catálogo obligatorio antes de quedar operativo. Los
+assets distribuidos pero todavía no consumidos no bloquean startup.
 
-### 7.6 Modelo de amenazas
+Cada operación documental vuelve a leer y validar su template antes de abrir la transacción. La
+validación de startup no sustituye esta lectura porque el asset podría haber desaparecido o
+cambiado después del arranque.
 
-El repositorio gestionado es contenido externo al Orquestador. Un archivo con el mismo nombre que
-un asset del Runbook no debe poder reemplazar el baseline autoritativo.
+## 7.5 Integración con Parte 1
 
-### 7.7 Compatibilidad con FEATURE-023 Parte 1
+`persistFunctionalFeatureBatch` deja de leer
+`<worktreePath>/docs/runbook/07-FEATURE-TEMPLATE.md` y consume el asset del proveedor. El resto del
+lifecycle de Parte 1 no se rediseña.
 
-`persistFunctionalFeatureBatch` deberá recibir el template ya resuelto o depender del proveedor de
-Runbook. `worktreePath` continuará sirviendo para descubrir colisiones y materializar documentos,
-no para localizar el template fuente.
+La resolución debe ocurrir antes de la transacción Functional y antes de registrar la fase como
+completada.
 
-## Criterios para elegir arquitectura
+## 7.6 Contrato heredable
 
-La alternativa elegida deberá priorizar:
+FEATURE-033, FEATURE-034 y FEATURE-035 implementarán sus propios lifecycles, pero deberán resolver
+y validar el template correspondiente antes de cada transacción documental.
 
-1. determinismo;
-2. independencia del repositorio gestionado;
-3. compatibilidad con despliegue productivo;
-4. validación temprana;
-5. operación simple;
-6. cambios mínimos sobre el runtime actual;
-7. capacidad de versionar y auditar.
+## 7.7 BOOTSTRAP
+
+Development actualizará `docs/runbook/BOOTSTRAP.md` dentro de esta Feature. La documentación deberá
+reflejar el proveedor, los assets de instalación, el catálogo por funcionalidad y el mapa canónico
+de documentos.
+
+## 7.8 Observabilidad
+
+Errores y mecanismos existentes pueden incluir código, `assetRelativePath`, versión, etapa y causa
+técnica. No incluyen business cases, templates completos, contenido generado, secretos, tokens ni
+credenciales.
+
+Desarrollo, VPS y producción usan el mismo proveedor; solo cambia la ubicación física instalada.
+Esta Feature no diseña el deployment completo.
 
 ---
 
 # 8. Validation Criteria
 
-## Scenario 1 — Repositorio gestionado sin Runbook
+## Startup
 
-**Input**
+**Input:** iniciar el servidor con distintas instalaciones del Runbook.
 
-Run sobre un repositorio externo que no contiene `docs/runbook/`.
+**Expected output:**
 
-**Expected output**
+1. raíz válida y segura;
+2. `VERSION` existente, legible y soportada;
+3. catálogo obligatorio completo;
+4. todos sus assets legibles y dentro de raíz;
+5. SHA-256 calculable;
+6. startup bloqueado si falla cualquiera;
+7. archivos distribuidos pero no consumidos no bloquean startup.
 
-El runtime obtiene el template desde el Runbook instalado del Orquestador y Functional puede
-persistir el lote sin `ENOENT`.
+## Resolución
 
-## Scenario 2 — `cwd` arbitrario
+**Input:** resolver assets bajo condiciones normales y adversas.
 
-**Input**
+**Expected output:**
 
-El mismo runtime se inicia desde dos directorios de trabajo distintos.
+8. mismo resultado desde distintos `cwd`;
+9. repo gestionado sin `docs/runbook/` no afecta la lectura;
+10. archivo homónimo externo no reemplaza el asset;
+11. path absoluto rechazado;
+12. `..` rechazado;
+13. traversal codificado o normalizado rechazado;
+14. resolución final fuera de raíz rechazada;
+15. asset ilegible produce error controlado.
 
-**Expected output**
+## Operaciones documentales
 
-Resuelve exactamente la misma versión y los mismos hashes del Runbook.
+**Input:** ejecutar persistencia documental con template válido o inválido.
 
-## Scenario 3 — Asset obligatorio ausente
+**Expected output:**
 
-**Input**
+16. template de Feature validado antes de abrir la transacción Functional;
+17. fallo de template no crea Feature, revisión o artifact canónico parcial ni completa Functional;
+18. Project Brief hereda el contrato previo a transacción;
+19. Architecture hereda el contrato previo a transacción;
+20. Release Plan hereda el contrato previo a transacción;
+21. FEATURE-033, FEATURE-034 y FEATURE-035 siguen siendo responsables de implementar esos
+    lifecycles.
 
-La fuente configurada no contiene `07-FEATURE-TEMPLATE.md`.
+## Metadata
 
-**Expected output**
+**Input:** leer y usar un template distribuido.
 
-Fallo técnico controlado y temprano; no se invoca el rol dependiente ni se persiste un
-`phase_finished` engañoso.
+**Expected output:**
 
-## Scenario 4 — Hash inválido
+22. versión persistida correcta;
+23. hash correspondiente a los bytes leídos;
+24. snapshot correspondiente al template validado;
+25. lecturas sin cambios producen el mismo hash.
 
-**Input**
+## Rutas canónicas
 
-El contenido de un archivo no coincide con el manifiesto.
+**Input:** validar el destino declarado para cada documento gestionado.
 
-**Expected output**
+**Expected output:**
 
-El Runbook se rechaza y el error identifica el asset afectado sin exponer contenido.
+26. Project Brief: `docs/project/PROJECT-BRIEF.md`;
+27. Architecture y Roadmap: `docs/architecture/ARCHITECTURE.md`;
+28. Release Plan: `docs/releases/<release-key>/RELEASE-PLAN.md`;
+29. Feature: `docs/features/<feature-code>-<slug>.md`;
+30. el Roadmap no se materializa en un archivo independiente.
 
-## Scenario 5 — Versión incompatible
+Esta Parte 2 valida el mapa y la ruta de Feature existente, pero no ejecuta los lifecycles de
+Project Brief, Architecture o Release Plan.
 
-**Input**
+## Documentación
 
-Runtime y Runbook declaran versiones incompatibles.
+**Input:** documentación resultante de Development.
 
-**Expected output**
+**Expected output:**
 
-El servicio o run falla de forma explícita; no aplica fallback silencioso.
+31. `docs/runbook/BOOTSTRAP.md` actualizado;
+32. sin afirmaciones de que la ubicación del Runbook sigue pendiente;
+33. separación Orquestador/repositorio gestionado preservada.
 
-## Scenario 6 — Archivo homónimo en el repositorio gestionado
+## E2E conjunto
 
-**Input**
+**Input:** caso real controlado sobre un repositorio externo sin Runbook.
 
-El repositorio externo contiene su propio `docs/runbook/07-FEATURE-TEMPLATE.md`.
+**Expected output:**
 
-**Expected output**
-
-Ese archivo no reemplaza ni modifica el asset autoritativo del Orquestador.
-
-## Scenario 7 — Snapshot documental
-
-**Input**
-
-Functional crea una Feature usando el template activo.
-
-**Expected output**
-
-`template_version`, `template_hash` y `template_snapshot` corresponden exactamente al asset
-validado por el proveedor del Runbook.
-
-## Scenario 8 — Actualización del producto
-
-**Input**
-
-Se instala una nueva versión compatible del Runbook.
-
-**Expected output**
-
-Nuevos runs usan la versión activada; el comportamiento de runs ya fijados queda definido y es
-auditable.
-
-## Scenario 9 — Validación conjunta
-
-**Input**
-
-Caso real controlado sobre un repositorio externo.
-
-**Expected output**
-
-El E2E demuestra FEATURE-022 + FEATURE-023 Parte 1 + FEATURE-023 Parte 2: lectura universal de
-artifacts, lifecycle documental, resolución propia del Runbook, materialización, commit, push, SHA
-remoto, recuperación UI y continuidad según el modo configurado.
+34. FEATURE-022 operativa;
+35. FEATURE-023 Parte 1 operativa;
+36. FEATURE-023 Parte 2 operativa;
+37. repositorio externo sin Runbook;
+38. template leído desde la instalación;
+39. Feature materializada;
+40. artifact leído desde otro rol;
+41. commit y push;
+42. SHA remoto;
+43. recuperación UI;
+44. continuidad según modo `manual` o `auto`.
 
 ### Validation Evidence
 
-La evidencia deberá incluir:
+La evidencia combina tests unitarios de `RunbookProvider`, integración de startup y resolución,
+atomicidad documental, validación de rutas y un E2E real conjunto con un provider real.
 
-* tests unitarios del proveedor, manifiesto, hashes y compatibilidad;
-* tests de integración con `cwd` arbitrario;
-* repositorio externo sin Runbook;
-* repositorio externo con archivo homónimo malicioso o incompatible;
-* instalación o montaje equivalente al entorno productivo elegido;
-* logs de fallo temprano sin contenido sensible;
-* snapshot/version/hash persistidos en FEATURE-023 Parte 1;
-* un E2E real conjunto con un provider real.
+No se ejecutan todavía los lifecycles completos de Project Brief, Architecture o Release Plan.
 
 ---
 
 # 9. Risks
 
-## Riesgo — Acoplar la solución al checkout actual
-
-**Impacto:** funciona en desarrollo y vuelve a fallar al empaquetar o desplegar.
-
-**Mitigación requerida:** validar la alternativa elegida fuera de un checkout Git.
-
-## Riesgo — Duplicar fuentes autoritativas
-
-**Impacto:** runtime, VPS y repositorios gestionados consumen versiones diferentes.
-
-**Mitigación requerida:** una fuente primaria explícita y reglas cerradas para cualquier override.
-
-## Riesgo — Upgrade incompatible
-
-**Impacto:** una actualización del Runbook cambia contratos durante runs activos.
-
-**Mitigación requerida:** versionado, compatibilidad y semántica de pinning definidas.
-
-## Riesgo — Ampliar permisos de workers
-
-**Impacto:** agentes acceden a más filesystem del host del necesario.
-
-**Mitigación requerida:** preferir resolución e inyección desde el host confiable.
-
-## Riesgo — Confundir baseline con configuración por proyecto
-
-**Impacto:** se sobrescriben reglas globales o se pierde personalización durable.
-
-**Mitigación requerida:** modelo explícito de capas y ownership.
-
-## Riesgo — Absorber deuda no relacionada
-
-**Impacto:** la Parte 2 crece hacia deployment completo, FEATURE-028 o FEATURE-030.
-
-**Mitigación requerida:** respetar Included/Excluded y abrir decisiones separadas cuando
-corresponda.
+| Riesgo | Impacto | Mitigación |
+|---|---|---|
+| Acoplamiento al checkout | Falla al desplegar | Assets empaquetados y test con otro `cwd` |
+| Raíz controlada por input externo | Sustitución del Runbook | Configuración exclusiva de la instalación/composición |
+| Traversal | Lectura fuera del Runbook | Paths relativos y raíz cerrada |
+| Fuente externa accidental | Reglas reemplazadas por el repo gestionado | Proveedor único sin fallback |
+| Catálogo sobredimensionado | Assets futuros bloquean startup | Incluir solo funcionalidades habilitadas |
+| Persistencia parcial | Fase engañosa o Feature incompleta | Validación antes de efectos |
+| Expansión de alcance | Plataforma innecesaria | Mantener Future Ideas fuera de v1 |
+| Absorber lifecycles posteriores | Duplica FEATURE-033/034/035 | Parte 2 solo fija pertenencia y rutas |
 
 ---
 
@@ -447,53 +536,54 @@ corresponda.
 
 ## Estado
 
-**PENDIENTE**
+**APROBADO POR EL OWNER — 2026-07-28**
 
-Antes de habilitar Development deben quedar aprobados explícitamente:
+La v1 queda definida por:
 
-1. arquitectura de distribución elegida;
-2. fuente autoritativa y mecanismo de lookup;
-3. manifiesto, versión, integridad y compatibilidad;
-4. modelo baseline/configuración/artifacts por proyecto;
-5. semántica de actualización y pinning;
-6. comportamiento fail-closed;
-7. alcance exacto de la integración con FEATURE-023 Parte 1;
-8. plan de validación conjunta;
-9. nombre de la rama de implementación y checkout de origen;
-10. autorización explícita del owner.
+1. assets read-only distribuidos con el producto;
+2. raíz proveniente solo de configuración confiable;
+3. `RunbookProvider` único;
+4. versión mínima explícita;
+5. hash calculado al leer;
+6. catálogo cerrado según funcionalidades habilitadas;
+7. validación completa en startup;
+8. validación previa a toda transacción documental;
+9. fail-closed sin fallback;
+10. mapa canónico de documentos;
+11. integración concreta con Parte 1;
+12. actualización de `docs/runbook/BOOTSTRAP.md` durante Development;
+13. validación conjunta con FEATURE-022.
 
-Hasta ese momento:
+No queda una decisión arquitectónica bloqueante dentro del alcance v1. El owner autorizó
+Development sobre `codex/feature-023-runbook-runtime-part-2`, con checkout de origen `main` en
+`639426e`, y confirmó el alcance documentado.
 
-* no implementar;
-* no reanudar el E2E;
-* no aplicar cambios de DB;
-* no ampliar mounts o permisos;
-* no absorber FEATURE-028, FEATURE-030 ni Deployment Strategy completo.
+La autorización no incluye:
+
+* merge ni push de `main` antes de la validación del owner;
+* modificación de DB o Roadmap;
+* expansión hacia FEATURE-028, FEATURE-030, FEATURE-033, FEATURE-034 o FEATURE-035.
 
 ---
 
 # Design Principle
 
-Runbook propio del producto
+Runbook del Orquestador
 
 ↓
 
-Distribución y versión verificables
+Assets read-only de la instalación
 
 ↓
 
-Resolución independiente del repositorio gestionado
+`RunbookProvider`
 
 ↓
 
-Validación fail-closed
+Versión, path, lectura y SHA-256
 
 ↓
 
-Consumo por el runtime
-
-↓
-
-Evidencia conjunta
+Lifecycle documental
 
 Nunca invertir este orden.

@@ -75,6 +75,11 @@ import {
   recordFeaturePush,
 } from "../../features/lifecycle.js";
 import { sha256 } from "../../features/document.js";
+import {
+  defaultRunbookProvider,
+  FEATURE_TEMPLATE_ASSET,
+  type RunbookProvider,
+} from "../../runbook/runbookProvider.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const orchestratorRoot = path.resolve(__dirname, "..", "..", "..");
@@ -292,6 +297,8 @@ export async function executePipelineRun(params: {
    * sin ningún repoRoot compartido de por medio.
    */
   cleanupStrategy?: "shared-worktree" | "standalone-clone";
+  /** Inyectable únicamente por composición confiable/tests; nunca desde input del run. */
+  runbookProvider?: RunbookProvider;
 }): Promise<void> {
   const {
     projectRepoRoot,
@@ -304,6 +311,7 @@ export async function executePipelineRun(params: {
     cliAgentOverride,
     model,
     cleanupStrategy = "shared-worktree",
+    runbookProvider = defaultRunbookProvider,
   } = params;
   const resolveSelection = (role: AgentRole): Promise<AgentConfig> =>
     cliAgentOverride ? Promise.resolve(cliAgentOverride) : resolveAgentConfig(userId, role);
@@ -356,14 +364,25 @@ export async function executePipelineRun(params: {
       await recordRunEvent(runId, "phase_started", { agentRole: invocation.agentRole });
       const result = await executor.runPhase(invocation, { timeoutMs: timeoutForLinearPhase(phase.agentRole) });
       const durationMs = Date.now() - phaseTiming.startedAt;
+      // FEATURE-020: Planning nunca pasa; el marcador aplica a Architect/Functional acá.
+      const isPass =
+        phase.agentRole !== "planning" &&
+        result.status === "completed" &&
+        isNotApplicableOutput(result.outputArtifact);
+      // FEATURE-023 Parte 2: el template se resuelve antes de completar Functional o abrir la
+      // transacción. El repositorio gestionado nunca es fuente del Runbook.
+      const functionalBatch =
+        invocation.agentRole === "functional" && result.status === "completed" && !isPass
+          ? {
+              payload: parseFeaturesPayload(result.outputArtifact),
+              templateAsset: await runbookProvider.readText(FEATURE_TEMPLATE_ASSET),
+            }
+          : null;
       const phaseFinishedEventId = await recordRunEvent(
         runId,
         "phase_finished",
         { agentRole: invocation.agentRole, result, durationMs }
       );
-      // FEATURE-020, Regla 5/10b: Planning nunca pasa (alimenta al loop Developer↔QA, ver 6.4.a) —
-      // el marcador solo aplica a Architect/Functional acá.
-      const isPass = phase.agentRole !== "planning" && result.status === "completed" && isNotApplicableOutput(result.outputArtifact);
       const artifact = await recordArtifact({
         runId,
         phase: invocation.agentRole,
@@ -381,7 +400,7 @@ export async function executePipelineRun(params: {
         });
       }
 
-      if (invocation.agentRole === "functional" && result.status === "completed" && !isPass) {
+      if (functionalBatch) {
         const roadmap = await getCurrentProjectConfig(projectId, "release_roadmap");
         const activeRelease = activeReleaseFromRoadmap(roadmap?.value);
         if (!activeRelease) {
@@ -393,7 +412,8 @@ export async function executePipelineRun(params: {
           worktreePath: worktree.worktreePath,
           releaseKey: activeRelease.id,
           phaseFinishedEventId,
-          payload: parseFeaturesPayload(result.outputArtifact),
+          payload: functionalBatch.payload,
+          templateAsset: functionalBatch.templateAsset,
         });
       }
 
