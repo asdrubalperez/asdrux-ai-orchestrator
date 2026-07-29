@@ -2,7 +2,35 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { PhaseResult } from "../../contracts/executor.js";
 import { latestEscalationArtifact } from "../respondService.js";
-import { ramaBaseTrabajoFromBusinessCase, runDeveloperQaLoop } from "./runStart.js";
+import {
+  persistReleasePlanIfDeclared,
+  ramaBaseTrabajoFromBusinessCase,
+  runDeveloperQaLoop,
+} from "./runStart.js";
+
+test("Planning escalado no persiste RELEASE_PLAN ni exige FEATURE_UPDATE", async () => {
+  const result: PhaseResult = {
+    status: "escalated",
+    outputArtifact: {
+      releasePlan: JSON.stringify({
+        features: [{ id: "f1", nombre: "Feature vigente", estado: "En curso" }],
+        featureActualId: "f1",
+      }),
+    },
+    summary: "Planning detectó una inconsistencia y escaló.",
+    escalationReason: "El estado recibido es contradictorio.",
+  };
+
+  await assert.doesNotReject(() =>
+    persistReleasePlanIfDeclared({
+      projectId: "project-no-debe-consultarse",
+      runId: "run-escalado",
+      result,
+      fallbackRamaBaseTrabajo: "main",
+      phaseFinishedEventId: 1,
+    })
+  );
+});
 
 test("ramaBaseTrabajoFromBusinessCase lee rama_base_trabajo del business_case crudo de un run raíz", () => {
   assert.equal(ramaBaseTrabajoFromBusinessCase({ rama_base_trabajo: "release/mvp" }), "release/mvp");

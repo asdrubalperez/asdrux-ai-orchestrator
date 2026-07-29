@@ -700,13 +700,18 @@ export function ramaBaseTrabajoFromBusinessCase(value: unknown): string | undefi
  * Features, no una decisión de negocio (la única decisión gateada es el cierre del release, ver
  * `respondService.ts`).
  */
-async function persistReleasePlanIfDeclared(params: {
+export async function persistReleasePlanIfDeclared(params: {
   projectId: string;
   runId: string;
   result: PhaseResult;
   fallbackRamaBaseTrabajo: string | undefined;
   phaseFinishedEventId: string | number;
 }): Promise<void> {
+  // Un resultado escalado todavía no es una decisión documental aceptada. Debe continuar por el
+  // circuito existente de handleLinearEscalation sin persistir RELEASE_PLAN ni exigir
+  // FEATURE_UPDATE.
+  if (params.result.status !== "completed") return;
+
   const declaration = extractReleasePlanDeclaration(
     { phase: "planning" },
     { outputArtifact: params.result.outputArtifact }
