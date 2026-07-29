@@ -81,15 +81,22 @@
 - FEATURE-022 — Lectura universal de artifacts por todos los roles: todos los roles pueden
   descubrir y leer bajo demanda cualquier artifact del proyecto del run actual mediante
   `artifact_list` y `artifact_read`, con aislamiento por proyecto, acceso read-only y sin
-  acumulación automática de contexto. Implementada, validada técnicamente y publicada en
-  `codex/feature-022-artifact-read`; pendiente únicamente del merge final a `main`. Ver
+  acumulación automática de contexto. Implementada, validada técnicamente y mergeada a `main`
+  (`4e4f209`). Su validación funcional punta a punta se retomará junto con ambas partes de
+  FEATURE-023. Ver
   `docs/features/FEATURE-022-Lectura-universal-de-artifacts-por-todos-los-roles.md` y
   `docs/features/FEATURE-022-implementation-results.md`.
+- FEATURE-023 — Parte 1 — Lifecycle canónico de Features basado en
+  `docs/runbook/07-FEATURE-TEMPLATE.md`: implementación y validación automatizada completas.
+  La prueba E2E real fue suspendida por decisión del owner al detectar que el runtime intentaba
+  resolver el Runbook desde el repositorio gestionado. La validación funcional continuará después
+  de diseñar e implementar FEATURE-023 Parte 2.
 
 **🟡 Confirmado**
-- FEATURE-023 — Lifecycle canónico de Features basado en
-  `docs/playbook/07-FEATURE-TEMPLATE.md`. **P0 y siguiente Feature a diseñar e implementar**;
-  primera validación funcional punta a punta de FEATURE-022.
+- FEATURE-023 — Parte 2 — Distribución, versionado y disponibilidad del Runbook en runtime.
+  **P0 y siguiente Feature a diseñar**; debe garantizar que el Runbook sea un activo siempre
+  disponible del Orquestador, independiente del repositorio gestionado y del directorio de
+  ejecución.
 - FEATURE-024 (antes FEATURE-023, antes FEATURE-022, antes FEATURE-021, antes FEATURE-019, antes FEATURE-018, antes FEATURE-017, antes
   FEATURE-014) — Milestone 2 — Validación end-to-end con caso de negocio real
 - FEATURE-025 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
@@ -395,8 +402,7 @@ nuevo: continuación automática a Planning, "Modo Manual" renombrado, cierre de
 Architect vía humano). No se abre como Feature separada; el número se reutiliza acá.
 
 ### ✅ FEATURE-022 — Lectura universal de artifacts por todos los roles
-Implementada, validada técnicamente y publicada en `codex/feature-022-artifact-read`; pendiente
-únicamente del merge final a `main`.
+Implementada, validada técnicamente y mergeada a `main` (`4e4f209`).
 
 Todos los roles pueden descubrir y leer bajo demanda cualquier artifact del proyecto del run
 actual mediante `artifact_list` y `artifact_read`, con aislamiento por proyecto, acceso read-only
@@ -404,13 +410,16 @@ y sin acumulación automática de contexto. Diseño y contrato en
 `docs/features/FEATURE-022-Lectura-universal-de-artifacts-por-todos-los-roles.md`.
 Resultados en `docs/features/FEATURE-022-implementation-results.md`.
 
-### 🟡 FEATURE-023 — Lifecycle canónico de Features basado en el Runbook
+La próxima validación funcional punta a punta se ejecutará conjuntamente con FEATURE-023 Parte 1
+y FEATURE-023 Parte 2.
 
-**Estado:** Confirmada.
+### 🟡 FEATURE-023 — Parte 1 — Lifecycle canónico de Features basado en el Runbook
+
+**Estado:** Implementada y validada automáticamente. E2E real suspendido por decisión del owner.
 
 **Prioridad:** P0.
 
-**Orden:** siguiente Feature a diseñar e implementar.
+**Orden:** su validación continúa después de FEATURE-023 Parte 2.
 
 Debe implementar el lifecycle del documento canónico de Feature usando obligatoriamente
 `docs/playbook/07-FEATURE-TEMPLATE.md`:
@@ -426,15 +435,48 @@ Debe implementar el lifecycle del documento canónico de Feature usando obligato
 9. Después del push confirmado, la UI muestra un modal con el Markdown completo para revisión y
    copia.
 
-FEATURE-023 será la primera validación funcional punta a punta de FEATURE-022. La prueba E2E
-conjunta deberá cubrir artifacts operativos en DB, evolución del documento canónico, persistencia
-del Markdown en repo, commit y push, descubrimiento desde otro rol, lectura bajo demanda y
-continuidad real entre Features. La validación técnica aislada de FEATURE-022 ya está completa; lo
-diferido es el flujo funcional conjunto DB + archivos.
+La primera prueba E2E real detectó que el runtime buscaba
+`docs/runbook/07-FEATURE-TEMPLATE.md` dentro del repositorio gestionado. El owner suspendió las
+pruebas de esta Parte 1 hasta definir e implementar la disponibilidad propia del Runbook en
+FEATURE-023 Parte 2.
+
+La próxima prueba será conjunta para FEATURE-022, FEATURE-023 Parte 1 y FEATURE-023 Parte 2. Deberá
+cubrir artifacts operativos en DB, resolución del Runbook independiente del repositorio gestionado,
+evolución del documento canónico, persistencia del Markdown en repo, commit y push, descubrimiento
+desde otro rol, lectura bajo demanda y continuidad real entre Features.
 
 La primera implementación se centra en `07-FEATURE-TEMPLATE`. Los lifecycles de
 `01-PROJECT-BRIEF-TEMPLATE`, `02-ARCHITECTURE-TEMPLATE` y `09-RELEASE-PLAN-TEMPLATE` quedan fuera
 de su alcance inicial y registrados separadamente en FEATURE-033, FEATURE-034 y FEATURE-035.
+
+### 🟡 FEATURE-023 — Parte 2 — Distribución, versionado y disponibilidad del Runbook en runtime
+
+**Estado:** Confirmada. Diseño pendiente.
+
+**Prioridad:** P0.
+
+**Orden:** siguiente Feature a diseñar; prerequisito de la próxima validación conjunta.
+
+El Runbook es un activo propio de Asdrux AI Orchestrator. No pertenece al repositorio que el
+usuario proporciona para desarrollar su caso de negocio y no puede depender de que ese repositorio
+contenga `docs/runbook/`.
+
+Esta Parte 2 deberá definir y posteriormente implementar:
+
+1. fuente autoritativa del Runbook instalada con el producto;
+2. mecanismo de resolución independiente del `cwd` y del worktree gestionado;
+3. distribución y disponibilidad en desarrollo, VPS y futura instalación productiva;
+4. versión activa, manifiesto, integridad y compatibilidad;
+5. comportamiento fail-closed cuando el Runbook falte o sea incompatible;
+6. separación entre baseline del Orquestador, configuraciones por proyecto y documentos
+   materializados en el repositorio gestionado;
+7. estrategia de actualización del Runbook al desplegar una nueva versión del producto.
+
+El documento oficial conservará el número FEATURE-023 y expresará “Parte 2” en el título y nombre
+del archivo. No se renumeran FEATURE-024 ni las Features posteriores.
+
+Las pruebas de FEATURE-023 Parte 1 permanecen suspendidas. Al completar esta Parte 2 se ejecutará
+una validación conjunta de FEATURE-022 + FEATURE-023 Parte 1 + FEATURE-023 Parte 2.
 
 ### ✅ Feature 09 — Runbook para el Orquestador AI automático
 Diseño completo y cerrado: 12 archivos en `docs/runbook/` (equivalente al `docs/playbook/` actual
@@ -582,7 +624,7 @@ previa del pipeline, incluyendo una caché escribible y reproducible.
 
 ### 🟡 FEATURE-033 — Lifecycle de `01-PROJECT-BRIEF-TEMPLATE`
 
-**Estado:** Confirmada; posterior a FEATURE-023, prioridad por definir.
+**Estado:** Confirmada; posterior a FEATURE-023 Parte 2, prioridad por definir.
 
 Deberá definir rol creador, roles actualizadores, validación, persistencia DB, ubicación canónica
 en repo, versionado, lectura mediante FEATURE-022 y exposición en UI cuando corresponda. No se
@@ -590,7 +632,7 @@ diseña en detalle en esta actualización.
 
 ### 🟡 FEATURE-034 — Lifecycle de `02-ARCHITECTURE-TEMPLATE`
 
-**Estado:** Confirmada; posterior a FEATURE-023, prioridad por definir.
+**Estado:** Confirmada; posterior a FEATURE-023 Parte 2, prioridad por definir.
 
 Deberá definir el lifecycle del documento de arquitectura que incluye el Roadmap de Releases:
 creación, actualización, validación, persistencia DB, ubicación, versionado, lectura mediante
@@ -598,7 +640,7 @@ FEATURE-022 y exposición en UI. No se diseña en detalle en esta actualización
 
 ### 🟡 FEATURE-035 — Lifecycle de `09-RELEASE-PLAN-TEMPLATE`
 
-**Estado:** Confirmada; posterior a FEATURE-023, prioridad por definir.
+**Estado:** Confirmada; posterior a FEATURE-023 Parte 2, prioridad por definir.
 
 Deberá definir creación, actualización, validación, persistencia DB, ubicación canónica,
 versionado, lectura mediante FEATURE-022 y exposición en UI del Release Plan. No se diseña en

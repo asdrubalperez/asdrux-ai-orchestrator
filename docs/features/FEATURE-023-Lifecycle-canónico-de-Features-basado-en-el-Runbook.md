@@ -6,7 +6,8 @@
 * **Type:** Arquitectura / Workflow / Persistencia documental
 * **Owner:** Asdru — Product Owner
 * **Implementation Owner:** DAIA
-* **Status:** Diseño validado — Approval Gate aprobado; Development habilitado
+* **Status:** Implementada; pruebas E2E suspendidas por decisión del owner hasta completar
+  FEATURE-023 Parte 2
 * **Priority:** P0
 * **Playbook Mode:** Full
 * **Template de gobernanza de FEATURE-023:** `docs/playbook/07-FEATURE-TEMPLATE.md`

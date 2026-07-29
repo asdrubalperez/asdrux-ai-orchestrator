@@ -4,8 +4,8 @@ Fecha: 2026-07-28
 
 Rama: `codex/feature-023-lifecycle`
 
-Estado: implementada y validada en suites local y VPS; pendiente del E2E controlado y de la
-revisión del owner antes de cualquier merge a `main`.
+Estado: implementada y validada en suites local y VPS. La primera prueba E2E real fue suspendida
+por decisión del owner; continuará después de FEATURE-023 Parte 2.
 
 ## 1. Resultado
 
@@ -68,19 +68,29 @@ La migración se aplicó además dentro de una transacción real. Se verificaron
 restricciones e índice y luego se ejecutó `ROLLBACK`; el esquema quedó idéntico a su estado previo.
 El checkout principal y sus cambios locales en la VPS no fueron modificados.
 
-## 5. Evidencia pendiente
+## 5. E2E suspendido y validación conjunta pendiente
 
-Permanece pendiente el único E2E real con una Feature controlada y un provider real requerido por
-el documento. Ese ejercicio deberá aplicar previamente la migración en el entorno elegido y
-demostrar el circuito completo, incluido commit, push, SHA remoto, lectura por FEATURE-022,
-recuperación UI y continuidad según el modo configurado.
+La primera prueba E2E real comenzó con el run
+`f1cd4011-4c0d-4b00-be92-28c516cbd7b7`. Architect y Functional completaron, pero el
+postprocesamiento falló porque FEATURE-023 intentó leer
+`docs/runbook/07-FEATURE-TEMPLATE.md` desde el worktree de `tempo-auto-planner`.
 
-No se ejecutó este E2E durante la validación automatizada para no persistir migraciones, crear
-Features, consumir un provider ni publicar una rama de run sin separar explícitamente esa evidencia
-de la revisión técnica de la rama.
+El Runbook es un activo del Orquestador y no puede exigirse al repositorio gestionado. El owner
+suspendió las pruebas de FEATURE-023 Parte 1 y creó FEATURE-023 Parte 2 para diseñar e implementar
+su distribución, versionado y disponibilidad en runtime.
+
+Al finalizar la Parte 2 se ejecutará una única validación conjunta de:
+
+- FEATURE-022 — lectura universal de artifacts;
+- FEATURE-023 Parte 1 — lifecycle canónico de Features;
+- FEATURE-023 Parte 2 — disponibilidad propia del Runbook.
+
+La evidencia deberá demostrar el circuito completo, incluido commit, push, SHA remoto, lectura por
+FEATURE-022, recuperación UI y continuidad según el modo configurado.
 
 ## 6. Alcance preservado
 
 No se implementó lifecycle de Project Brief, Architecture o Release Plan; no se agregó backfill;
 no se creó un parser Markdown genérico; no se incorporó edición humana desde UI; no se implementó
-merge a `main`; y no se modificó ni publicó `main`.
+como capacidad del producto el merge a `main`. El merge de entrega de esta implementación fue
+autorizado separadamente por el owner.
