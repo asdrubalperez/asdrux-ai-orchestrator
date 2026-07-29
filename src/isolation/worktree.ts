@@ -35,6 +35,12 @@ export interface GitReadinessSnapshot {
   treeHash: string;
 }
 
+export interface BaseBranchSyncResult {
+  mergeSha: string;
+  remoteSha: string;
+  localBaseSha: string;
+}
+
 export async function createRunWorktree(repoRoot: string, runId: string, baseRef = "HEAD"): Promise<RunWorktree> {
   const branchName = `run/${runId}`;
   const worktreesBaseDir = process.env.WORKTREES_BASE_DIR ?? path.resolve(repoRoot, "..", "ai-orchestrator-worktrees");
@@ -201,7 +207,31 @@ export async function mergeFeatureBranchIntoBase(params: {
   repoRoot: string;
   baseBranch: string;
   featureBranch: string;
-}): Promise<void> {
+}): Promise<BaseBranchSyncResult> {
+  // La rama persistente del clon administrado es la base de la siguiente Feature. Antes de
+  // integrar, se avanza por fast-forward hasta el estado remoto vigente; después del push se
+  // vuelve a avanzar hasta el SHA publicado. Nunca se crea una continuación desde una ref local
+  // atrasada.
+  await execFileAsync(
+    "git",
+    [
+      "fetch",
+      "origin",
+      `refs/heads/${params.baseBranch}:refs/remotes/origin/${params.baseBranch}`,
+    ],
+    { cwd: params.repoRoot, env: gitNoPromptEnv() }
+  );
+  await fastForwardLocalBranch(
+    params.repoRoot,
+    params.baseBranch,
+    `refs/remotes/origin/${params.baseBranch}`
+  );
+  await assertFeatureBasedOnCurrentBase(
+    params.repoRoot,
+    params.baseBranch,
+    params.featureBranch
+  );
+
   const baseWorktreePath = path.join(
     process.env.WORKTREES_BASE_DIR ?? path.resolve(params.repoRoot, "..", "ai-orchestrator-worktrees"),
     `base-${randomUUID()}`
@@ -227,16 +257,119 @@ export async function mergeFeatureBranchIntoBase(params: {
       ],
       { cwd: baseWorktreePath, env: gitNoPromptEnv() }
     );
+    const mergeSha = (
+      await execFileAsync("git", ["rev-parse", "HEAD"], {
+        cwd: baseWorktreePath,
+        env: gitNoPromptEnv(),
+      })
+    ).stdout.trim();
     await execFileAsync("git", ["push", "origin", `HEAD:refs/heads/${params.baseBranch}`], {
       cwd: baseWorktreePath,
       env: gitNoPromptEnv(),
     });
+    const remoteSha = await remoteBranchSha({
+      branchName: params.baseBranch,
+      worktreePath: params.repoRoot,
+    });
+    if (remoteSha !== mergeSha) {
+      throw new Error(
+        `SHA remoto inesperado para ${params.baseBranch}: esperado ${mergeSha}, recibido ${remoteSha}.`
+      );
+    }
+
+    await fastForwardLocalBranch(params.repoRoot, params.baseBranch, remoteSha);
+    const localBaseSha = (
+      await execFileAsync("git", ["rev-parse", `refs/heads/${params.baseBranch}`], {
+        cwd: params.repoRoot,
+        env: gitNoPromptEnv(),
+      })
+    ).stdout.trim();
+    if (localBaseSha !== remoteSha) {
+      throw new Error(
+        `La base local ${params.baseBranch} no quedó alineada: local ${localBaseSha}, remoto ${remoteSha}.`
+      );
+    }
+    return { mergeSha, remoteSha, localBaseSha };
   } finally {
     await execFileAsync("git", ["worktree", "remove", baseWorktreePath, "--force"], {
       cwd: params.repoRoot,
       env: gitNoPromptEnv(),
     });
   }
+}
+
+async function fastForwardLocalBranch(
+  repoRoot: string,
+  branchName: string,
+  targetRef: string
+): Promise<void> {
+  const checkedOutPath = await worktreeForBranch(repoRoot, branchName);
+  if (checkedOutPath) {
+    const status = await execFileAsync("git", ["status", "--porcelain"], {
+      cwd: checkedOutPath,
+      env: gitNoPromptEnv(),
+    });
+    if (status.stdout.trim()) {
+      throw new Error(
+        `No se puede actualizar la base local ${branchName}: su worktree tiene cambios locales.`
+      );
+    }
+    await execFileAsync("git", ["merge", "--ff-only", targetRef], {
+      cwd: checkedOutPath,
+      env: gitNoPromptEnv(),
+    });
+    return;
+  }
+
+  await execFileAsync("git", ["merge-base", "--is-ancestor", branchName, targetRef], {
+    cwd: repoRoot,
+    env: gitNoPromptEnv(),
+  });
+  await execFileAsync("git", ["branch", "-f", branchName, targetRef], {
+    cwd: repoRoot,
+    env: gitNoPromptEnv(),
+  });
+}
+
+async function assertFeatureBasedOnCurrentBase(
+  repoRoot: string,
+  baseBranch: string,
+  featureBranch: string
+): Promise<void> {
+  const [base, commonBase] = await Promise.all([
+    execFileAsync("git", ["rev-parse", `refs/heads/${baseBranch}`], {
+      cwd: repoRoot,
+      env: gitNoPromptEnv(),
+    }),
+    execFileAsync("git", ["merge-base", baseBranch, featureBranch], {
+      cwd: repoRoot,
+      env: gitNoPromptEnv(),
+    }),
+  ]);
+  const baseSha = base.stdout.trim();
+  const commonBaseSha = commonBase.stdout.trim();
+  if (baseSha !== commonBaseSha) {
+    throw new Error(
+      `La rama base ${baseBranch} avanzó desde que comenzó ${featureBranch}; ` +
+        "se requiere integrar la base actual y repetir build/QA antes del merge."
+    );
+  }
+}
+
+async function worktreeForBranch(repoRoot: string, branchName: string): Promise<string | null> {
+  const result = await execFileAsync("git", ["worktree", "list", "--porcelain", "-z"], {
+    cwd: repoRoot,
+    env: gitNoPromptEnv(),
+  });
+  let currentWorktree: string | null = null;
+  for (const field of result.stdout.split("\0")) {
+    if (field.startsWith("worktree ")) {
+      currentWorktree = field.slice("worktree ".length);
+      continue;
+    }
+    if (field === `branch refs/heads/${branchName}`) return currentWorktree;
+  }
+  return null;
 }
 
 export async function assertRunWorktreeAvailable(repoRoot: string, worktree: RunWorktree): Promise<void> {

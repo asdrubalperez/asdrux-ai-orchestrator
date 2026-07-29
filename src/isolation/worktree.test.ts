@@ -119,7 +119,7 @@ test("mergeFeatureBranchIntoBase mergea y pushea usando el worktree de la Featur
 
     // El punto central del arreglo: `repoRoot` es el worktree de la Feature ya aprobada, no
     // `rootClonePath` ni ninguna URL — y el merge no revienta aunque "main" siga checked out ahí.
-    await mergeFeatureBranchIntoBase({
+    const merged = await mergeFeatureBranchIntoBase({
       repoRoot: featureWorktree.worktreePath,
       baseBranch: "main",
       featureBranch: featureWorktree.branchName,
@@ -129,6 +129,145 @@ test("mergeFeatureBranchIntoBase mergea y pushea usando el worktree de la Featur
     await execFileAsync("git", ["clone", originPath, verifyClone]);
     const content = await fs.readFile(path.join(verifyClone, "feature.txt"), "utf8");
     assert.equal(content.replace(/\r\n/g, "\n"), "contenido de la feature\n");
+    const localBase = await execFileAsync("git", ["rev-parse", "main"], { cwd: rootClonePath });
+    assert.equal(localBase.stdout.trim(), merged.remoteSha);
+    assert.equal(merged.localBaseSha, merged.remoteSha);
+  } finally {
+    if (originalWorktreesBaseDir === undefined) delete process.env.WORKTREES_BASE_DIR;
+    else process.env.WORKTREES_BASE_DIR = originalWorktreesBaseDir;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("cada Feature siguiente nace desde la base local sincronizada con el merge remoto anterior", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "worktree-sequential-features-"));
+  const originPath = path.join(tmp, "origin.git");
+  const rootClonePath = path.join(tmp, "root-clone");
+  const originalWorktreesBaseDir = process.env.WORKTREES_BASE_DIR;
+  process.env.WORKTREES_BASE_DIR = path.join(tmp, "worktrees");
+
+  try {
+    await execFileAsync("git", ["init", "--bare", "-b", "main", originPath]);
+    await execFileAsync("git", ["clone", originPath, rootClonePath]);
+    await fs.writeFile(path.join(rootClonePath, "README.md"), "base\n");
+    await execFileAsync("git", ["add", "-A"], { cwd: rootClonePath });
+    await execFileAsync("git", [...GIT_IDENTITY, "commit", "-m", "chore: initial"], {
+      cwd: rootClonePath,
+    });
+    await execFileAsync("git", ["push", "origin", "main"], { cwd: rootClonePath });
+    await execFileAsync("git", ["checkout", "-b", "run/root"], { cwd: rootClonePath });
+
+    const featureOne = await createRunWorktree(rootClonePath, "sequential-1", "main");
+    await fs.writeFile(path.join(featureOne.worktreePath, "feature-one.txt"), "uno\n");
+    await execFileAsync("git", ["add", "-A"], { cwd: featureOne.worktreePath });
+    await execFileAsync("git", [...GIT_IDENTITY, "commit", "-m", "feat: one"], {
+      cwd: featureOne.worktreePath,
+    });
+    await execFileAsync("git", ["push", "origin", featureOne.branchName], {
+      cwd: featureOne.worktreePath,
+    });
+    const firstMerge = await mergeFeatureBranchIntoBase({
+      repoRoot: featureOne.worktreePath,
+      baseBranch: "main",
+      featureBranch: featureOne.branchName,
+    });
+
+    const featureTwo = await createRunWorktree(rootClonePath, "sequential-2", "main");
+    const featureTwoBase = await execFileAsync("git", ["rev-parse", "HEAD"], {
+      cwd: featureTwo.worktreePath,
+    });
+    assert.equal(featureTwoBase.stdout.trim(), firstMerge.remoteSha);
+
+    await fs.writeFile(path.join(featureTwo.worktreePath, "feature-two.txt"), "dos\n");
+    await execFileAsync("git", ["add", "-A"], { cwd: featureTwo.worktreePath });
+    await execFileAsync("git", [...GIT_IDENTITY, "commit", "-m", "feat: two"], {
+      cwd: featureTwo.worktreePath,
+    });
+    await execFileAsync("git", ["push", "origin", featureTwo.branchName], {
+      cwd: featureTwo.worktreePath,
+    });
+    const secondMerge = await mergeFeatureBranchIntoBase({
+      repoRoot: featureTwo.worktreePath,
+      baseBranch: "main",
+      featureBranch: featureTwo.branchName,
+    });
+
+    const verifyClone = path.join(tmp, "verify");
+    await execFileAsync("git", ["clone", originPath, verifyClone]);
+    assert.equal(
+      (await fs.readFile(path.join(verifyClone, "feature-one.txt"), "utf8")).replace(/\r\n/g, "\n"),
+      "uno\n"
+    );
+    assert.equal(
+      (await fs.readFile(path.join(verifyClone, "feature-two.txt"), "utf8")).replace(/\r\n/g, "\n"),
+      "dos\n"
+    );
+    const localBase = await execFileAsync("git", ["rev-parse", "main"], { cwd: rootClonePath });
+    assert.equal(localBase.stdout.trim(), secondMerge.remoteSha);
+  } finally {
+    if (originalWorktreesBaseDir === undefined) delete process.env.WORKTREES_BASE_DIR;
+    else process.env.WORKTREES_BASE_DIR = originalWorktreesBaseDir;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// La sincronización preventiva no autoriza integrar silenciosamente una base que avanzó durante
+// Development: actualiza la única base local, pero exige nueva integración y validación.
+test("si origin/base avanzó durante una Feature, sincroniza la base local y rechaza el merge antes del push", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "worktree-base-advanced-"));
+  const originPath = path.join(tmp, "origin.git");
+  const rootClonePath = path.join(tmp, "root-clone");
+  const externalClonePath = path.join(tmp, "external-clone");
+  const originalWorktreesBaseDir = process.env.WORKTREES_BASE_DIR;
+  process.env.WORKTREES_BASE_DIR = path.join(tmp, "worktrees");
+
+  try {
+    await execFileAsync("git", ["init", "--bare", "-b", "main", originPath]);
+    await execFileAsync("git", ["clone", originPath, rootClonePath]);
+    await fs.writeFile(path.join(rootClonePath, "README.md"), "base\n");
+    await execFileAsync("git", ["add", "-A"], { cwd: rootClonePath });
+    await execFileAsync("git", [...GIT_IDENTITY, "commit", "-m", "chore: initial"], {
+      cwd: rootClonePath,
+    });
+    await execFileAsync("git", ["push", "origin", "main"], { cwd: rootClonePath });
+
+    const feature = await createRunWorktree(rootClonePath, "base-advanced", "main");
+    await fs.writeFile(path.join(feature.worktreePath, "feature.txt"), "feature\n");
+    await execFileAsync("git", ["add", "-A"], { cwd: feature.worktreePath });
+    await execFileAsync("git", [...GIT_IDENTITY, "commit", "-m", "feat: stale feature"], {
+      cwd: feature.worktreePath,
+    });
+    await execFileAsync("git", ["push", "origin", feature.branchName], {
+      cwd: feature.worktreePath,
+    });
+
+    await execFileAsync("git", ["clone", originPath, externalClonePath]);
+    await fs.writeFile(path.join(externalClonePath, "external.txt"), "avance externo\n");
+    await execFileAsync("git", ["add", "-A"], { cwd: externalClonePath });
+    await execFileAsync("git", [...GIT_IDENTITY, "commit", "-m", "feat: external advance"], {
+      cwd: externalClonePath,
+    });
+    await execFileAsync("git", ["push", "origin", "main"], { cwd: externalClonePath });
+    const remoteBefore = await execFileAsync("git", ["rev-parse", "HEAD"], {
+      cwd: externalClonePath,
+    });
+
+    await assert.rejects(
+      () =>
+        mergeFeatureBranchIntoBase({
+          repoRoot: feature.worktreePath,
+          baseBranch: "main",
+          featureBranch: feature.branchName,
+        }),
+      /avanzó desde que comenzó.*repetir build\/QA/
+    );
+
+    const localBase = await execFileAsync("git", ["rev-parse", "main"], { cwd: rootClonePath });
+    assert.equal(localBase.stdout.trim(), remoteBefore.stdout.trim());
+    const remoteAfter = await execFileAsync("git", ["ls-remote", "--heads", "origin", "main"], {
+      cwd: rootClonePath,
+    });
+    assert.equal(remoteAfter.stdout.trim().split(/\s+/)[0], remoteBefore.stdout.trim());
   } finally {
     if (originalWorktreesBaseDir === undefined) delete process.env.WORKTREES_BASE_DIR;
     else process.env.WORKTREES_BASE_DIR = originalWorktreesBaseDir;
@@ -137,16 +276,8 @@ test("mergeFeatureBranchIntoBase mergea y pushea usando el worktree de la Featur
 });
 
 /**
- * fix/merge-approval-atomicity: hallazgo real en producción — `respondMergeApproval`
- * (`respondService.ts`) marcaba el run como "resolved" en su propia transacción ANTES de intentar
- * este merge; si el merge fallaba, el run quedaba "resolved" para siempre sin que el merge hubiera
- * ocurrido realmente, sin ningún rastro de error. El fix reordena para que el merge corra primero
- * — pero esa garantía solo vale si `mergeFeatureBranchIntoBase` efectivamente **lanza** ante un
- * fallo real, en vez de colgarse o resolver en silencio. No hay DB en esta suite de tests (mismo
- * comentario que el test de arriba), así que no se puede verificar acá que el run permanezca
- * "escalated" — este test verifica la precondición de la que depende ese fix: un fallo de merge
- * real (rama de Feature inexistente) se propaga como una excepción real y rápida, nunca en
- * silencio ni colgado.
+ * fix/merge-approval-atomicity: un fallo real debe propagarse antes de que respondService marque
+ * el run como resolved. Este test conserva esa precondición sin depender de PostgreSQL.
  */
 test("mergeFeatureBranchIntoBase lanza una excepción real cuando la rama de la Feature no existe (precondición del fix de atomicidad de aprobación de merge)", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "worktree-merge-fail-"));
