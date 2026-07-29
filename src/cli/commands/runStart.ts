@@ -42,7 +42,7 @@ import {
 } from "../../db/repository.js";
 import { pool } from "../../db/pool.js";
 import type { AgentRole, PhaseInvocation, PhaseResult } from "../../contracts/executor.js";
-import { PIPELINES, PLANNING_TO_QA, SINGLE_PHASE_ARCHITECT } from "../../pipelines/definitions.js";
+import { FULL_PIPELINE, PIPELINES, PLANNING_TO_QA, SINGLE_PHASE_ARCHITECT } from "../../pipelines/definitions.js";
 import type { PipelineSpec } from "../../pipelines/definitions.js";
 import { extractTestCommand } from "../../pipelines/extractTestCommand.js";
 import { TestExecutor, parseTestCommand } from "../../testing/testExecutor.js";
@@ -51,10 +51,14 @@ import {
   activeReleaseFromRoadmap,
   artifactsAreEquivalent,
   buildEscalationContext,
+  buildReentryContext,
+  classifyGateEscalation,
   extractReleasePlanDeclaration,
+  isFeatureContinuationContext,
   isNotApplicableOutput,
   isReentryContext,
   type MergeApprovalPayload,
+  type ReentryContext,
 } from "../escalation.js";
 import {
   parseDeveloperImplementation,
@@ -432,6 +436,26 @@ export async function executePipelineRun(params: {
       }
 
       if (result.status === "escalated") {
+        // Corrección del runtime de circuitos: roadmap_approval (Architect) y release_completion
+        // (Planning declarando RELEASE_COMPLETO) son decisiones de gobernanza esperadas — Approval
+        // Gates, no errores reintentables. Antes de esta clasificación, ambas entraban primero a
+        // handleLinearEscalation y podían reintentarse automáticamente (hasta 3 veces) antes de
+        // mostrarse al humano.
+        const gateKind = classifyGateEscalation(invocation.agentRole, result.outputArtifact);
+        if (gateKind) {
+          await recordRunEvent(runId, "escalation_gate_recognized", {
+            agentRole: invocation.agentRole,
+            artifactId: artifact.id,
+            gate: gateKind,
+          });
+          console.log(
+            `[run:start] fase "${phase.agentRole}" abrió un Approval Gate (${gateKind}) — pipeline detenido para aprobación humana.`
+          );
+          await finishRun(projectRepoRoot, runId, worktree, result, { pushAndClean: false, cleanupStrategy });
+          return;
+        }
+
+        const pipelineHasArchitect = pipelineSpec.definition.phases.some((p) => p.agentRole === "architect");
         const decision = await handleLinearEscalation({
           runId,
           worktree,
@@ -440,14 +464,58 @@ export async function executePipelineRun(params: {
           artifact,
           escalationAttemptsByRole,
           previousEscalationArtifactByRole,
+          pipelineHasArchitect,
         });
 
-        if (decision.retry) {
+        if (decision.kind === "retry-in-place") {
           retrying = true;
           contextForNextPhase = decision.context;
           previousResult = null;
           phaseIndex = 0;
           continue;
+        }
+
+        if (decision.kind === "retry-cross-pipeline") {
+          // Corrección del runtime de circuitos: el pipeline en curso (ej. PLANNING_TO_QA,
+          // Circuito 2/3) no incluye a Architect — reiniciar phaseIndex=0 acá reintentaría el
+          // propio rol que escaló, nunca llegaría a Architect. En vez de eso, este run se resuelve
+          // y se crea/ejecuta automáticamente (sin esperar humano) un run FULL_PIPELINE que
+          // arranca en Architect con el mismo ReentryContext que usa el reingreso humano.
+          await updateRunStatus(runId, "resolved");
+          const releasePlanConfig = await getCurrentProjectConfig(projectId, "release_plan");
+          const ramaBaseTrabajo = (releasePlanConfig?.value as { ramaBaseTrabajo?: unknown } | undefined)
+            ?.ramaBaseTrabajo;
+          if (typeof ramaBaseTrabajo !== "string") {
+            throw new Error(
+              `Run ${runId}: no se puede cruzar a Architect sin ramaBaseTrabajo persistida en release_plan.`
+            );
+          }
+          console.log(
+            `[run:start] fase "${phase.agentRole}" no puede volver a Architect dentro de este pipeline — creando run de reingreso automático.`
+          );
+          const { childRunId, childWorktree } = await createArchitectReentryChildRun({
+            repoRoot: worktree.worktreePath,
+            parentRunId: runId,
+            projectId,
+            baseBranch: ramaBaseTrabajo,
+            userId,
+            cliAgentOverride,
+            model,
+          });
+          console.log(`[run:start] run de reingreso a Architect creado: ${childRunId}.`);
+          await executePipelineRun({
+            projectRepoRoot: childWorktree.worktreePath,
+            runId: childRunId,
+            projectId,
+            worktree: childWorktree,
+            pipelineSpec: FULL_PIPELINE,
+            initialContext: decision.reentryContext,
+            userId,
+            cliAgentOverride,
+            model,
+            cleanupStrategy,
+          });
+          return;
         }
 
         console.log(`[run:start] fase "${phase.agentRole}" terminó con status "${result.status}" — pipeline detenido.`);
@@ -548,6 +616,27 @@ export async function executePipelineRun(params: {
   }
 }
 
+export type LinearEscalationDecisionKind = "retry-in-place" | "retry-cross-pipeline" | "stop";
+
+/**
+ * Corrección del runtime de circuitos: núcleo de decisión sin efectos (sin DB/git), separado para
+ * poder testearlo directamente. `pipelineHasArchitect` es falso para pipelines de Circuito 2/3
+ * (ej. PLANNING_TO_QA) — ahí reiniciar `phaseIndex=0` del pipeline en curso reintentaría el mismo
+ * rol que escaló, nunca llegaría a Architect (Architect no es una fase de ese pipeline). En ese
+ * caso, mientras no se repita el contenido ni se agoten los intentos, la decisión es cruzar de
+ * pipeline en vez de reintentar en el lugar.
+ */
+export function decideLinearEscalationKind(params: {
+  isRepeated: boolean;
+  attempt: number;
+  maxAttempts: number;
+  pipelineHasArchitect: boolean;
+}): LinearEscalationDecisionKind {
+  if (params.isRepeated) return "stop";
+  if (params.attempt >= params.maxAttempts) return "stop";
+  return params.pipelineHasArchitect ? "retry-in-place" : "retry-cross-pipeline";
+}
+
 async function handleLinearEscalation(params: {
   runId: string;
   worktree: RunWorktree;
@@ -556,7 +645,12 @@ async function handleLinearEscalation(params: {
   artifact: ArtifactRow;
   escalationAttemptsByRole: Map<AgentRole, number>;
   previousEscalationArtifactByRole: Map<AgentRole, ArtifactRow>;
-}): Promise<{ retry: true; context: unknown } | { retry: false }> {
+  pipelineHasArchitect: boolean;
+}): Promise<
+  | { kind: "retry-in-place"; context: unknown }
+  | { kind: "retry-cross-pipeline"; reentryContext: ReentryContext }
+  | { kind: "stop" }
+> {
   const attempt = (params.escalationAttemptsByRole.get(params.agentRole) ?? 0) + 1;
   params.escalationAttemptsByRole.set(params.agentRole, attempt);
 
@@ -568,28 +662,54 @@ async function handleLinearEscalation(params: {
 
   const previousArtifact = params.previousEscalationArtifactByRole.get(params.agentRole);
   params.previousEscalationArtifactByRole.set(params.agentRole, params.artifact);
+  const isRepeated = Boolean(
+    previousArtifact && artifactsAreEquivalent(outputArtifactOf(previousArtifact), params.result.outputArtifact)
+  );
 
-  if (previousArtifact && artifactsAreEquivalent(outputArtifactOf(previousArtifact), params.result.outputArtifact)) {
-    await recordRunEvent(params.runId, "escalation_repeated_detected", {
-      agentRole: params.agentRole,
-      artifactId: params.artifact.id,
-      previousArtifactId: previousArtifact.id,
-    });
+  const kind = decideLinearEscalationKind({
+    isRepeated,
+    attempt,
+    maxAttempts: MAX_ESCALATION_ATTEMPTS,
+    pipelineHasArchitect: params.pipelineHasArchitect,
+  });
+
+  if (kind === "stop") {
+    await recordRunEvent(
+      params.runId,
+      isRepeated ? "escalation_repeated_detected" : "escalation_exhausted",
+      isRepeated
+        ? { agentRole: params.agentRole, artifactId: params.artifact.id, previousArtifactId: previousArtifact!.id }
+        : { agentRole: params.agentRole, attempts: attempt }
+    );
     await commitAllChanges(params.worktree, `chore: preserve escalated work (run ${params.runId})`);
-    return { retry: false };
+    return { kind: "stop" };
   }
 
-  if (attempt >= MAX_ESCALATION_ATTEMPTS) {
-    await recordRunEvent(params.runId, "escalation_exhausted", { agentRole: params.agentRole, attempts: attempt });
-    await commitAllChanges(params.worktree, `chore: preserve escalated work (run ${params.runId})`);
-    return { retry: false };
+  const businessCase = await getBusinessCaseForRun(params.runId);
+
+  if (kind === "retry-cross-pipeline") {
+    const reentryContext = buildReentryContext({
+      businessCase,
+      escalationReason: params.result.escalationReason,
+      rejectedArtifact: params.result.outputArtifact,
+      originAgentRole: params.agentRole,
+      humanSolution: null,
+      attempt,
+      originalVersionRef: params.artifact.id,
+    });
+    await recordRunEvent(params.runId, "escalation_cross_pipeline_reentry_prepared", {
+      agentRole: params.agentRole,
+      attempt,
+      context: reentryContext,
+    });
+    return { kind: "retry-cross-pipeline", reentryContext };
   }
 
   // FEATURE-020, Regla 2/9: se corrige acá el bug original de FEATURE-019 — el contexto de
   // reintento ahora incluye el `business_case` real (vía `root_run_id`), sin cambiar el resto del
   // mecanismo (sigue siendo un reinicio en el mismo run, gratis, sin worktree/rama nueva).
   const context = buildEscalationContext({
-    businessCase: await getBusinessCaseForRun(params.runId),
+    businessCase,
     escalationReason: params.result.escalationReason,
     rejectedArtifact: params.result.outputArtifact,
     originAgentRole: params.agentRole,
@@ -601,10 +721,7 @@ async function handleLinearEscalation(params: {
     context,
   });
   await updateRunStatus(params.runId, "retrying");
-  return {
-    retry: true,
-    context,
-  };
+  return { kind: "retry-in-place", context };
 }
 
 function artifactContentForResult(result: PhaseResult): Record<string, unknown> {
@@ -651,11 +768,27 @@ export async function persistLoopExhaustionArtifact(
  * FEATURE-020, sección 6.2/Corrección 2: además del Roadmap activo, toda invocación de Planning
  * recibe también el Release Plan vigente (`release_plan`), no solo en el uso interno del merge.
  * Si el contexto entrante es un contexto de reingreso (Regla 11/12 — Architect/Functional ya
- * pasaron, o Planning es el `targetAgentRole`), no se envuelve dentro de `functionalArtifact`: se
- * le agrega `activeRelease`/`releasePlan` al lado, preservando su forma (`escalationReason`,
- * `targetAgentRole`, etc.) intacta. El flujo normal (`functionalArtifact` real de Functional, o
- * `{ featureJustCompleted }` de una continuación de FEATURE-019) sigue envuelto como siempre.
+ * pasaron, o Planning es el `targetAgentRole`) o una continuación natural de Feature
+ * (`{ featureJustCompleted }`, FEATURE-019), no se envuelve dentro de `functionalArtifact`: se le
+ * agrega `activeRelease`/`releasePlan` al lado, preservando su forma raíz intacta. Solo un
+ * artifact real de Functional se envuelve en `functionalArtifact`.
+ *
+ * Corrección del runtime de circuitos (triangulación 2026-07-29): antes de este fix,
+ * `{ featureJustCompleted }` no era reconocido acá (no es un `ReentryContext` — no tiene
+ * `escalationReason`/`targetAgentRole`) y terminaba envuelto como
+ * `{ functionalArtifact: { featureJustCompleted } } }`, violando la Regla 5 de `planning.txt`, que
+ * exige `featureJustCompleted` a nivel raíz para reconocer una invocación de continuación. Ver
+ * `isFeatureContinuationContext` en `escalation.ts`.
  */
+export function shapeRoleContext(
+  incomingContext: unknown,
+  shared: { activeRelease: unknown; releasePlan: unknown }
+): unknown {
+  return isReentryContext(incomingContext) || isFeatureContinuationContext(incomingContext)
+    ? { ...incomingContext, ...shared }
+    : { functionalArtifact: incomingContext, ...shared };
+}
+
 async function withRoleContext(projectId: string, incomingContext: unknown): Promise<unknown> {
   const roadmap = await getCurrentProjectConfig(projectId, "release_roadmap");
   const releasePlan = await getCurrentProjectConfig(projectId, "release_plan");
@@ -663,9 +796,7 @@ async function withRoleContext(projectId: string, incomingContext: unknown): Pro
     activeRelease: activeReleaseFromRoadmap(roadmap?.value ?? null),
     releasePlan: releasePlan?.value ?? null,
   };
-  return isReentryContext(incomingContext)
-    ? { ...incomingContext, ...shared }
-    : { functionalArtifact: incomingContext, ...shared };
+  return shapeRoleContext(incomingContext, shared);
 }
 
 /**
@@ -992,6 +1123,74 @@ export async function createPlanningToQaChildRun(params: {
         authMode: firstPhaseSelection.authMode,
         model: params.model ?? null,
         pipeline: `${PLANNING_TO_QA.name}@${PLANNING_TO_QA.version}`,
+        projectId: params.projectId,
+        repoPath: childWorktree.worktreePath,
+        originatedFromRunId: params.parentRunId,
+        baseCommitSha,
+      },
+      client
+    );
+    await client.query("commit");
+  } catch (err) {
+    await client.query("rollback");
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  return { childRunId, childWorktree };
+}
+
+/**
+ * Corrección del runtime de circuitos: crea el run hijo `FULL_PIPELINE` que arranca en Architect
+ * para un reingreso automático (sin esperar humano) — usado cuando `handleLinearEscalation`
+ * necesita "volver a Architect" pero el pipeline en curso (ej. `PLANNING_TO_QA`, Circuito 2/3) no
+ * incluye esa fase. Architect (y luego Functional, si corresponde) ve el `ReentryContext` y decide
+ * si la escalación es suya, la deja pasar (`notApplicable`) hacia el rol real
+ * (`targetAgentRole`/`predecessorRoleFor`), o la atiende directamente — mismo mecanismo que ya usa
+ * `respondService.ts` para el reingreso humano, aplicado acá sin intervención humana.
+ */
+export async function createArchitectReentryChildRun(params: {
+  repoRoot: string;
+  parentRunId: string;
+  projectId: string;
+  baseBranch: string;
+  userId: string;
+  cliAgentOverride: AgentConfig | null;
+  model?: string;
+}): Promise<{ childRunId: string; childWorktree: RunWorktree }> {
+  const childRunId = randomUUID();
+  const pipelineDefinition = await ensurePipelineDefinition(FULL_PIPELINE);
+  const childWorktree = await createRunWorktree(params.repoRoot, childRunId, params.baseBranch);
+  const baseCommitSha = await headSha(childWorktree);
+  const firstPhaseSelection: AgentConfig =
+    params.cliAgentOverride ?? (await resolveAgentConfig(params.userId, "architect"));
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await createRun({
+      id: childRunId,
+      pipelineDefinitionId: pipelineDefinition.id,
+      ownerId: params.userId,
+      projectId: params.projectId,
+      firstPhase: "architect",
+      branchName: childWorktree.branchName,
+      worktreePath: childWorktree.worktreePath,
+      originatedFromRunId: params.parentRunId,
+      client,
+    });
+    await recordRunConfigVersions(childRunId, client);
+    await recordRunEvent(
+      childRunId,
+      "run_started",
+      {
+        branchName: childWorktree.branchName,
+        worktreePath: childWorktree.worktreePath,
+        provider: firstPhaseSelection.executorProvider,
+        authMode: firstPhaseSelection.authMode,
+        model: params.model ?? null,
+        pipeline: `${FULL_PIPELINE.name}@${FULL_PIPELINE.version}`,
         projectId: params.projectId,
         repoPath: childWorktree.worktreePath,
         originatedFromRunId: params.parentRunId,

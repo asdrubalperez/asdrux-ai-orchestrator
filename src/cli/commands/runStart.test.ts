@@ -3,9 +3,11 @@ import test from "node:test";
 import type { PhaseResult } from "../../contracts/executor.js";
 import { latestEscalationArtifact } from "../respondService.js";
 import {
+  decideLinearEscalationKind,
   persistReleasePlanIfDeclared,
   ramaBaseTrabajoFromBusinessCase,
   runDeveloperQaLoop,
+  shapeRoleContext,
 } from "./runStart.js";
 
 test("Planning escalado no persiste RELEASE_PLAN ni exige FEATURE_UPDATE", async () => {
@@ -270,6 +272,59 @@ test("FEATURE-023: QA factual pasado requiere readiness estable de Developer ant
     "qa-result",
     "developer-readiness",
   ]);
+});
+
+// Corrección del runtime de circuitos (triangulación 2026-07-29)
+
+const SHARED = { activeRelease: { id: "r1", nombre: "MVP", alcanceResumen: "x", estado: "Activo" }, releasePlan: null };
+
+test("shapeRoleContext NO envuelve { featureJustCompleted } en functionalArtifact (bug confirmado)", () => {
+  const shaped = shapeRoleContext({ featureJustCompleted: "f1" }, SHARED) as Record<string, unknown>;
+  assert.equal(shaped.featureJustCompleted, "f1");
+  assert.equal("functionalArtifact" in shaped, false);
+  assert.deepEqual(shaped.activeRelease, SHARED.activeRelease);
+});
+
+test("shapeRoleContext NO envuelve un ReentryContext, preserva su forma", () => {
+  const reentry = { escalationReason: "x", targetAgentRole: "planning", rejectedArtifact: null };
+  const shaped = shapeRoleContext(reentry, SHARED) as Record<string, unknown>;
+  assert.equal(shaped.escalationReason, "x");
+  assert.equal(shaped.targetAgentRole, "planning");
+  assert.equal("functionalArtifact" in shaped, false);
+});
+
+test("shapeRoleContext SÍ envuelve un artifact real de Functional en functionalArtifact", () => {
+  const functionalOutput = { features: [{ id: "f1", nombre: "x", resumen: "y", prioridad: "P0" }] };
+  const shaped = shapeRoleContext(functionalOutput, SHARED) as Record<string, unknown>;
+  assert.deepEqual(shaped.functionalArtifact, functionalOutput);
+});
+
+test("decideLinearEscalationKind reintenta en el lugar cuando el pipeline incluye Architect", () => {
+  assert.equal(
+    decideLinearEscalationKind({ isRepeated: false, attempt: 1, maxAttempts: 3, pipelineHasArchitect: true }),
+    "retry-in-place"
+  );
+});
+
+test("decideLinearEscalationKind cruza de pipeline cuando Architect no está disponible", () => {
+  assert.equal(
+    decideLinearEscalationKind({ isRepeated: false, attempt: 1, maxAttempts: 3, pipelineHasArchitect: false }),
+    "retry-cross-pipeline"
+  );
+});
+
+test("decideLinearEscalationKind detiene por contenido repetido, incluso sin Architect en el pipeline", () => {
+  assert.equal(
+    decideLinearEscalationKind({ isRepeated: true, attempt: 1, maxAttempts: 3, pipelineHasArchitect: false }),
+    "stop"
+  );
+});
+
+test("decideLinearEscalationKind detiene al agotar intentos, incluso con Architect disponible", () => {
+  assert.equal(
+    decideLinearEscalationKind({ isRepeated: false, attempt: 3, maxAttempts: 3, pipelineHasArchitect: true }),
+    "stop"
+  );
 });
 
 function planningResult(): PhaseResult {

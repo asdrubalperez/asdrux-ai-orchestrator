@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractRoadmapApproval, findOriginatingReentryContext, previousAttemptFromEvents } from "./respondService.js";
+import { findOriginatingReentryContext, previousAttemptFromEvents } from "./respondService.js";
+import { extractRoadmapApproval } from "./escalation.js";
 
 const VALID_ROADMAP = {
   releases: [{ id: "r1", nombre: "MVP", alcanceResumen: "Alcance mínimo.", estado: "Activo" }],

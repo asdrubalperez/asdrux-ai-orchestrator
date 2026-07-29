@@ -24,6 +24,7 @@ import {
   artifactsAreEquivalent,
   buildReentryContext,
   extractMergeApproval,
+  extractRoadmapApproval,
   isAgentRole,
   isReentryContext,
   isReleaseCompletionEscalation,
@@ -450,34 +451,6 @@ function escalationArtifactContent(artifact: { id: string; content: unknown }): 
     outputArtifact: content.outputArtifact,
     escalationReason: typeof content.escalationReason === "string" ? content.escalationReason : null,
   };
-}
-
-/**
- * FEATURE-018, sección 7.2: distingue una escalación de "aprobación de roadmap" de una escalación
- * genérica sin campo/tipo de acción nuevo — solo Architect declara ROADMAP, y solo lo declara con
- * contenido cuando completó su análisis (nunca junto con una ambigüedad genérica sin resolver, por
- * construcción del contrato de architect.txt). Devuelve null tanto si no aplica (rol distinto,
- * ROADMAP ausente) como si el contenido no es JSON válido con la forma esperada — mismo tratamiento
- * que "sin roadmap", riesgo aceptado de H12 (ver 7.5 del documento de la Feature).
- */
-export function extractRoadmapApproval(
-  artifact: { phase: AgentRole },
-  content: { outputArtifact: unknown }
-): RoadmapApprovalPayload | null {
-  if (artifact.phase !== "architect") return null;
-  if (content.outputArtifact === null || typeof content.outputArtifact !== "object") return null;
-
-  const raw = (content.outputArtifact as { roadmap?: unknown }).roadmap;
-  if (typeof raw !== "string") return null;
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-
-  return isRoadmapApprovalPayload(parsed) ? parsed : null;
 }
 
 function buildRoadmapApprovalHumanSolution(rawSolution: string): string {
