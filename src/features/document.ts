@@ -6,9 +6,40 @@ import type {
   FunctionalFeature,
   QaResultPayload,
 } from "./contracts.js";
+import type { RunbookTextAsset } from "../runbook/runbookProvider.js";
 
 export const FEATURE_TEMPLATE_KEY = "runbook-feature";
 export const FEATURE_TEMPLATE_VERSION = "v1.0";
+
+const FEATURE_DESCRIPTOR_SECTIONS = Object.freeze([
+  "identity",
+  "problem_statement",
+  "functional_goal",
+  "scope",
+  "functional_rules",
+  "algorithmic_strategy",
+  "technical_considerations",
+  "validation_criteria",
+  "risks",
+  "approval_gate",
+]);
+
+export function functionalTemplateMetadata(templateAsset: RunbookTextAsset) {
+  return {
+    templateVersion: templateAsset.runbookVersion,
+    templateHash: templateAsset.assetHash,
+    templateSnapshot: {
+      template: templateAsset.content,
+      runbookVersion: templateAsset.runbookVersion,
+      assetRelativePath: templateAsset.assetRelativePath,
+      descriptor: {
+        key: FEATURE_TEMPLATE_KEY,
+        version: templateAsset.runbookVersion,
+        sections: FEATURE_DESCRIPTOR_SECTIONS,
+      },
+    },
+  };
+}
 
 export interface FeatureIdentityView {
   id: string;

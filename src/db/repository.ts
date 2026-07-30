@@ -554,7 +554,17 @@ export async function updateRunCurrentPhase(runId: string, phase: string): Promi
   await pool.query("update runs set current_phase = $1, updated_at = now() where id = $2", [phase, runId]);
 }
 
-export async function updateRunStatus(runId: string, status: "running" | "retrying"): Promise<void> {
+/**
+ * "resolved" agregado por la corrección del runtime de circuitos: marca el run padre como resuelto
+ * cuando un reingreso automático a Architect (sin humano) lo reemplaza por un run hijo
+ * FULL_PIPELINE — mismo valor terminal que ya usa `resolveEscalatedRunStatus` para el reingreso
+ * humano, pero acá el run padre nunca llegó a estar `escalated` (se intercepta antes), así que no
+ * puede reusarse esa función (exige status='escalated' en el WHERE).
+ */
+export async function updateRunStatus(
+  runId: string,
+  status: "running" | "retrying" | "resolved"
+): Promise<void> {
   await pool.query("update runs set status = $1, updated_at = now() where id = $2", [status, runId]);
 }
 

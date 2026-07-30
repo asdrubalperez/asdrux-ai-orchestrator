@@ -17,7 +17,11 @@
 - FEATURE-012 — Persistencia de contexto/hallazgos en escalamiento: migración
   `0005_escalation_context_persistence.sql`, `runs.originated_from_run_id`, estado `retrying`,
   comando `run:respond`, worktree hijo ramificado desde la rama del padre y validación E2E real
-  documentada en `docs/features/FEATURE-012-implementation-results.md`
+  documentada en `docs/features/FEATURE-012-implementation-results.md`. **Matiz (2026-07-29)**:
+  persiste el contexto de continuación, pero no unifica un único contrato de reentrada — conviven
+  `EscalationContext` (retry en el lugar) y `ReentryContext` (reingreso vía run hijo o cruce de
+  pipeline), con campos distintos. Ver Lecciones Aprendidas en
+  `docs/features/lecciones-aprendidas/`.
 - Feature 09 — Runbook para el Orquestador AI automático: 12 archivos en `docs/runbook/`, v1.0,
   marcador `[PENDIENTE-DB-PROJECTS]` reemplazado por la referencia real a
   `project_config_versions` (FEATURE-011), pasada de consistencia cruzada completa
@@ -82,23 +86,31 @@
   descubrir y leer bajo demanda cualquier artifact del proyecto del run actual mediante
   `artifact_list` y `artifact_read`, con aislamiento por proyecto, acceso read-only y sin
   acumulación automática de contexto. Implementada, validada técnicamente y mergeada a `main`
-  (`4e4f209`). Su validación funcional punta a punta se retomará junto con ambas partes de
-  FEATURE-023. Ver
+  (`4e4f209`). Validación funcional punta a punta completada junto con FEATURE-023 Parte 1 y
+  Parte 2 mediante prueba E2E real del owner (2026-07-29, caso de negocio real), después del
+  bloque correctivo de runtime de circuitos — ver Lecciones Aprendidas en
+  `docs/features/lecciones-aprendidas/`. Ver
   `docs/features/FEATURE-022-Lectura-universal-de-artifacts-por-todos-los-roles.md` y
   `docs/features/FEATURE-022-implementation-results.md`.
 - FEATURE-023 — Parte 1 — Lifecycle canónico de Features basado en
   `docs/runbook/07-FEATURE-TEMPLATE.md`: implementación y validación automatizada completas.
-  La prueba E2E real fue suspendida por decisión del owner al detectar que el runtime intentaba
-  resolver el Runbook desde el repositorio gestionado. La validación funcional continuará después
-  de diseñar e implementar FEATURE-023 Parte 2.
+  E2E real completado por el owner el 2026-07-29 (caso de negocio real), después de resolver
+  FEATURE-023 Parte 2 y el bloque correctivo de runtime de circuitos.
+- FEATURE-023 — Parte 2 — Distribución, versionado y disponibilidad del Runbook en runtime:
+  implementada. Validada por evidencia empírica real en la prueba E2E conjunta del 2026-07-29 —
+  el Approval Gate de diseño formal nunca se cerró explícitamente (ver
+  `docs/research/FEATURE-023-revision-tecnica-y-validacion.md`, bloqueos B1-B10 sin resolución
+  documentada), pero el comportamiento quedó validado contra un caso real. Queda como deuda
+  documental cerrar formalmente ese Gate o registrar por qué se considera superado por la
+  evidencia.
+- FEATURE-024 (antes FEATURE-023, antes FEATURE-022, antes FEATURE-021, antes FEATURE-019, antes
+  FEATURE-018, antes FEATURE-017, antes FEATURE-014) — Milestone 2 — Validación end-to-end con
+  caso de negocio real: ejecutada mediante prueba de usuario real (2026-07-29, proyecto
+  `tempo-auto-planner`), sin necesidad de una Feature de producto nueva. Validó de punta a punta
+  el circuito completo (merge de Feature → run hijo → Planning → Gate de cierre → proyecto
+  cerrado). Ver Lecciones Aprendidas en `docs/features/lecciones-aprendidas/`.
 
 **🟡 Confirmado**
-- FEATURE-023 — Parte 2 — Distribución, versionado y disponibilidad del Runbook en runtime.
-  **P0 y siguiente Feature a diseñar**; debe garantizar que el Runbook sea un activo siempre
-  disponible del Orquestador, independiente del repositorio gestionado y del directorio de
-  ejecución.
-- FEATURE-024 (antes FEATURE-023, antes FEATURE-022, antes FEATURE-021, antes FEATURE-019, antes FEATURE-018, antes FEATURE-017, antes
-  FEATURE-014) — Milestone 2 — Validación end-to-end con caso de negocio real
 - FEATURE-025 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
 - FEATURE-026 — Credenciales git por usuario para el Orquestador (promovida de ⚪ Tentativo)
 - FEATURE-027 — Continuidad durable del loop Developer ↔ QA. Prioridad P0.
@@ -112,6 +124,8 @@
 - FEATURE-033 — Lifecycle canónico de `01-PROJECT-BRIEF-TEMPLATE`.
 - FEATURE-034 — Lifecycle canónico de `02-ARCHITECTURE-TEMPLATE`.
 - FEATURE-035 — Lifecycle canónico de `09-RELEASE-PLAN-TEMPLATE`.
+- FEATURE-036 — Release activo nominal tras cierre de proyecto sin release siguiente. Detectado en
+  la prueba E2E real del 2026-07-29 (FEATURE-024). Prioridad P1.
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
@@ -323,6 +337,13 @@ en el mecanismo genérico de reintento de escalamiento (pérdida del `business_c
 bloqueó seguir validando Circuito 2/3 de punta a punta. Ver Lecciones Aprendidas en
 `docs/features/FEATURE-019-*.md` y FEATURE-020 (rediseño derivado del hallazgo).
 
+**Corrección de runtime (2026-07-29)**: la prueba E2E real detectó que el retry automático de
+escalamiento (`handleLinearEscalation`) no podía volver a Architect cuando ocurría dentro de
+`PLANNING_TO_QA` (Circuito 2/3, sin esa fase) — reiniciaba el propio pipeline en el lugar en vez
+de cruzar hacia Architect. Corregido en el bloque correctivo de runtime de circuitos (rama
+`fix/circuit-escalation-context-and-gates`). Ver Lecciones Aprendidas en
+`docs/features/lecciones-aprendidas/`.
+
 ### ✅ FEATURE-020 — Rediseño de armado de contexto entre roles (lectura por referencia desde DB)
 Surge de un hallazgo real durante la prueba E2E de FEATURE-019 (ver su Lecciones Aprendidas): el
 mecanismo genérico de reintento de escalamiento pierde el `business_case` original porque
@@ -352,6 +373,12 @@ no había llegado a probar. La prueba encontró un problema real y no relacionad
 esta Feature (el paso de compilación de `COMANDO_TEST` no puede correr en el sandbox de solo
 lectura de QA), que derivó en FEATURE-021 (ver abajo). Ver Lecciones Aprendidas en
 `docs/features/FEATURE-020-*.md` para el detalle completo de los 3 hallazgos de implementación.
+
+**Corrección de runtime (2026-07-29)**: la prueba E2E real (después de este bloque de fixes)
+confirmó que `withRoleContext` envolvía `{ featureJustCompleted }` dentro de `functionalArtifact`,
+violando la Regla 5 de `planning.txt` (exige el campo a nivel raíz). Corregido junto con la
+clasificación de Approval Gates antes del retry genérico y la paridad Codex de los extractores de
+Gate. Ver Lecciones Aprendidas en `docs/features/lecciones-aprendidas/`.
 
 ### ✅ FEATURE-021 — Build determinístico garantizado por el Orquestador entre Developer y QA
 Surge de un hallazgo real durante la prueba E2E de FEATURE-020: `COMANDO_TEST` (declarado por
@@ -413,13 +440,12 @@ Resultados en `docs/features/FEATURE-022-implementation-results.md`.
 La próxima validación funcional punta a punta se ejecutará conjuntamente con FEATURE-023 Parte 1
 y FEATURE-023 Parte 2.
 
-### 🟡 FEATURE-023 — Parte 1 — Lifecycle canónico de Features basado en el Runbook
+### ✅ FEATURE-023 — Parte 1 — Lifecycle canónico de Features basado en el Runbook
 
-**Estado:** Implementada y validada automáticamente. E2E real suspendido por decisión del owner.
+**Estado:** Implementada y validada, incluyendo E2E real del owner (2026-07-29, caso de negocio
+real), después de resolver FEATURE-023 Parte 2 y el bloque correctivo de runtime de circuitos.
 
 **Prioridad:** P0.
-
-**Orden:** su validación continúa después de FEATURE-023 Parte 2.
 
 Debe implementar el lifecycle del documento canónico de Feature usando obligatoriamente
 `docs/playbook/07-FEATURE-TEMPLATE.md`:
@@ -440,28 +466,33 @@ La primera prueba E2E real detectó que el runtime buscaba
 pruebas de esta Parte 1 hasta definir e implementar la disponibilidad propia del Runbook en
 FEATURE-023 Parte 2.
 
-La próxima prueba será conjunta para FEATURE-022, FEATURE-023 Parte 1 y FEATURE-023 Parte 2. Deberá
-cubrir artifacts operativos en DB, resolución del Runbook independiente del repositorio gestionado,
-evolución del documento canónico, persistencia del Markdown en repo, commit y push, descubrimiento
-desde otro rol, lectura bajo demanda y continuidad real entre Features.
+**Cierre (2026-07-29)**: la prueba E2E conjunta con FEATURE-022 y FEATURE-023 Parte 2 se ejecutó
+con un caso de negocio real (`tempo-auto-planner`), después del bloque correctivo de runtime de
+circuitos. Cubrió artifacts operativos en DB, resolución del Runbook independiente del repositorio
+gestionado, evolución del documento canónico, persistencia del Markdown en repo, commit y push,
+continuación real de Feature a cierre de Release y cierre de proyecto. Ver Lecciones Aprendidas en
+`docs/features/lecciones-aprendidas/`.
 
 La primera implementación se centra en `07-FEATURE-TEMPLATE`. Los lifecycles de
 `01-PROJECT-BRIEF-TEMPLATE`, `02-ARCHITECTURE-TEMPLATE` y `09-RELEASE-PLAN-TEMPLATE` quedan fuera
 de su alcance inicial y registrados separadamente en FEATURE-033, FEATURE-034 y FEATURE-035.
 
-### 🟡 FEATURE-023 — Parte 2 — Distribución, versionado y disponibilidad del Runbook en runtime
+### ✅ FEATURE-023 — Parte 2 — Distribución, versionado y disponibilidad del Runbook en runtime
 
-**Estado:** Confirmada. Diseño pendiente.
+**Estado:** Implementada. Validada por evidencia empírica en la prueba E2E real conjunta del
+2026-07-29 (ver FEATURE-023 Parte 1, FEATURE-022 y FEATURE-024). El Approval Gate de diseño formal
+nunca se cerró explícitamente — `docs/research/FEATURE-023-revision-tecnica-y-validacion.md`
+había dejado bloqueos B1-B10 sin resolución documentada. El comportamiento quedó validado contra
+un caso real; cerrar formalmente ese Gate (o registrar por qué se considera superado por la
+evidencia) queda como deuda documental, no como bloqueo funcional.
 
 **Prioridad:** P0.
-
-**Orden:** siguiente Feature a diseñar; prerequisito de la próxima validación conjunta.
 
 El Runbook es un activo propio de Asdrux AI Orchestrator. No pertenece al repositorio que el
 usuario proporciona para desarrollar su caso de negocio y no puede depender de que ese repositorio
 contenga `docs/runbook/`.
 
-Esta Parte 2 deberá definir y posteriormente implementar:
+Esta Parte 2 definió e implementó:
 
 1. fuente autoritativa del Runbook instalada con el producto;
 2. mecanismo de resolución independiente del `cwd` y del worktree gestionado;
@@ -472,11 +503,11 @@ Esta Parte 2 deberá definir y posteriormente implementar:
    materializados en el repositorio gestionado;
 7. estrategia de actualización del Runbook al desplegar una nueva versión del producto.
 
-El documento oficial conservará el número FEATURE-023 y expresará “Parte 2” en el título y nombre
-del archivo. No se renumeran FEATURE-024 ni las Features posteriores.
+El documento oficial conserva el número FEATURE-023 y expresa “Parte 2” en el título y nombre
+del archivo. No se renumeraron FEATURE-024 ni las Features posteriores.
 
-Las pruebas de FEATURE-023 Parte 1 permanecen suspendidas. Al completar esta Parte 2 se ejecutará
-una validación conjunta de FEATURE-022 + FEATURE-023 Parte 1 + FEATURE-023 Parte 2.
+La validación conjunta de FEATURE-022 + FEATURE-023 Parte 1 + FEATURE-023 Parte 2 se ejecutó el
+2026-07-29 (ver Cierre en FEATURE-023 Parte 1, arriba).
 
 ### ✅ Feature 09 — Runbook para el Orquestador AI automático
 Diseño completo y cerrado: 12 archivos en `docs/runbook/` (equivalente al `docs/playbook/` actual
@@ -524,6 +555,15 @@ para Codex el equivalente de FEATURE-002 (aislamiento de escritura, resuelto ví
 problema de privilegio de red del kernel), FEATURE-004/005 (secuencia multi-fase, pipeline
 completo) y FEATURE-006 (confinamiento QA, vía `--config features.shell_tool=false`). Paridad
 completa alcanzada y validada con evidencia real contra la VPS.
+
+**Matiz (2026-07-29)**: "paridad completa" cubre aislamiento, secuencia y pipeline — no cubría
+paridad semántica de los artifacts de gobernanza (Roadmap/Release Plan/Release Completo), donde
+Codex está forzado por su propio `PHASE_RESULT_SCHEMA` a que `outputArtifact` sea siempre
+`string | null`. Ese gap quedó corregido en el bloque correctivo de runtime de circuitos (ver
+Lecciones Aprendidas en `docs/features/lecciones-aprendidas/`). Queda sin verificar con test la
+paridad de forma para FEATURES/QA_RESULT/READINESS: el código en `features/contracts.ts` soporta
+ambas formas, pero ningún test ejercita la rama string real de Codex para esos tres contratos —
+deuda de cobertura, no de comportamiento.
 
 ### ⚪ Escalamiento optimizado sin reinicio completo
 La v1 ya diseñada en Feature 09 (`03-AI-CONSTITUTION.md`, Reglas 8 y 10) resuelve el escalamiento
@@ -582,6 +622,10 @@ Developer, el último veredicto de QA, el último fallo de build y el motivo inm
 Hoy existe un único `release_plan` vigente por proyecto y, al avanzar de Release, Planning puede
 recibir temporalmente el plan anterior. La Feature deberá garantizar que el Release Plan
 entregado a Planning corresponda inequívocamente al Release activo.
+
+Debe incluir como criterio verificable: activar un Release nuevo no debe dejar expuesto el plan
+ni el `activeReleaseId` del Release anterior como si siguiera vigente — ver FEATURE-036 (release
+activo nominal tras cierre sin release siguiente), hallazgo relacionado de la misma prueba E2E.
 
 ### 🟡 FEATURE-029 — Contrato determinístico entre build output y `COMANDO_TEST`
 
@@ -645,6 +689,18 @@ FEATURE-022 y exposición en UI. No se diseña en detalle en esta actualización
 Deberá definir creación, actualización, validación, persistencia DB, ubicación canónica,
 versionado, lectura mediante FEATURE-022 y exposición en UI del Release Plan. No se diseña en
 detalle en esta actualización.
+
+### 🟡 FEATURE-036 — Release activo nominal tras cierre de proyecto sin release siguiente
+
+**Estado:** Confirmada. Prioridad P1.
+
+Detectado en la prueba E2E real del 2026-07-29 (FEATURE-024): cuando se aprueba el cierre del
+último Release de un proyecto y no hay Release siguiente pendiente, `respondService.ts` marca el
+Release actual `Completado` pero conserva `activeReleaseId` apuntando a ese mismo Release ya
+completado, en vez de representar explícitamente que no hay ningún Release activo. Un proyecto
+cerrado puede así seguir exponiendo un Release completado como si fuera el activo. Relacionado con
+FEATURE-028 (Release Plan asociado al Release activo) — mismo tipo de invariante, distinto momento
+del ciclo de vida.
 
 ### ⚪ Approval Model por Release
 Feature 09 (`06-DELIVERY-WORKFLOW.md`, Stage 6) ya diseñó la v1: Modo Manual (default — automático
@@ -750,7 +806,17 @@ primera opción porque, a esfuerzo comparable, una UI mínima de solo lectura da
 reusable hacia la Capa de UI completa. Queda como complemento futuro si hace falta alertas push
 (fase completada/fallida) fuera de cuando alguien está mirando la UI activamente.
 
-### 🟡 FEATURE-024 (antes FEATURE-023, antes FEATURE-022, antes FEATURE-021, antes FEATURE-019, antes FEATURE-018, antes FEATURE-017,
+### ✅ FEATURE-024 (antes FEATURE-023, antes FEATURE-022, antes FEATURE-021, antes FEATURE-019, antes FEATURE-018, antes FEATURE-017,
 antes FEATURE-014) — Milestone 2 — Validación end-to-end con caso de negocio real
-Necesario y ya decidido antes de sumar al resto del equipo. No es opcional — por eso está
-Confirmado y no Tentativo.
+Necesario y ya decidido antes de sumar al resto del equipo. Ejecutada mediante prueba de usuario
+real (2026-07-29, proyecto `tempo-auto-planner`), sin necesidad de una Feature de producto nueva.
+
+**Resultado**: validó de punta a punta el circuito completo — Architect → Functional → Planning →
+Developer ↔ QA → merge de Feature (Modo Manual) → run hijo `PLANNING_TO_QA` → Planning reconoce
+`featureJustCompleted` en raíz → `RELEASE_COMPLETO` reconocido como Approval Gate sin retry
+automático previo → aprobación humana → cierre de proyecto (`project_closed`). La primera corrida
+había fallado antes del bloque correctivo de runtime de circuitos (ver Lecciones Aprendidas en
+`docs/features/lecciones-aprendidas/`); repetida después del fix, funcionó de punta a punta.
+
+**Hallazgo pendiente, no bloqueante**: el proyecto cerrado (sin release siguiente) conserva
+`activeReleaseId` apuntando al release ya completado — ver FEATURE-036.

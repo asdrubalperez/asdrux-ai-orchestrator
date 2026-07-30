@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { asciiSlug, featureDocumentPath, renderFeatureDocument, sha256 } from "./document.js";
+import {
+  asciiSlug,
+  featureDocumentPath,
+  functionalTemplateMetadata,
+  renderFeatureDocument,
+  sha256,
+} from "./document.js";
 
 const identity = {
   id: "feature-id",
@@ -82,4 +88,37 @@ test("proyección es determinista por sequence, no por orden de entrada", () => 
   assert.equal(sha256(a), sha256(b));
   assert.match(a, /Approval mode: auto/);
   assert.doesNotMatch(a, /automatic|automático/);
+});
+
+test("metadata Functional conserva versión, hash y snapshot del asset distribuido", () => {
+  const metadata = functionalTemplateMetadata({
+    runbookVersion: "v1.0",
+    assetRelativePath: "07-FEATURE-TEMPLATE.md",
+    assetHash: "abc123",
+    content: "# Template\n",
+  });
+
+  assert.equal(metadata.templateVersion, "v1.0");
+  assert.equal(metadata.templateHash, "abc123");
+  assert.deepEqual(metadata.templateSnapshot, {
+    template: "# Template\n",
+    runbookVersion: "v1.0",
+    assetRelativePath: "07-FEATURE-TEMPLATE.md",
+    descriptor: {
+      key: "runbook-feature",
+      version: "v1.0",
+      sections: [
+        "identity",
+        "problem_statement",
+        "functional_goal",
+        "scope",
+        "functional_rules",
+        "algorithmic_strategy",
+        "technical_considerations",
+        "validation_criteria",
+        "risks",
+        "approval_gate",
+      ],
+    },
+  });
 });

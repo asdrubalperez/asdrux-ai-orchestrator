@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
+import { readdir, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { PoolClient } from "pg";
 import { pool } from "../db/pool.js";
@@ -14,14 +14,15 @@ import {
 } from "./contracts.js";
 import {
   FEATURE_TEMPLATE_KEY,
-  FEATURE_TEMPLATE_VERSION,
   featureDocumentPath,
+  functionalTemplateMetadata,
   normalizeLf,
   renderFeatureDocument,
   sha256,
   type FeatureIdentityView,
   type FeatureRevisionView,
 } from "./document.js";
+import type { RunbookTextAsset } from "../runbook/runbookProvider.js";
 
 export class FeatureLifecycleEscalationError extends Error {}
 
@@ -42,23 +43,6 @@ type Contribution =
   | { purpose: "qa-result"; sectionKey: "qa_result"; operation: "record_qa_result"; content: QaResultPayload }
   | { purpose: "developer-readiness"; sectionKey: "developer_readiness"; operation: "record_readiness"; content: DeveloperReadinessPayload };
 
-const DESCRIPTOR_SNAPSHOT = Object.freeze({
-  key: FEATURE_TEMPLATE_KEY,
-  version: FEATURE_TEMPLATE_VERSION,
-  sections: [
-    "identity",
-    "problem_statement",
-    "functional_goal",
-    "scope",
-    "functional_rules",
-    "algorithmic_strategy",
-    "technical_considerations",
-    "validation_criteria",
-    "risks",
-    "approval_gate",
-  ],
-});
-
 export async function persistFunctionalFeatureBatch(params: {
   projectId: string;
   runId: string;
@@ -66,10 +50,9 @@ export async function persistFunctionalFeatureBatch(params: {
   releaseKey: string;
   phaseFinishedEventId: string | number;
   payload: FeaturesPayload;
+  templateAsset: RunbookTextAsset;
 }): Promise<FeatureRow[]> {
-  const templatePath = path.join(params.worktreePath, "docs", "runbook", "07-FEATURE-TEMPLATE.md");
-  const template = normalizeLf(await readFile(templatePath, "utf8"));
-  const templateHash = sha256(template);
+  const templateMetadata = functionalTemplateMetadata(params.templateAsset);
   const names = await existingFeatureNames(params.worktreePath);
   const client = await pool.connect();
   try {
@@ -113,9 +96,9 @@ export async function persistFunctionalFeatureBatch(params: {
             definition.nombre,
             definition.prioridad,
             FEATURE_TEMPLATE_KEY,
-            FEATURE_TEMPLATE_VERSION,
-            templateHash,
-            { template, descriptor: DESCRIPTOR_SNAPSHOT },
+            templateMetadata.templateVersion,
+            templateMetadata.templateHash,
+            templateMetadata.templateSnapshot,
             finalPath,
             params.runId,
           ]

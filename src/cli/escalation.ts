@@ -86,6 +86,28 @@ function isReleasePlanFeatureEntry(value: unknown): value is ReleasePlanFeatureE
 }
 
 /**
+ * Corrección del runtime de circuitos (hallazgo confirmado 2026-07-29): lee un campo tanto de la
+ * forma objeto estructurado de Claude (ej. `{ roadmap: "..." }`) como de la forma texto plano que
+ * `PHASE_RESULT_SCHEMA` fuerza en Codex — ahí `outputArtifact` es SIEMPRE `string | null`, nunca
+ * objeto ([codexExecutor.ts], `PHASE_RESULT_SCHEMA`). Antes de esta corrección,
+ * `extractRoadmapApproval`/`extractReleasePlanDeclaration`/`isReleaseCompletionEscalation`
+ * exigían `typeof outputArtifact === "object"` — con Codex, esa condición nunca se cumple, así que
+ * estas tres funciones devolvían siempre `null`/`false` sin importar lo que Codex hubiera
+ * declarado. La forma texto usa la misma convención "ETIQUETA: valor en su propia línea" que ya
+ * usa `extractStructuredValue` en `features/contracts.ts` para estos mismos 5 contratos.
+ */
+function extractTaggedField(outputArtifact: unknown, tag: string, property: string): unknown {
+  if (outputArtifact !== null && typeof outputArtifact === "object" && !Array.isArray(outputArtifact)) {
+    return (outputArtifact as Record<string, unknown>)[property];
+  }
+  if (typeof outputArtifact === "string") {
+    const match = outputArtifact.match(new RegExp(`(?:^|\\n)${tag}:\\s*([^\\n]+)`, "i"));
+    return match ? match[1].trim() : undefined;
+  }
+  return undefined;
+}
+
+/**
  * Parsea el RELEASE_PLAN que Planning boltea a `outputArtifact` (mismo patrón que
  * `comandoTest`/`roadmap`/`features`). Devuelve null si el rol no es Planning, si no hay
  * `releasePlan` en el artifact, o si el JSON es inválido/malformado — riesgo H12 aceptado, mismo
@@ -96,9 +118,8 @@ export function extractReleasePlanDeclaration(
   content: { outputArtifact: unknown }
 ): ReleasePlanDeclaration | null {
   if (artifact.phase !== "planning") return null;
-  if (content.outputArtifact === null || typeof content.outputArtifact !== "object") return null;
 
-  const raw = (content.outputArtifact as { releasePlan?: unknown }).releasePlan;
+  const raw = extractTaggedField(content.outputArtifact, "RELEASE_PLAN", "releasePlan");
   let parsed: unknown = raw;
   if (typeof raw === "string") {
     try {
@@ -114,15 +135,66 @@ export function extractReleasePlanDeclaration(
 /**
  * FEATURE-019: distingue la escalación de "release completo" (Planning no tiene más Features para
  * asignar) de una ambigüedad genérica de Planning — mismo criterio de distinción por contenido que
- * `extractRoadmapApproval`.
+ * `extractRoadmapApproval`. Acepta booleano real o el string `"true"` (mismo criterio dual que
+ * `isNotApplicableOutput`).
  */
 export function isReleaseCompletionEscalation(
   artifact: { phase: AgentRole },
   content: { outputArtifact: unknown }
 ): boolean {
   if (artifact.phase !== "planning") return false;
-  if (content.outputArtifact === null || typeof content.outputArtifact !== "object") return false;
-  return (content.outputArtifact as { releaseCompleto?: unknown }).releaseCompleto === "true";
+  const raw = extractTaggedField(content.outputArtifact, "RELEASE_COMPLETO", "releaseCompleto");
+  return raw === "true" || raw === true;
+}
+
+/**
+ * FEATURE-018, sección 7.2: distingue una escalación de "aprobación de roadmap" de una escalación
+ * genérica sin campo/tipo de acción nuevo — solo Architect declara ROADMAP, y solo lo declara con
+ * contenido cuando completó su análisis (nunca junto con una ambigüedad genérica sin resolver, por
+ * construcción del contrato de architect.txt). Devuelve null tanto si no aplica (rol distinto,
+ * ROADMAP ausente) como si el contenido no es JSON válido con la forma esperada — mismo tratamiento
+ * que "sin roadmap", riesgo aceptado de H12 (ver 7.5 del documento de la Feature).
+ *
+ * Vive acá (movida desde respondService.ts) porque, tras la corrección del runtime de circuitos,
+ * `runStart.ts` también necesita clasificar esta escalación (ver `classifyGateEscalation`) antes de
+ * decidir si entra al retry genérico — y `runStart.ts` no puede importar de `respondService.ts`
+ * (import circular: `respondService.ts` ya importa de `runStart.ts`).
+ */
+export function extractRoadmapApproval(
+  artifact: { phase: AgentRole },
+  content: { outputArtifact: unknown }
+): RoadmapApprovalPayload | null {
+  if (artifact.phase !== "architect") return null;
+
+  const raw = extractTaggedField(content.outputArtifact, "ROADMAP", "roadmap");
+  if (typeof raw !== "string") return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  return isRoadmapApprovalPayload(parsed) ? parsed : null;
+}
+
+export type GateKind = "roadmap_approval" | "release_completion";
+
+/**
+ * Corrección del runtime de circuitos: clasifica una escalación ANTES de que el retry genérico
+ * (`handleLinearEscalation`) la procese. `roadmap_approval` (Architect proponiendo el Roadmap) y
+ * `release_completion` (Planning declarando `RELEASE_COMPLETO`) son decisiones de gobernanza
+ * esperadas — Approval Gates, no errores reintentables. Antes de esta corrección, ambas entraban
+ * primero al retry automático (hasta 3 reinvocaciones del mismo rol) antes de mostrarse al humano.
+ * `merge_approval` no necesita clasificarse acá: nunca pasa por el loop de fases de
+ * `executePipelineRun` (se construye aparte, en `continueReleaseAfterFeatureApproved`), así que
+ * nunca llega a `handleLinearEscalation`.
+ */
+export function classifyGateEscalation(agentRole: AgentRole, outputArtifact: unknown): GateKind | null {
+  if (extractRoadmapApproval({ phase: agentRole }, { outputArtifact }) !== null) return "roadmap_approval";
+  if (isReleaseCompletionEscalation({ phase: agentRole }, { outputArtifact })) return "release_completion";
+  return null;
 }
 
 /**
@@ -202,6 +274,27 @@ const PREDECESSOR_ROLE: Partial<Record<AgentRole, AgentRole>> = {
 
 export function predecessorRoleFor(role: AgentRole): AgentRole | null {
   return PREDECESSOR_ROLE[role] ?? null;
+}
+
+/**
+ * Corrección del runtime de circuitos (hallazgo confirmado contra código): distingue la
+ * continuación natural de una Feature (`{ featureJustCompleted }`, creada en
+ * `createPlanningToQaChildRun` y `respondMergeApproval`) de un artifact normal de fase. Ningún rol
+ * declara esta forma — nace siempre del propio Orquestador. Debe viajar a nivel raíz del contexto
+ * de Planning, igual que un `ReentryContext`, nunca envuelta en `functionalArtifact`: la Regla 5 de
+ * `planning.txt` exige `featureJustCompleted` en la raíz para reconocer una invocación de
+ * continuación.
+ */
+export interface FeatureContinuationContext {
+  featureJustCompleted: string | null;
+}
+
+export function isFeatureContinuationContext(value: unknown): value is FeatureContinuationContext {
+  if (value === null || typeof value !== "object") return false;
+  const keys = Object.keys(value as Record<string, unknown>);
+  if (keys.length !== 1 || keys[0] !== "featureJustCompleted") return false;
+  const candidate = (value as { featureJustCompleted: unknown }).featureJustCompleted;
+  return candidate === null || typeof candidate === "string";
 }
 
 /**

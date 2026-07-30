@@ -6,8 +6,11 @@ import {
   buildEscalationContext,
   buildReentryContext,
   canonicalJson,
+  classifyGateEscalation,
   extractMergeApproval,
   extractReleasePlanDeclaration,
+  extractRoadmapApproval,
+  isFeatureContinuationContext,
   isMergeApprovalPayload,
   isNotApplicableOutput,
   isReentryContext,
@@ -214,4 +217,83 @@ test("isNotApplicableOutput acepta booleano real (Codex) o el string 'true' (Cla
   assert.equal(isNotApplicableOutput({ notApplicable: false }), false);
   assert.equal(isNotApplicableOutput({ text: "propuesta real" }), false);
   assert.equal(isNotApplicableOutput(null), false);
+});
+
+// Corrección del runtime de circuitos (triangulación 2026-07-29)
+
+test("isFeatureContinuationContext acepta { featureJustCompleted } con string o null", () => {
+  assert.equal(isFeatureContinuationContext({ featureJustCompleted: "f1" }), true);
+  assert.equal(isFeatureContinuationContext({ featureJustCompleted: null }), true);
+});
+
+test("isFeatureContinuationContext rechaza cualquier otra forma, incluyendo campos extra", () => {
+  assert.equal(isFeatureContinuationContext(null), false);
+  assert.equal(isFeatureContinuationContext("f1"), false);
+  assert.equal(isFeatureContinuationContext({ functionalArtifact: { features: [] } }), false);
+  assert.equal(isFeatureContinuationContext({ featureJustCompleted: "f1", extra: true }), false);
+  assert.equal(isFeatureContinuationContext({ featureJustCompleted: 1 }), false);
+});
+
+test("classifyGateEscalation reconoce roadmap_approval solo para architect con ROADMAP válido", () => {
+  const roadmap = { text: "diseño", roadmap: JSON.stringify(VALID_ROADMAP) };
+  assert.equal(classifyGateEscalation("architect", roadmap), "roadmap_approval");
+  assert.equal(classifyGateEscalation("planning", roadmap), null);
+});
+
+test("classifyGateEscalation reconoce release_completion solo para planning con releaseCompleto", () => {
+  assert.equal(classifyGateEscalation("planning", { releaseCompleto: "true" }), "release_completion");
+  assert.equal(classifyGateEscalation("developer", { releaseCompleto: "true" }), null);
+});
+
+test("classifyGateEscalation devuelve null para una escalación genérica (ni roadmap ni release completo)", () => {
+  assert.equal(classifyGateEscalation("developer", "ambigüedad real, texto libre"), null);
+  assert.equal(classifyGateEscalation("planning", { releasePlan: "{}" }), null);
+});
+
+test("extractRoadmapApproval (movida a escalation.ts) sigue parseando un ROADMAP válido bolteado a outputArtifact", () => {
+  const content = { outputArtifact: { text: "diseño", roadmap: JSON.stringify(VALID_ROADMAP) } };
+  assert.deepEqual(extractRoadmapApproval({ phase: "architect" }, content), VALID_ROADMAP);
+  assert.equal(extractRoadmapApproval({ phase: "planning" }, content), null);
+});
+
+// Corrección del runtime de circuitos: paridad Codex para los 3 extractores de Gate.
+// Codex está forzado (PHASE_RESULT_SCHEMA) a que outputArtifact sea SIEMPRE string|null — antes de
+// esta corrección, estas 3 funciones exigían "object" y devolvían siempre null/false con Codex.
+
+test("extractRoadmapApproval reconoce ROADMAP cuando outputArtifact es el string real que produce Codex", () => {
+  const codexOutput = `RESUMEN: listo\nARTEFACTO: null\nROADMAP: ${JSON.stringify(VALID_ROADMAP)}`;
+  assert.deepEqual(extractRoadmapApproval({ phase: "architect" }, { outputArtifact: codexOutput }), VALID_ROADMAP);
+});
+
+test("extractRoadmapApproval devuelve null si el string de Codex no trae la línea ROADMAP", () => {
+  assert.equal(
+    extractRoadmapApproval({ phase: "architect" }, { outputArtifact: "RESUMEN: ambigüedad genérica" }),
+    null
+  );
+});
+
+test("extractReleasePlanDeclaration reconoce RELEASE_PLAN cuando outputArtifact es el string real que produce Codex", () => {
+  const codexOutput = `RESUMEN: plan\nRELEASE_PLAN: ${JSON.stringify(VALID_RELEASE_PLAN_DECLARATION)}\nRELEASE_COMPLETO: null`;
+  assert.deepEqual(
+    extractReleasePlanDeclaration({ phase: "planning" }, { outputArtifact: codexOutput }),
+    VALID_RELEASE_PLAN_DECLARATION
+  );
+});
+
+test("isReleaseCompletionEscalation reconoce RELEASE_COMPLETO cuando outputArtifact es el string real que produce Codex", () => {
+  const codexOutput = "RESUMEN: no queda ninguna Feature pendiente\nRELEASE_COMPLETO: true";
+  assert.equal(isReleaseCompletionEscalation({ phase: "planning" }, { outputArtifact: codexOutput }), true);
+});
+
+test("isReleaseCompletionEscalation sigue aceptando el booleano real ademas del string 'true'", () => {
+  assert.equal(
+    isReleaseCompletionEscalation({ phase: "planning" }, { outputArtifact: { releaseCompleto: true } }),
+    true
+  );
+});
+
+test("classifyGateEscalation también clasifica correctamente con outputArtifact string (forma de Codex)", () => {
+  const roadmapOutput = `RESUMEN: listo\nROADMAP: ${JSON.stringify(VALID_ROADMAP)}`;
+  assert.equal(classifyGateEscalation("architect", roadmapOutput), "roadmap_approval");
+  assert.equal(classifyGateEscalation("planning", "RESUMEN: cierre\nRELEASE_COMPLETO: true"), "release_completion");
 });
