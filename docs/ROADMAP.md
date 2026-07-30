@@ -687,9 +687,9 @@ implementar: el mensaje de error no le sugiere a Developer "alinear el comando" 
 permisos de escritura totales tome una decisión imperfecta muy puntual, y en los dos intentos
 tomó decisiones razonables que lo evitaron — buena señal del sistema, pero no reproducible a
 demanda. La validación queda sostenida por los tests automatizados (deterministas, sin depender
-del comportamiento de un LLM), que sí ejercitan el mecanismo directamente. Ver
-`docs/features/lecciones-aprendidas/` si se agrega un documento dedicado a este intento más
-adelante.
+del comportamiento de un LLM), que sí ejercitan el mecanismo directamente. Diseño completo y
+detalle de los intentos en
+`docs/features/FEATURE-029-Contrato-determinístico-entre-build-output-y-COMANDO_TEST.md`.
 
 ### 🟡 FEATURE-030 — Proyecto asociado correctamente al repositorio gestionado
 
@@ -704,7 +704,8 @@ accidental.
 
 **Estado:** Implementada, validada con suite automatizada y con prueba manual del owner en VPS
 (2026-07-30). Prioridad P2. Diseño original de ARIA (AI Product Architect), revisado y ajustado
-antes de implementar.
+antes de implementar. Diseño completo en
+`docs/features/FEATURE-031-Mapping-confiable-de-tipo_solucion-y-canales.md`.
 
 Estos campos del intake se mapeaban con menor confiabilidad que el resto de los diez campos
 descriptivos: `tipo_solucion` (`select`) podía clasificarse por palabras aisladas ("existe") sin
