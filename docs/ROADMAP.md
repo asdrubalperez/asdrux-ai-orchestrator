@@ -158,6 +158,11 @@
   inyectarse fresco en cada llamada, mismo patrón que ya usa `runbookProvider.readText` para
   Functional. Motivado por las Reglas 11/12 nuevas de `04-TESTING-POLICY.md` (2026-07-30).
   Prioridad por definir.
+- FEATURE-038 — El `release_plan` no resetea el scope de Features al cruzar a un release nuevo
+  (Features de un release cerrado reaparecen en el siguiente) ni marca el último Feature de un
+  release como `Completada` cuando el turno siguiente de Planning declara `RELEASE_COMPLETO` en vez
+  de un nuevo `RELEASE_PLAN`. Detectado en la validación E2E de FEATURE-036 (2026-07-30). Prioridad
+  por definir.
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
@@ -813,6 +818,37 @@ ahora persiste `activeReleaseId: null` y garantiza por estado (no por coincidenc
 ningún release quede `Activo`; `runView.ts`/`ReleasePlanPanel.tsx` muestran "Sin release activo" en
 vez de reutilizar el último release completado como fallback. Relacionado con FEATURE-028 (Release
 Plan asociado al Release activo) — mismo tipo de invariante, distinto momento del ciclo de vida.
+
+### 🟡 FEATURE-038 — Ciclo de vida del Release Plan no resetea scope entre releases ni cierra el último Feature
+
+**Estado:** Confirmada contra código real y contra una prueba E2E real (2026-07-30, proyecto
+`pruebas-ia`, caso de dos releases). Prioridad por definir. Detectada durante la validación E2E de
+FEATURE-036 — distinta en alcance (no es sobre `activeReleaseId`, es sobre el `release_plan`
+mismo), se deja como hallazgo separado en vez de mezclarla con esa Feature.
+
+**Síntoma 1 — Features de un release ya cerrado aparecen también en el release siguiente**: en el
+caso probado, Planning declaró el primer `RELEASE_PLAN` (release r1) incluyendo tanto f1 (asignada
+a r1) como f2 (que Functional ya había asignado explícitamente a r2:
+`"f2 (calculateSplitTip, Release 2, P1)"`). Al abrirse r2, Planning volvió a declarar f1 dentro de
+su secuencia (`"Esta es la única Feature del release además de f1 (ya completada)"`), pese a que f1
+pertenece a r1. `persistReleasePlanIfDeclared` (`src/cli/commands/runStart.ts:845`) persiste el
+`release_plan` tal como Planning lo declara, sin filtrar por release — y la instrucción de
+`planning.txt:57-58` ("declará siempre el estado completo de la secuencia... incluyendo las ya
+completadas") no acota explícitamente que esa secuencia se resetea al cruzar a un release nuevo.
+Efecto visible: `ReleasePlanPanel` muestra el mismo listado de Features duplicado bajo los dos
+releases.
+
+**Síntoma 2 — el último Feature de cada release nunca queda marcado "Completada"**: el
+`release_plan` persistido solo cambia cuando Planning declara un `RELEASE_PLAN` nuevo. Cuando un
+Feature es el último del release, el turno siguiente de Planning declara `RELEASE_COMPLETO` (no un
+`RELEASE_PLAN`), así que nadie vuelve a persistir ese Feature con `estado: "Completada"` — queda
+para siempre en el estado ("En curso") de su última declaración real, aunque QA ya la haya
+aprobado. Confirmado en la UI: en el proyecto cerrado, el último Feature de ambos releases se
+mostraba con el ícono "en curso", nunca con el check verde.
+
+Ambos sin diseñar todavía — requieren decidir si Planning debe recibir explícitamente el scope de
+Features del release activo (no el histórico completo) y si el cierre de un Feature vía
+`RELEASE_COMPLETO` debe forzar una actualización final de `estado` antes de escalar.
 
 ### ⚪ Approval Model por Release
 Feature 09 (`06-DELIVERY-WORKFLOW.md`, Stage 6) ya diseñó la v1: Modo Manual (default — automático
