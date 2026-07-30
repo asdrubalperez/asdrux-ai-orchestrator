@@ -13,7 +13,7 @@ Versión de plantilla usada: v2.1 (`docs/playbook/07-FEATURE-TEMPLATE.md`)
 - **Name**: Instalación determinística de dependencias antes del build
 - **Type**: Pipeline Reliability / Testing Infrastructure
 - **Owner**: asdru
-- **Status**: Implementada — pendiente de validación real en VPS antes de merge a `main`
+- **Status**: ✅ Ejecutada — validada con suite automatizada y prueba E2E real en VPS (2026-07-30)
 - **Priority**: P2
 - **Related Features**: FEATURE-021 (build determinístico), FEATURE-029 (contrato COMANDO_TEST)
 
@@ -180,11 +180,25 @@ agotamiento, regresiones de FEATURE-021/FEATURE-029, `shell: false`, aislamiento
   invocar `BuildExecutor` ni QA.
 - Suite completa: 196 tests, 186 pass, 10 skip (específicos de plataforma en Windows), 0 fail.
 
-**Pendiente antes de merge a `main`** (per Approval Gate del diseño): evidencia real en VPS con
-Docker — camino exitoso (`npm ci` real instalando `typescript`, `node_modules/.bin/tsc` aparece,
-build completa) y camino fallido (dependencia inexistente, motivo llega a Developer). Los tests
-unitarios cubren la lógica de decisión determinística, no reemplazan la validación de que el
-contenedor realmente puede escribir su caché e instalar con red real.
+**Validación E2E real en VPS (2026-07-30, proyecto `pruebas-ia`, rama
+`pruebas-ai-orchestratror-feature-029`, mismo caso de negocio reutilizado de FEATURE-029)**:
+
+1. Primer intento: Developer escribió un `package.json` con BOM inválido (patrón ya observado
+   antes en la validación de FEATURE-029). El evento `dependency_install_executed` registró el
+   fallo de instalación (JSON inválido, Regla 7 del diseño) y el loop lo atribuyó correctamente
+   como `dependencyInstallationFailureReason` — ni `BuildExecutor` ni QA se invocaron.
+2. Segundo intento: Developer corrigió el `package.json`. La instalación real de `typescript` vía
+   `npm ci` corrió con éxito con red real (`node_modules/.bin/tsc` quedó disponible), pero el build
+   con `tsc` real falló por un error de tipos genuino y distinto (`TS2307`, módulo no encontrado) —
+   atribuido correctamente como `buildFailureReason`, no como fallo de instalación, confirmando en
+   un run real la exclusión mutua estricta entre ambos motivos (Regla 11 del diseño).
+3. Tercer intento: Developer corrigió el problema de tipos; instalación, build, contrato de
+   `COMANDO_TEST` (FEATURE-029) y tests corrieron limpios, QA aprobó, y el run llegó al
+   escalamiento de merge.
+
+Evidencia real y específica — con Docker y red reales, no simulados — de los tres componentes de
+la Feature (no-op/instalación real, atribución de fallo, exclusión mutua con `buildFailureReason`)
+actuando correctamente en secuencia sobre un run genuino.
 
 ---
 
@@ -201,13 +215,14 @@ aprobación técnica requiere evidencia real en VPS, no solo tests unitarios).
 
 ## 10. Approval Gate
 
-Aprobado por el owner, incluyendo la ampliación de timeouts configurables. Pendiente de validación
-real en VPS antes de mergear a `main` — ver sección 8.
+Aprobado por el owner, incluyendo la ampliación de timeouts configurables. Validado real en VPS
+(Docker con red real) — ver sección 8. Mergeada a `main`.
 
 ---
 
 ## Estado de la implementación
 
-**Implementada** en rama `feature/032-dependency-installer` — pendiente de validación real en VPS
-(evidencia de camino exitoso y fallido con Docker real) antes de mergear a `main`. `tsc --noEmit` y
-suite completa (196 tests) verificados en la rama.
+**✅ Ejecutada.** Implementada en rama `feature/032-dependency-installer`, validada con suite
+automatizada (`tsc --noEmit` limpio, 196 tests) y con una prueba E2E real en VPS que ejercitó tanto
+el camino de fallo de instalación como el camino exitoso con un fallo de build genuino y distinto,
+confirmando la exclusión mutua entre motivos en un run real. Mergeada a `main`.
