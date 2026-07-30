@@ -47,6 +47,7 @@ import type { PipelineSpec } from "../../pipelines/definitions.js";
 import { extractTestCommand } from "../../pipelines/extractTestCommand.js";
 import { TestExecutor, parseTestCommand } from "../../testing/testExecutor.js";
 import { BuildExecutor } from "../../testing/buildExecutor.js";
+import { validateTestCommandContract } from "../../testing/testCommandContract.js";
 import {
   activeReleaseFromRoadmap,
   artifactsAreEquivalent,
@@ -1236,6 +1237,7 @@ export async function runDeveloperQaLoop(params: {
     testExecutor?: Pick<TestExecutor, "run">;
     persistFeatureContribution?: typeof persistActiveFeatureContribution;
     gitReadinessSnapshot?: typeof gitReadinessSnapshot;
+    validateTestCommandContract?: typeof validateTestCommandContract;
   };
 }): Promise<PhaseResult> {
   const { executor, developerExecutor, readRole, runId, planningResult, maxAttempts, phaseTiming } = params;
@@ -1248,6 +1250,7 @@ export async function runDeveloperQaLoop(params: {
     testExecutor: new TestExecutor() as Pick<TestExecutor, "run">,
     persistFeatureContribution: persistActiveFeatureContribution,
     gitReadinessSnapshot,
+    validateTestCommandContract,
     ...params.services,
   };
   const testCommand = extractTestCommand(planningResult.outputArtifact);
@@ -1263,6 +1266,12 @@ export async function runDeveloperQaLoop(params: {
   // motivo inmediato del reintento es un build roto, ese es el único motivo que ve Developer, no
   // se le mezcla un qaRejectionReason viejo de un intento anterior donde QA sí llegó a correr.
   let lastBuildFailureSummary: string | null = null;
+  // FEATURE-029: motivo del reintento cuando COMANDO_TEST no supera la prevalidación posterior al
+  // build (ej. declara una ruta que el build no produjo) — mutuamente excluyente con
+  // buildFailureReason y qaRejectionReason. Nunca se le pide a Developer que toque COMANDO_TEST
+  // (Regla 4 de developer.txt: esa declaración es propiedad exclusiva de Planning); el motivo
+  // siempre apunta a alinear el output que el proyecto genera.
+  let lastTestCommandFailureSummary: string | null = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     await services.haltIfCancelledExternally(runId);
@@ -1276,9 +1285,11 @@ export async function runDeveloperQaLoop(params: {
             previousAttemptSummary: lastDeveloperResult?.summary,
             ...(lastBuildFailureSummary
               ? { buildFailureReason: lastBuildFailureSummary }
-              : lastQaResult
-                ? { qaRejectionReason: lastQaResult.summary }
-                : {}),
+              : lastTestCommandFailureSummary
+                ? { testCommandFailureReason: lastTestCommandFailureSummary }
+                : lastQaResult
+                  ? { qaRejectionReason: lastQaResult.summary }
+                  : {}),
           };
 
     const developerInvocation: PhaseInvocation = {
@@ -1367,11 +1378,52 @@ export async function runDeveloperQaLoop(params: {
     }
     lastBuildFailureSummary = null; // se limpia apenas un build corre bien (o es no-op) en este intento
 
-    await services.updateRunCurrentPhase(runId, "qa");
-
     // FEATURE-006 (resuelve H14): el TestExecutor —no el agente QA— corre el comando de test,
     // como executable + args estructurados, dentro de un contenedor sin red. QA nunca recibe Bash.
     const { executable, args: testArgs } = parseTestCommand(testCommand);
+
+    // FEATURE-029: antes de invocar QA, verificar que COMANDO_TEST sea consistente con lo que el
+    // proyecto realmente produjo después del build — ej. Planning declaró una ruta compilada que
+    // Developer nunca generó. Sin esto, el fallo recién aparecía durante la ejecución del test,
+    // indistinguible de un rechazo real de QA.
+    const contractValidation = await services.validateTestCommandContract(
+      { executable, args: testArgs },
+      executor.options.workingDirectory
+    );
+    if (!contractValidation.valid) {
+      lastTestCommandFailureSummary = contractValidation.reason;
+      console.log(
+        `[run:start] COMANDO_TEST (intento ${attempt}) no superó la prevalidación — QA no se invoca: ${contractValidation.reason}`
+      );
+
+      if (attempt === maxAttempts) {
+        const exhausted: PhaseResult = {
+          status: "escalated",
+          outputArtifact: null,
+          summary: `Se agotaron los ${maxAttempts} intentos sin un COMANDO_TEST alineado con el output del build. Último motivo: ${contractValidation.reason}`,
+          escalationReason: `Límite de reintentos (${maxAttempts}) alcanzado — COMANDO_TEST inconsistente con el output del build en todos los intentos.`,
+        };
+        await persistLoopExhaustionArtifact(
+          { runId, phase: "developer", attempt, result: exhausted },
+          services.persistArtifact
+        );
+        await services.recordRunEvent(runId, "loop_exhausted", {
+          maxAttempts,
+          reason: "test_command_contract",
+          lastReason: contractValidation.reason,
+        });
+        console.log(`[run:start] Límite de ${maxAttempts} intentos alcanzado sin COMANDO_TEST válido — run escalado.`);
+        return exhausted;
+      }
+
+      // No se invoca a QA este intento — continúa al siguiente attempt del mismo for,
+      // consumiendo el mismo contador maxAttempts que ya existe (sin inventar uno nuevo).
+      continue;
+    }
+    lastTestCommandFailureSummary = null;
+
+    await services.updateRunCurrentPhase(runId, "qa");
+
     const testResult = await services.testExecutor.run({
       executable,
       args: testArgs,

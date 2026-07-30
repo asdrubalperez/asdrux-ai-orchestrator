@@ -118,14 +118,20 @@
   caso persistido tiene `canales` como array antes de implementar, evitando esa parte del alcance
   original propuesto por el diseño. Validada por el owner en VPS (2026-07-30) además de la suite
   automatizada. Diseño original de ARIA (AI Product Architect).
+- FEATURE-029 — Contrato determinístico entre build output y `COMANDO_TEST`: prevalidación entre
+  el build y la invocación de QA (`src/testing/testCommandContract.ts`), soporta script de
+  `package.json` y `node --test` con rutas explícitas. Validada con 13 tests automatizados
+  (unitarios + integración del loop); dos intentos de validación E2E real (2026-07-30) no
+  reprodujeron el escenario — ver detalle abajo sobre por qué. Diseño original de ARIA (AI Product
+  Architect), con una corrección aplicada antes de implementar (el mensaje de error no debe
+  sugerirle a Developer tocar `COMANDO_TEST` — Regla 4 de `developer.txt` se lo prohíbe
+  explícitamente).
 
 **🟡 Confirmado**
 - FEATURE-025 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
 - FEATURE-026 — Credenciales git por usuario para el Orquestador (promovida de ⚪ Tentativo)
 - FEATURE-027 — Continuidad durable del loop Developer ↔ QA. Prioridad P0.
 - FEATURE-028 — Release Plan asociado inequívocamente al Release activo. Prioridad P1.
-- FEATURE-029 — Contrato determinístico entre build output y `COMANDO_TEST`. Prioridad P1;
-  complementa FEATURE-021 sin reabrir el build determinístico básico.
 - FEATURE-030 — Proyecto del Orquestador asociado correctamente al repositorio gestionado.
   Prioridad P1.
 - FEATURE-032 — Instalación determinística de dependencias antes del build. Prioridad P2.
@@ -642,18 +648,48 @@ Debe incluir como criterio verificable: activar un Release nuevo no debe dejar e
 ni el `activeReleaseId` del Release anterior como si siguiera vigente — ver FEATURE-036 (release
 activo nominal tras cierre sin release siguiente), hallazgo relacionado de la misma prueba E2E.
 
-### 🟡 FEATURE-029 — Contrato determinístico entre build output y `COMANDO_TEST`
+### ✅ FEATURE-029 — Contrato determinístico entre build output y `COMANDO_TEST`
 
-**Estado:** Confirmada. Prioridad P1.
+**Estado:** Implementada y validada con 13 tests automatizados (unitarios de
+`testCommandContract.ts` + integración del loop en `runStart.test.ts`). Prioridad P1. Diseño
+original de ARIA (AI Product Architect).
 
 No duplica FEATURE-021: el build obligatorio, su separación del test, el rechazo de operadores de
-shell y los retries por fallo ya están resueltos. El pendiente es garantizar que `COMANDO_TEST`
-apunte al output realmente generado por el build —por ejemplo, evitar `src/example.test.ts`
-cuando el compilado ejecutable es `dist/example.test.js`.
+shell y los retries por fallo ya estaban resueltos. Esta Feature agrega una prevalidación entre el
+build y la invocación de QA (`src/testing/testCommandContract.ts`) que verifica que `COMANDO_TEST`
+sea consistente con lo que el proyecto realmente produjo — soporta script de `package.json`
+(`npm test`/`npm run <script>`) y `node --test` con rutas explícitas (existencia + confinamiento
+al worktree). Cualquier otra forma conserva el comportamiento previo.
 
-Discovery deberá decidir entre exigir comandos contra el output compilado, validar
-semánticamente la existencia de la ruta después del build, permitir TypeScript directo sólo con
-runtime explícito o una combinación acotada de esas alternativas.
+Se agregó `testCommandFailureReason` como campo de contexto para Developer, mutuamente excluyente
+con `buildFailureReason`/`qaRejectionReason`. Corrección aplicada al diseño original antes de
+implementar: el mensaje de error no le sugiere a Developer "alinear el comando" — solo alinear el
+*output* que genera — porque `developer.txt` (Regla 4) le prohíbe explícitamente tocar
+`COMANDO_TEST`, propiedad exclusiva de Planning.
+
+**Intentos de validación E2E real (2026-07-30, proyecto `pruebas-ia`) — no reproducidos**:
+
+1. Primer intento: proyecto con `package.json` declarando un `scripts.build` no-op
+   (`mkdir -p dist`) y un caso de negocio describiendo el proyecto como TypeScript. Developer, al
+   no encontrar evidencia real de TypeScript en el repo (sin `tsconfig.json` ni dependencia
+   `typescript`), escribió el archivo de test directamente en `.mjs` ejecutable — una decisión
+   razonable de su parte, no un error — evitando por completo el circuito `dist/` y, con eso, el
+   escenario que la Feature valida.
+2. Segundo intento: se agregó `tsconfig.json` y la dependencia `typescript` real al repo. Esta vez
+   Planning y Developer sí siguieron la ruta `dist/` como se esperaba, pero Developer reemplazó el
+   `scripts.build` no-op por un `tsc` real (decisión también razonable) — y como el contenedor de
+   build corre con `--network none` y nadie instaló `node_modules` (gap ya conocido, ver
+   FEATURE-032), el build falló con `tsc: not found` antes de llegar a la prevalidación de esta
+   Feature. El loop se agotó por el mecanismo de fallo de build ya existente (FEATURE-021), sin
+   invocar nunca a QA — comportamiento correcto, pero de una Feature distinta.
+
+**Conclusión**: forzar este escenario específico en un E2E real depende de que un agente con
+permisos de escritura totales tome una decisión imperfecta muy puntual, y en los dos intentos
+tomó decisiones razonables que lo evitaron — buena señal del sistema, pero no reproducible a
+demanda. La validación queda sostenida por los tests automatizados (deterministas, sin depender
+del comportamiento de un LLM), que sí ejercitan el mecanismo directamente. Ver
+`docs/features/lecciones-aprendidas/` si se agrega un documento dedicado a este intento más
+adelante.
 
 ### 🟡 FEATURE-030 — Proyecto asociado correctamente al repositorio gestionado
 

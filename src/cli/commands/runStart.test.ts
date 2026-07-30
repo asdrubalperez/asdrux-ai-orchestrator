@@ -122,6 +122,54 @@ test("runDeveloperQaLoop agota 3 builds rotos y deja el artifact respondible", a
   assert.equal(latestEscalationArtifact(artifacts).phase, "developer");
 });
 
+test("runDeveloperQaLoop agota 3 intentos con COMANDO_TEST inconsistente con el build y no invoca QA (FEATURE-029)", async () => {
+  const artifacts: unknown[] = [];
+  let developerCalls = 0;
+  let qaCalls = 0;
+  const completedDeveloper: PhaseResult = {
+    status: "completed",
+    outputArtifact: { patch: "intentado" },
+    summary: "Developer terminó.",
+    escalationReason: null,
+  };
+  const executor = {
+    options: { workingDirectory: "C:\\fake-worktree" },
+    runPhase: async () => {
+      qaCalls += 1;
+      throw new Error("QA no debe invocarse cuando COMANDO_TEST no supera la prevalidación.");
+    },
+  } as unknown as Parameters<typeof runDeveloperQaLoop>[0]["executor"];
+  const developerExecutor = {
+    options: { workingDirectory: "C:\\fake-worktree" },
+    runPhase: async () => {
+      developerCalls += 1;
+      return completedDeveloper;
+    },
+  } as unknown as Parameters<typeof runDeveloperQaLoop>[0]["developerExecutor"];
+
+  const services = loopServices(artifacts, { ran: false, exitCode: null, stdout: "", stderr: "", timedOut: false });
+  services.validateTestCommandContract = async () => ({
+    valid: false,
+    reason: 'COMANDO_TEST apunta a una ruta que no existe después del build: "dist/example.test.js".',
+  });
+
+  const result = await runDeveloperQaLoop({
+    executor,
+    developerExecutor,
+    readRole: async () => "instrucciones",
+    runId: "run-test-command-contract-loop",
+    planningResult: planningResult(),
+    maxAttempts: 3,
+    phaseTiming: { agentRole: null, startedAt: null },
+    services,
+  });
+
+  assert.equal(result.status, "escalated");
+  assert.equal(developerCalls, 3);
+  assert.equal(qaCalls, 0);
+  assert.equal(latestEscalationArtifact(artifacts).phase, "developer");
+});
+
 test("runDeveloperQaLoop agota 3 rechazos de QA y deja la escalación después del último verdict", async () => {
   const artifacts: unknown[] = [];
   let developerCalls = 0;
@@ -353,5 +401,9 @@ function loopServices(
     testExecutor: {
       run: async () => ({ exitCode: 1, stdout: "", stderr: "tests fallan", timedOut: false }),
     },
+    // FEATURE-029: workingDirectory en estos tests es una ruta falsa ("C:\\fake-worktree") — sin
+    // este override, la validación real de testCommandContract.ts intentaría leer el filesystem
+    // real y fallaría siempre, rompiendo todos los tests existentes que esperan llegar a QA.
+    validateTestCommandContract: async () => ({ valid: true }),
   } as unknown as NonNullable<Parameters<typeof runDeveloperQaLoop>[0]["services"]>;
 }

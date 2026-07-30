@@ -19,6 +19,12 @@ Reglas de esta fase:
    un paso de compilación (FEATURE-021) — el Orquestador ya lo garantiza entre el turno de
    Developer y el de QA. Ejemplo correcto: `"node --test dist/x.test.js"`. Ejemplo incorrecto (ya
    no aceptado): `"npm run build && node --test dist/x.test.js"`.
+   FEATURE-029: si el proyecto tiene un paso de build, la ruta que declares en `node --test <ruta>`
+   debe ser la que el build realmente produce (ej. `dist/x.test.js`, no `src/x.test.ts`) — el
+   Orquestador verifica que esa ruta exista después del build y rechaza el intento antes de QA si
+   no existe, sin adivinar ni transformar la ruta por vos. Si el proyecto ya encapsula
+   correctamente su propia ejecución de tests, preferí declarar `npm test` o `npm run <script>` en
+   vez de una ruta directa.
 3. Si los requisitos funcionales recibidos son insuficientes para definir casos de prueba
    concretos, NO inventes una resolución: reportá el escalamiento.
 4. Release activo (FEATURE-018): tu contexto incluye un campo `activeRelease` con el release
