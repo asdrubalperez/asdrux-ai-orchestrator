@@ -126,6 +126,13 @@
 - FEATURE-035 — Lifecycle canónico de `09-RELEASE-PLAN-TEMPLATE`.
 - FEATURE-036 — Release activo nominal tras cierre de proyecto sin release siguiente. Detectado en
   la prueba E2E real del 2026-07-29 (FEATURE-024). Prioridad P1.
+- FEATURE-037 — Entrega garantizada de reglas de gobernanza del Runbook (Testing Policy, Coding
+  Standards) al contexto de QA/Developer en cada invocación. Hoy ninguno de los dos roles tiene
+  tool ni contexto para alcanzar esos documentos (QA: `fs_read` acotado al worktree, sin acceso a
+  `assets/runbook/`; tampoco son artifacts persistidos). Sin persistencia entre invocaciones — debe
+  inyectarse fresco en cada llamada, mismo patrón que ya usa `runbookProvider.readText` para
+  Functional. Motivado por las Reglas 11/12 nuevas de `04-TESTING-POLICY.md` (2026-07-30).
+  Prioridad por definir.
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo

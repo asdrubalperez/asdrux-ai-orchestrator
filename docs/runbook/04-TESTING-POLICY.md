@@ -2,7 +2,7 @@
 
 # Testing Policy — Runbook
 
-Versión: v1.0
+Versión: v1.1
 Dueño y único consultor directo de este documento: Planning (lo usa para diseñar el Test Plan de
 cada Feature, dentro del Release Plan — `09-RELEASE-PLAN-TEMPLATE.md`, sección 2 — ver
 `03-AI-CONSTITUTION.md`, Regla 10, Ownership de Artefactos)
@@ -210,6 +210,38 @@ La necesidad de evidencia nunca justifica una operación insegura.
 
 ---
 
+## 11. Riesgo de Contrato Externo No Resuelto Escala, No Se Re-anota
+
+Cuando QA reporta en `qualityRisks` un riesgo sobre el contrato de una API o sistema externo que
+no fue verificado contra su documentación oficial, y ese mismo riesgo ya había sido reportado en
+una pasada anterior de QA sobre la misma Feature sin resolverse, QA no debe repetir la observación
+como si fuera nueva: debe declarar `ESTADO: escalated`.
+
+Evitar: reportar el mismo riesgo de contrato externo no verificado más de una vez sin escalar;
+tratar un riesgo ya señalado como si fuera información nueva; dejar avanzar una Feature cuyo
+contrato externo central sigue sin confirmarse después de haber sido advertido.
+
+Principio: un riesgo de contrato externo detectado y no resuelto dos veces deja de ser una
+observación — es un bloqueo.
+
+## 12. Documentación Primero para Integraciones Externas
+
+Cuando una Feature declare una integración con una API o sistema externo documentado
+públicamente, Planning debe exigir en el Test Plan, y Developer/QA deben confirmar antes de dar
+por válido el contrato, que: el endpoint, método y forma de request/response fueron consultados
+contra la documentación oficial vigente (no inferidos por convención ni por analogía con otras
+APIs); cualquier supuesto no verificable contra documentación pública queda declarado
+explícitamente como riesgo abierto, no como decisión aceptada.
+
+Evitar: asumir la forma de un contrato externo por convención sin citar la fuente; dar por válida
+una integración externa solo porque compiló o pasó un test con mocks; aceptar un supuesto no
+verificado como "riesgo conocido" sin plan de resolución.
+
+Principio: la documentación oficial prevalece sobre la inferencia cuando el contrato es externo y
+verificable.
+
+---
+
 # Test Levels
 
 La profundidad del testing debe ser proporcional al riesgo. Planning selecciona el nivel al
@@ -306,13 +338,6 @@ Development.
 # 🧩 OPTIONAL EXTENSIONS
 
 Activadas por **Architect**, al configurar el producto — mismo criterio que la sección anterior.
-
-## API Documentation First Mode
-
-[Optional] — cuando exista integración externa, consultar documentación, validar contratos,
-confirmar operaciones soportadas, evitar supuestos. La documentación prevalece sobre inferencias,
-pero no reemplaza la validación en ambiente real cuando el riesgo depende de permisos,
-configuración o comportamiento operativo.
 
 ## Test Budget Mode
 
