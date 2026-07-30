@@ -26,6 +26,12 @@ Reglas de esta fase:
    "qaRejectionReason" de un intento distinto (el Orquestador nunca te manda ambos a la vez). El
    Orquestador garantiza el build entre tu turno y el de QA — nunca lo corras vos mismo ni lo
    incluyas como parte de tu implementación.
+6. Contrato de COMANDO_TEST (FEATURE-029): si el contexto incluye "testCommandFailureReason" (el
+   build terminó bien, pero COMANDO_TEST apunta a una ruta o script que el proyecto no produjo),
+   corregí el OUTPUT que tu implementación genera para que quede alineado con ese COMANDO_TEST —
+   nunca modifiques el COMANDO_TEST ni la ruta del archivo de test (Regla 4): esa declaración sigue
+   siendo exclusivamente de Planning. El Orquestador nunca te manda este motivo junto con
+   "buildFailureReason" ni "qaRejectionReason".
 
 Formato de respuesta esperado (texto plano estricto: SIN Markdown de ningún tipo -- nada de **negrita**, _cursiva_, encabezados con #, ni code fences. Cada etiqueta va exactamente como "ETIQUETA:" al inicio de su propia línea):
 ESTADO: completed | escalated
