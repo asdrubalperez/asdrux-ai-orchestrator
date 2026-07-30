@@ -48,6 +48,7 @@ import { extractTestCommand } from "../../pipelines/extractTestCommand.js";
 import { TestExecutor, parseTestCommand } from "../../testing/testExecutor.js";
 import { BuildExecutor } from "../../testing/buildExecutor.js";
 import { validateTestCommandContract } from "../../testing/testCommandContract.js";
+import { DependencyInstaller } from "../../testing/dependencyInstaller.js";
 import {
   activeReleaseFromRoadmap,
   artifactsAreEquivalent,
@@ -113,6 +114,15 @@ const FUNCTIONAL_TIMEOUT_MS = parsePositiveIntEnv("FUNCTIONAL_TIMEOUT_MS", 600_0
 const PLANNING_TIMEOUT_MS = parsePositiveIntEnv("PLANNING_TIMEOUT_MS", 600_000);
 const DEVELOPER_TIMEOUT_MS = parsePositiveIntEnv("DEVELOPER_TIMEOUT_MS", 900_000);
 const QA_TIMEOUT_MS = parsePositiveIntEnv("QA_TIMEOUT_MS", 900_000);
+
+// FEATURE-032: BUILD_TIMEOUT_MS y TEST_TIMEOUT_MS existían hardcodeados (120_000/60_000) desde
+// FEATURE-021/FEATURE-006 — se hacen configurables acá, mismo patrón que los timeouts de fase de
+// arriba, sin cambiar el valor por defecto (regresión cero para quien no configure la variable).
+// DEPENDENCY_INSTALL_TIMEOUT_MS es nuevo: npm ci/install depende de red real (registry), por eso
+// un default más alto que build/test.
+const BUILD_TIMEOUT_MS = parsePositiveIntEnv("BUILD_TIMEOUT_MS", 120_000);
+const TEST_TIMEOUT_MS = parsePositiveIntEnv("TEST_TIMEOUT_MS", 60_000);
+const DEPENDENCY_INSTALL_TIMEOUT_MS = parsePositiveIntEnv("DEPENDENCY_INSTALL_TIMEOUT_MS", 180_000);
 
 const LINEAR_PHASE_TIMEOUT_MS: Partial<Record<AgentRole, number>> = {
   architect: ARCHITECT_TIMEOUT_MS,
@@ -1235,6 +1245,7 @@ export async function runDeveloperQaLoop(params: {
     persistArtifact?: PersistArtifact;
     buildExecutor?: Pick<BuildExecutor, "runIfNeeded">;
     testExecutor?: Pick<TestExecutor, "run">;
+    dependencyInstaller?: Pick<DependencyInstaller, "installIfNeeded">;
     persistFeatureContribution?: typeof persistActiveFeatureContribution;
     gitReadinessSnapshot?: typeof gitReadinessSnapshot;
     validateTestCommandContract?: typeof validateTestCommandContract;
@@ -1248,6 +1259,7 @@ export async function runDeveloperQaLoop(params: {
     persistArtifact: recordArtifact as PersistArtifact,
     buildExecutor: new BuildExecutor() as Pick<BuildExecutor, "runIfNeeded">,
     testExecutor: new TestExecutor() as Pick<TestExecutor, "run">,
+    dependencyInstaller: new DependencyInstaller() as Pick<DependencyInstaller, "installIfNeeded">,
     persistFeatureContribution: persistActiveFeatureContribution,
     gitReadinessSnapshot,
     validateTestCommandContract,
@@ -1272,6 +1284,11 @@ export async function runDeveloperQaLoop(params: {
   // (Regla 4 de developer.txt: esa declaración es propiedad exclusiva de Planning); el motivo
   // siempre apunta a alinear el output que el proyecto genera.
   let lastTestCommandFailureSummary: string | null = null;
+  // FEATURE-032: motivo del reintento cuando la instalación de dependencias falla antes del build
+  // — el primero en la cadena de exclusión mutua, porque es el primer paso cronológico (Developer
+  // → instalación → build → contrato de test → QA). Igual que los otros tres motivos, nunca le
+  // pide a Developer que toque COMANDO_TEST.
+  let lastDependencyInstallFailureSummary: string | null = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     await services.haltIfCancelledExternally(runId);
@@ -1283,13 +1300,15 @@ export async function runDeveloperQaLoop(params: {
         : {
             plan: planningResult.outputArtifact,
             previousAttemptSummary: lastDeveloperResult?.summary,
-            ...(lastBuildFailureSummary
-              ? { buildFailureReason: lastBuildFailureSummary }
-              : lastTestCommandFailureSummary
-                ? { testCommandFailureReason: lastTestCommandFailureSummary }
-                : lastQaResult
-                  ? { qaRejectionReason: lastQaResult.summary }
-                  : {}),
+            ...(lastDependencyInstallFailureSummary
+              ? { dependencyInstallationFailureReason: lastDependencyInstallFailureSummary }
+              : lastBuildFailureSummary
+                ? { buildFailureReason: lastBuildFailureSummary }
+                : lastTestCommandFailureSummary
+                  ? { testCommandFailureReason: lastTestCommandFailureSummary }
+                  : lastQaResult
+                    ? { qaRejectionReason: lastQaResult.summary }
+                    : {}),
           };
 
     const developerInvocation: PhaseInvocation = {
@@ -1341,18 +1360,59 @@ export async function runDeveloperQaLoop(params: {
 
     await services.haltIfCancelledExternally(runId);
 
+    // FEATURE-032: instalación de dependencias npm garantizada por el Orquestador, siempre antes
+    // del build — sin depender de que Developer recuerde instalarlas. Corre en cada intento normal
+    // (incluido el primero), nunca durante el turno post-QA de readiness (ese turno no llega a
+    // este punto del loop en absoluto). Causa real que motivó esta Feature: el contenedor de
+    // Developer es --read-only sin NPM_CONFIG_CACHE configurado, y BuildExecutor corre con
+    // --network none — ninguno de los dos puede instalar nada por su cuenta.
+    const installResult = await services.dependencyInstaller.installIfNeeded(
+      executor.options.workingDirectory,
+      DEPENDENCY_INSTALL_TIMEOUT_MS
+    );
+    if (installResult.ran) {
+      await services.recordRunEvent(runId, "dependency_install_executed", { attempt, installResult });
+    }
+    if (installResult.ran && installResult.exitCode !== 0) {
+      lastDependencyInstallFailureSummary = installResult.timedOut
+        ? `Instalación de dependencias superó el timeout (${DEPENDENCY_INSTALL_TIMEOUT_MS}ms) sin terminar.`
+        : `Instalación de dependencias falló (comando "${installResult.command}", exitCode ${installResult.exitCode}): ${installResult.stderr.slice(0, 2000)}`;
+      console.log(`[run:start] Instalación de dependencias (intento ${attempt}) falló — Developer recibe el error en el próximo intento.`);
+
+      if (attempt === maxAttempts) {
+        const exhausted: PhaseResult = {
+          status: "escalated",
+          outputArtifact: null,
+          summary: `Se agotaron los ${maxAttempts} intentos sin instalar las dependencias. Último error: ${lastDependencyInstallFailureSummary}`,
+          escalationReason: `Límite de reintentos (${maxAttempts}) alcanzado — instalación de dependencias rota en todos los intentos, el build nunca llegó a correr.`,
+        };
+        await persistLoopExhaustionArtifact(
+          { runId, phase: "developer", attempt, result: exhausted },
+          services.persistArtifact
+        );
+        await services.recordRunEvent(runId, "loop_exhausted", { maxAttempts, reason: "dependency_install", lastInstallResult: installResult });
+        console.log(`[run:start] Límite de ${maxAttempts} intentos alcanzado sin instalar dependencias — run escalado.`);
+        return exhausted;
+      }
+
+      // No se ejecutan build, contrato de test, tests ni QA este intento — continúa al siguiente
+      // attempt del mismo for, consumiendo el mismo contador maxAttempts que ya existe.
+      continue;
+    }
+    lastDependencyInstallFailureSummary = null; // se limpia apenas la instalación corre bien (o es no-op)
+
     // FEATURE-021: build determinístico garantizado por el Orquestador, entre el turno de
     // Developer y el de QA — nunca por decisión de ningún agente. QA es intencionalmente
     // read-only (Regla 10, Ownership de Artefactos) y no puede recompilar; este paso corre en un
     // contenedor efímero propio, separado, con permiso de escritura, antes de que TestExecutor
     // monte el worktree en modo :ro para correr el test.
-    const buildResult = await services.buildExecutor.runIfNeeded(executor.options.workingDirectory, 120_000);
+    const buildResult = await services.buildExecutor.runIfNeeded(executor.options.workingDirectory, BUILD_TIMEOUT_MS);
     if (buildResult.ran) {
       await services.recordRunEvent(runId, "build_executed", { attempt, buildResult });
     }
     if (buildResult.ran && buildResult.exitCode !== 0) {
       lastBuildFailureSummary = buildResult.timedOut
-        ? `Build superó el timeout (120000ms) sin terminar.`
+        ? `Build superó el timeout (${BUILD_TIMEOUT_MS}ms) sin terminar.`
         : `Build falló (exitCode ${buildResult.exitCode}): ${buildResult.stderr.slice(0, 2000)}`;
       console.log(`[run:start] Build (intento ${attempt}) falló — Developer recibe el error en el próximo intento.`);
 
@@ -1428,7 +1488,7 @@ export async function runDeveloperQaLoop(params: {
       executable,
       args: testArgs,
       workingDirectory: executor.options.workingDirectory,
-      timeoutMs: 60_000,
+      timeoutMs: TEST_TIMEOUT_MS,
     });
     await services.recordRunEvent(runId, "test_executed", { attempt, testCommand, testResult });
 

@@ -122,6 +122,68 @@ test("runDeveloperQaLoop agota 3 builds rotos y deja el artifact respondible", a
   assert.equal(latestEscalationArtifact(artifacts).phase, "developer");
 });
 
+test("runDeveloperQaLoop agota 3 intentos cuando la instalación de dependencias falla y no invoca build/test/QA (FEATURE-032)", async () => {
+  const artifacts: unknown[] = [];
+  let developerCalls = 0;
+  let qaCalls = 0;
+  let buildCalls = 0;
+  const completedDeveloper: PhaseResult = {
+    status: "completed",
+    outputArtifact: { patch: "intentado" },
+    summary: "Developer terminó.",
+    escalationReason: null,
+  };
+  const executor = {
+    options: { workingDirectory: "C:\\fake-worktree" },
+    runPhase: async () => {
+      qaCalls += 1;
+      throw new Error("QA no debe invocarse cuando la instalación de dependencias falla.");
+    },
+  } as unknown as Parameters<typeof runDeveloperQaLoop>[0]["executor"];
+  const developerExecutor = {
+    options: { workingDirectory: "C:\\fake-worktree" },
+    runPhase: async () => {
+      developerCalls += 1;
+      return completedDeveloper;
+    },
+  } as unknown as Parameters<typeof runDeveloperQaLoop>[0]["developerExecutor"];
+
+  const services = loopServices(artifacts, { ran: false, exitCode: null, stdout: "", stderr: "", timedOut: false });
+  services.buildExecutor = {
+    runIfNeeded: async () => {
+      buildCalls += 1;
+      throw new Error("BuildExecutor no debe invocarse cuando la instalación de dependencias falla.");
+    },
+  };
+  services.dependencyInstaller = {
+    installIfNeeded: async () => ({
+      ran: true,
+      command: "npm ci",
+      exitCode: 1,
+      stdout: "",
+      stderr: "npm error código ENOTFOUND registry.npmjs.org",
+      timedOut: false,
+    }),
+  };
+
+  const result = await runDeveloperQaLoop({
+    executor,
+    developerExecutor,
+    readRole: async () => "instrucciones",
+    runId: "run-dependency-install-loop",
+    planningResult: planningResult(),
+    maxAttempts: 3,
+    phaseTiming: { agentRole: null, startedAt: null },
+    services,
+  });
+
+  assert.equal(result.status, "escalated");
+  assert.equal(developerCalls, 3);
+  assert.equal(buildCalls, 0);
+  assert.equal(qaCalls, 0);
+  assert.equal(latestEscalationArtifact(artifacts).phase, "developer");
+});
+
 test("runDeveloperQaLoop agota 3 intentos con COMANDO_TEST inconsistente con el build y no invoca QA (FEATURE-029)", async () => {
   const artifacts: unknown[] = [];
   let developerCalls = 0;

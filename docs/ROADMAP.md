@@ -126,6 +126,18 @@
   Architect), con una corrección aplicada antes de implementar (el mensaje de error no debe
   sugerirle a Developer tocar `COMANDO_TEST` — Regla 4 de `developer.txt` se lo prohíbe
   explícitamente).
+- FEATURE-032 — Instalación determinística de dependencias antes del build: nuevo
+  `DependencyInstaller` (`src/testing/dependencyInstaller.ts`) corre entre Developer y
+  `BuildExecutor`, con acceso a red y caché npm escribible explícita; `npm ci` con lockfile,
+  `npm install` sin él; nuevo motivo `dependencyInstallationFailureReason`, primero en la cadena de
+  exclusión mutua del loop. Ampliación aprobada antes de implementar: timeouts configurables para
+  los tres pasos del loop (`BUILD_TIMEOUT_MS`, `TEST_TIMEOUT_MS`, `DEPENDENCY_INSTALL_TIMEOUT_MS`).
+  Validada con suite automatizada (5 tests unitarios + 1 de integración) y con una prueba E2E real
+  en VPS (2026-07-30, proyecto `pruebas-ia`) que ejercitó tanto el camino de fallo (un
+  `package.json` con BOM inválido, correctamente atribuido a instalación y no a build) como el
+  camino exitoso (instalación real de `typescript` vía `npm ci`, build con `tsc` real, y un fallo
+  de build genuino y distinto — `TS2307`— correctamente atribuido por separado), hasta la
+  aprobación de QA y el escalamiento de merge. Diseño original de ARIA (AI Product Architect).
 
 **🟡 Confirmado**
 - FEATURE-025 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
@@ -134,7 +146,6 @@
 - FEATURE-028 — Release Plan asociado inequívocamente al Release activo. Prioridad P1.
 - FEATURE-030 — Proyecto del Orquestador asociado correctamente al repositorio gestionado.
   Prioridad P1.
-- FEATURE-032 — Instalación determinística de dependencias antes del build. Prioridad P2.
 - FEATURE-033 — Lifecycle canónico de `01-PROJECT-BRIEF-TEMPLATE`.
 - FEATURE-034 — Lifecycle canónico de `02-ARCHITECTURE-TEMPLATE`.
 - FEATURE-035 — Lifecycle canónico de `09-RELEASE-PLAN-TEMPLATE`.
@@ -730,14 +741,33 @@ confiar únicamente en que el prompt se respete); `canales` cambia de `field_typ
 `textarea` (`migrations/0014_canales_field_type_textarea.sql`, más el seed de `0009` actualizado
 para instalaciones nuevas).
 
-### 🟡 FEATURE-032 — Instalación determinística de dependencias antes del build
+### ✅ FEATURE-032 — Instalación determinística de dependencias antes del build
 
-**Estado:** Confirmada. Prioridad P2.
+**Estado:** Implementada y validada con suite automatizada y con prueba E2E real del owner en VPS
+(2026-07-30). Prioridad P2. Diseño original de ARIA (AI Product Architect), ampliado antes de
+implementar con timeouts configurables para los tres pasos del loop (`BUILD_TIMEOUT_MS`,
+`TEST_TIMEOUT_MS`, `DEPENDENCY_INSTALL_TIMEOUT_MS`). Diseño completo en
+`docs/features/FEATURE-032-Instalacion-determinística-de-dependencias-antes-del-build.md`.
 
-El pipeline asume que `node_modules` está disponible. Ya se observó un intento sin `tsc` porque la
-instalación no preparó correctamente las dependencias con `HOME` de solo lectura. Discovery deberá
-determinar si la garantía pertenece a la preparación del worktree, a `BuildExecutor` o a una etapa
-previa del pipeline, incluyendo una caché escribible y reproducible.
+El pipeline asumía que `node_modules` está disponible. Se observó un fallo real (`tsc: not found`)
+durante la validación E2E de FEATURE-029 — el nuevo `DependencyInstaller`
+(`src/testing/dependencyInstaller.ts`) corre entre Developer y `BuildExecutor`, con acceso a red y
+caché npm escribible explícita (el contenedor de Developer no la tiene). Nuevo motivo
+`dependencyInstallationFailureReason`, primero en la cadena de exclusión mutua del loop.
+
+**Validación E2E real (2026-07-30, proyecto `pruebas-ia`, rama
+`pruebas-ai-orchestratror-feature-029`)**: el run ejecutó tres intentos sobre el mismo caso de
+negocio. Primer intento: Developer escribió un `package.json` con BOM inválido; el evento
+`dependency_install_executed` registró el fallo de instalación (JSON inválido, Regla 7) y el loop
+lo atribuyó correctamente como `dependencyInstallationFailureReason`, sin invocar `BuildExecutor`
+ni QA. Segundo intento: Developer corrigió el `package.json`, la instalación real de `typescript`
+vía `npm ci` corrió con éxito (`node_modules/.bin/tsc` disponible), pero el build con `tsc` real
+falló por un error de tipos genuino y distinto (`TS2307`, módulo no encontrado) — atribuido
+correctamente como `buildFailureReason`, no como fallo de instalación, confirmando la exclusión
+mutua entre ambos motivos. Tercer intento: Developer corrigió el problema de tipos; instalación,
+build, contrato de `COMANDO_TEST` y tests corrieron limpios, QA aprobó, y el run llegó al
+escalamiento de merge. Evidencia real y específica de los tres componentes de la Feature actuando
+correctamente en secuencia sobre un run genuino con Docker y red real.
 
 ### 🟡 FEATURE-033 — Lifecycle de `01-PROJECT-BRIEF-TEMPLATE`
 
