@@ -58,3 +58,49 @@ test("completenessPercent calcula sobre el total de campos definidos, redondeado
   assert.equal(completenessPercent({ vision: null, canales: null }, FIELDS), 0);
   assert.equal(completenessPercent({ vision: "   ", canales: "otro" }, FIELDS), 50);
 });
+
+// FEATURE-031
+
+const FIELDS_WITH_TIPO_SOLUCION = [field("tipo_solucion", 1), ...FIELDS];
+
+test("buildMappingPrompt agrega las reglas de clasificación de tipo_solucion solo cuando ese campo está presente", () => {
+  const withField = buildMappingPrompt("texto", FIELDS_WITH_TIPO_SOLUCION);
+  assert.match(withField.system, /Reglas adicionales para clasificar el campo "tipo_solucion"/);
+  assert.match(withField.system, /negación de "existe"/);
+  assert.match(withField.system, /mejora_existente" exige DOS condiciones/);
+
+  const withoutField = buildMappingPrompt("texto", FIELDS);
+  assert.doesNotMatch(withoutField.system, /tipo_solucion/);
+});
+
+test("parseMappingResponse acepta los dos valores válidos de tipo_solucion", () => {
+  assert.equal(
+    parseMappingResponse(JSON.stringify({ tipo_solucion: "nueva" }), FIELDS_WITH_TIPO_SOLUCION).tipo_solucion,
+    "nueva"
+  );
+  assert.equal(
+    parseMappingResponse(JSON.stringify({ tipo_solucion: "mejora_existente" }), FIELDS_WITH_TIPO_SOLUCION)
+      .tipo_solucion,
+    "mejora_existente"
+  );
+});
+
+test("parseMappingResponse descarta cualquier valor de tipo_solucion fuera del dominio permitido (Regla 5.1)", () => {
+  assert.equal(
+    parseMappingResponse(JSON.stringify({ tipo_solucion: "otra_cosa" }), FIELDS_WITH_TIPO_SOLUCION).tipo_solucion,
+    null
+  );
+  assert.equal(
+    parseMappingResponse(JSON.stringify({ tipo_solucion: null }), FIELDS_WITH_TIPO_SOLUCION).tipo_solucion,
+    null
+  );
+});
+
+test("canales se mapea como texto plano, sin ningún tratamiento especial por su field_type", () => {
+  const listField: IntakeFieldDefinitionRow = { ...field("canales", 1), field_type: "textarea" };
+  const result = parseMappingResponse(
+    JSON.stringify({ canales: "Portal web y atención telefónica." }),
+    [listField]
+  );
+  assert.equal(result.canales, "Portal web y atención telefónica.");
+});

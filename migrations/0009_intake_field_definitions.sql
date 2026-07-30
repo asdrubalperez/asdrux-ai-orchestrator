@@ -1,6 +1,10 @@
 -- FEATURE-017: definición de los 12 campos del intake asistido por IA. Tabla simple, sin
 -- versionado (una sola fila vigente por field_key, actualizable in-place) — ver Scope/Excluido #1
 -- de la Feature para la justificación y el criterio de escalabilidad a versionado futuro.
+--
+-- FEATURE-031: `canales` sembrado directamente como 'textarea' (no 'list') para instalaciones
+-- nuevas — ver migrations/0014_canales_field_type_textarea.sql para la corrección equivalente en
+-- entornos donde esta migración ya corrió con el valor original.
 
 create table intake_field_definitions (
   id uuid primary key default gen_random_uuid(),
@@ -30,7 +34,7 @@ insert into intake_field_definitions (field_key, field_order, label, description
   ('alternativas_competidores', 7, 'Alternativas / Competidores',
    'Alternativas o competidores ya considerados.', 'textarea'),
   ('canales', 8, 'Canales',
-   'Canales por los que se entrega o distribuye la solución.', 'list'),
+   'Canales por los que se entrega o distribuye la solución.', 'textarea'),
   ('beneficios_esperables', 9, 'Beneficios Esperables',
    'Beneficios concretos esperados de la iniciativa.', 'textarea'),
   ('supuestos_pendientes', 10, 'Supuestos y Pendientes',
