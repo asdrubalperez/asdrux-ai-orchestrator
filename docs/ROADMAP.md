@@ -109,6 +109,15 @@
   `tempo-auto-planner`), sin necesidad de una Feature de producto nueva. Validó de punta a punta
   el circuito completo (merge de Feature → run hijo → Planning → Gate de cierre → proyecto
   cerrado). Ver Lecciones Aprendidas en `docs/features/lecciones-aprendidas/`.
+- FEATURE-031 — Mapping confiable de `tipo_solucion` y simplificación de `canales`: reglas de
+  clasificación explícitas (negación, distinción entre solución objeto de la iniciativa y
+  soluciones de terceros/sistemas relacionados, ambigüedad → vacío) inyectadas al prompt del
+  mapper, más validación de dominio en código para `tipo_solucion` (`nueva`/`mejora_existente`/
+  vacío, sin importar lo que devuelva el modelo). `canales` pasa de `field_type = list` a
+  `textarea` — sin lógica de compatibilidad histórica: se confirmó contra la base real que ningún
+  caso persistido tiene `canales` como array antes de implementar, evitando esa parte del alcance
+  original propuesto por el diseño. Validada por el owner en VPS (2026-07-30) además de la suite
+  automatizada. Diseño original de ARIA (AI Product Architect).
 
 **🟡 Confirmado**
 - FEATURE-025 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
@@ -119,7 +128,6 @@
   complementa FEATURE-021 sin reabrir el build determinístico básico.
 - FEATURE-030 — Proyecto del Orquestador asociado correctamente al repositorio gestionado.
   Prioridad P1.
-- FEATURE-031 — Mapping confiable de `tipo_solucion` y `canales` sin inventar valores. Prioridad P2.
 - FEATURE-032 — Instalación determinística de dependencias antes del build. Prioridad P2.
 - FEATURE-033 — Lifecycle canónico de `01-PROJECT-BRIEF-TEMPLATE`.
 - FEATURE-034 — Lifecycle canónico de `02-ARCHITECTURE-TEMPLATE`.
@@ -656,13 +664,34 @@ repositorios distintos, mezclando Roadmaps, Release Plans y estado persistido. L
 proyecto deberá distinguir correctamente el repositorio gestionado y evitar esa reutilización
 accidental.
 
-### 🟡 FEATURE-031 — Mapping confiable de `tipo_solucion` y `canales`
+### ✅ FEATURE-031 — Mapping confiable de `tipo_solucion` y simplificación de `canales`
 
-**Estado:** Confirmada. Prioridad P2.
+**Estado:** Implementada, validada con suite automatizada y con prueba manual del owner en VPS
+(2026-07-30). Prioridad P2. Diseño original de ARIA (AI Product Architect), revisado y ajustado
+antes de implementar.
 
-Estos campos del intake se mapean con menor confiabilidad que el resto; son los casos `select` y
-`list` sujetos a reglas conservadoras del modelo. Se requiere diagnosticar y corregir el contrato
-de mapping sin inventar valores.
+Estos campos del intake se mapeaban con menor confiabilidad que el resto de los diez campos
+descriptivos: `tipo_solucion` (`select`) podía clasificarse por palabras aisladas ("existe") sin
+considerar negaciones ni distinguir la solución objeto de la iniciativa de soluciones de terceros
+o sistemas relacionados; `canales` estaba definido como `list` sin que ningún código lo tratara
+distinto de un campo de texto libre.
+
+**Ajuste al diseño original, antes de implementar**: el diseño de ARIA incluía una capa de
+compatibilidad para leer `canales` histórico como `string | string[]`. Se verificó contra
+`mapBusinessCase.ts` (el parser trata todo campo como `string | null` sin excepción) y
+`ReviewModal.tsx` (renderiza `textarea` y `list` en la misma rama) que ningún camino de código
+produce `canales` como array, y se confirmó contra la base de datos real que no existe ningún
+caso persistido con esa forma — esa parte del alcance se descartó por no tener evidencia que la
+sostuviera, dejando el cambio de `canales` acotado a una migración de metadata.
+
+Qué se implementó: reglas de clasificación de `tipo_solucion` (negación, "mejora_existente" exige
+existencia + modificación simultáneas, terceros/sistemas relacionados no cuentan, ambigüedad →
+vacío) inyectadas al prompt del mapper solo cuando ese campo está presente
+(`src/intake/mapBusinessCase.ts`); validación de dominio en código para `tipo_solucion` (descarta
+cualquier valor fuera de `nueva`/`mejora_existente` que el modelo pudiera devolver, en vez de
+confiar únicamente en que el prompt se respete); `canales` cambia de `field_type = list` a
+`textarea` (`migrations/0014_canales_field_type_textarea.sql`, más el seed de `0009` actualizado
+para instalaciones nuevas).
 
 ### 🟡 FEATURE-032 — Instalación determinística de dependencias antes del build
 
