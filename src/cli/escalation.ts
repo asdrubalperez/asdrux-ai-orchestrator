@@ -16,17 +16,41 @@ export interface RoadmapReleaseEntry {
 
 export interface RoadmapApprovalPayload {
   releases: RoadmapReleaseEntry[];
-  activeReleaseId: string;
+  /**
+   * FEATURE-036: `null` representa ausencia real de release activo (proyecto cerrado sin release
+   * siguiente) — antes de esta Feature el campo era `string` no-nullable, así que un cierre sin
+   * release pendiente dejaba `activeReleaseId` apuntando al último release, ya `Completado`.
+   */
+  activeReleaseId: string | null;
 }
 
+/**
+ * FEATURE-036: además de la forma, valida el invariante cruzado entre `activeReleaseId` y los
+ * estados de `releases` — antes solo se comprobaba que el ID existiera entre los releases, sin
+ * comprobar que ese release estuviera `Activo` ni que no hubiera otros releases `Activo` a la vez.
+ * Exactamente uno de estos dos estados es válido:
+ *   - `activeReleaseId` es un string: existe exactamente un release `Activo` y es ese mismo.
+ *   - `activeReleaseId` es `null`: ningún release está `Activo`.
+ */
 export function isRoadmapApprovalPayload(value: unknown): value is RoadmapApprovalPayload {
   if (value === null || typeof value !== "object") return false;
   const candidate = value as { releases?: unknown; activeReleaseId?: unknown };
-  if (typeof candidate.activeReleaseId !== "string" || !Array.isArray(candidate.releases) || candidate.releases.length === 0) {
+  if (
+    (typeof candidate.activeReleaseId !== "string" && candidate.activeReleaseId !== null) ||
+    !Array.isArray(candidate.releases) ||
+    candidate.releases.length === 0
+  ) {
     return false;
   }
   if (!candidate.releases.every(isRoadmapReleaseEntry)) return false;
-  return candidate.releases.some((release) => release.id === candidate.activeReleaseId);
+
+  const releases = candidate.releases as RoadmapReleaseEntry[];
+  const activeReleases = releases.filter((release) => release.estado === "Activo");
+
+  if (candidate.activeReleaseId === null) {
+    return activeReleases.length === 0;
+  }
+  return activeReleases.length === 1 && activeReleases[0].id === candidate.activeReleaseId;
 }
 
 function isRoadmapReleaseEntry(value: unknown): value is RoadmapReleaseEntry {
@@ -40,10 +64,18 @@ function isRoadmapReleaseEntry(value: unknown): value is RoadmapReleaseEntry {
   );
 }
 
-/** El release marcado como activo dentro de un roadmap ya persistido, o null si no hay ninguno. */
+/**
+ * El release marcado como activo dentro de un roadmap ya persistido, o null si no hay ninguno.
+ * FEATURE-036, Regla 8: defensa local además de la validación de `isRoadmapApprovalPayload` — no
+ * confía únicamente en que `activeReleaseId` sea no-nulo, también exige que el release encontrado
+ * esté efectivamente `Activo` (documentación ejecutable del contrato, no solo una coincidencia de
+ * ID contra un release ya `Completado`).
+ */
 export function activeReleaseFromRoadmap(value: unknown): RoadmapReleaseEntry | null {
   if (!isRoadmapApprovalPayload(value)) return null;
-  return value.releases.find((release) => release.id === value.activeReleaseId) ?? null;
+  if (value.activeReleaseId === null) return null;
+  const release = value.releases.find((release) => release.id === value.activeReleaseId) ?? null;
+  return release && release.estado === "Activo" ? release : null;
 }
 
 /**

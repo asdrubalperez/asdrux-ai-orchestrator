@@ -16,7 +16,8 @@ export interface ReleaseRoadmapView {
     estado: "Activo" | "Pendiente" | "Completado";
     features: ReleasePlanFeatureView[];
   }>;
-  activeReleaseId: string;
+  /** FEATURE-036: `null` cuando el proyecto está cerrado y no hay ningún release activo. */
+  activeReleaseId: string | null;
 }
 
 export function ReleasePlanPanel({ releaseRoadmap }: { releaseRoadmap: ReleaseRoadmapView | null }) {
@@ -34,6 +35,9 @@ export function ReleasePlanPanel({ releaseRoadmap }: { releaseRoadmap: ReleaseRo
   return (
     <section className="h-full rounded-lg border border-zinc-200 bg-white p-4">
       <PanelLabel />
+      {releaseRoadmap.activeReleaseId === null ? (
+        <p className="mt-2 text-sm text-zinc-600">Sin release activo.</p>
+      ) : null}
       <div className="mt-4 space-y-4 text-sm">
         {releaseRoadmap.releases.map((release) => (
           <div key={release.id}>

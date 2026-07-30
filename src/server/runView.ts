@@ -46,7 +46,8 @@ export interface ReleaseRoadmapView {
     estado: "Activo" | "Pendiente" | "Completado";
     features: ReleasePlanFeatureEntry[];
   }>;
-  activeReleaseId: string;
+  /** FEATURE-036: `null` cuando el proyecto está cerrado y no hay ningún release activo. */
+  activeReleaseId: string | null;
 }
 
 export interface ReleasePlanConfigViewInput {

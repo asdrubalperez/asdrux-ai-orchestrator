@@ -795,15 +795,24 @@ detalle en esta actualización.
 
 ### 🟡 FEATURE-036 — Release activo nominal tras cierre de proyecto sin release siguiente
 
-**Estado:** Confirmada. Prioridad P1.
+**Estado:** Implementada en rama `feature/036-release-activo-consistente` — pendiente de
+validación E2E real en VPS (Roadmap con dos releases) antes de mergear a `main`. Prioridad P1.
+Diseño original de ARIA (AI Product Architect), aprobado con una corrección de orden: la revisión
+de datos reales se corrió como primer paso de la implementación, antes de tocar el validador (0
+roadmaps vigentes inconsistentes encontrados). Diseño completo en
+`docs/features/FEATURE-036-Release-activo-nominal-tras-cierre-de-proyecto.md`.
 
 Detectado en la prueba E2E real del 2026-07-29 (FEATURE-024): cuando se aprueba el cierre del
-último Release de un proyecto y no hay Release siguiente pendiente, `respondService.ts` marca el
-Release actual `Completado` pero conserva `activeReleaseId` apuntando a ese mismo Release ya
-completado, en vez de representar explícitamente que no hay ningún Release activo. Un proyecto
-cerrado puede así seguir exponiendo un Release completado como si fuera el activo. Relacionado con
-FEATURE-028 (Release Plan asociado al Release activo) — mismo tipo de invariante, distinto momento
-del ciclo de vida.
+último Release de un proyecto y no hay Release siguiente pendiente, `respondService.ts` marcaba el
+Release actual `Completado` pero conservaba `activeReleaseId` apuntando a ese mismo Release ya
+completado, en vez de representar explícitamente que no hay ningún Release activo, y
+`activeReleaseFromRoadmap` tampoco comprobaba el estado del release encontrado. `activeReleaseId`
+pasa a ser `string | null`; el validador exige el invariante cruzado (ID no nulo ⇒ exactamente un
+release `Activo` con ese ID; `null` ⇒ cero releases `Activo`); el cierre sin release siguiente
+ahora persiste `activeReleaseId: null` y garantiza por estado (no por coincidencia de ID) que
+ningún release quede `Activo`; `runView.ts`/`ReleasePlanPanel.tsx` muestran "Sin release activo" en
+vez de reutilizar el último release completado como fallback. Relacionado con FEATURE-028 (Release
+Plan asociado al Release activo) — mismo tipo de invariante, distinto momento del ciclo de vida.
 
 ### ⚪ Approval Model por Release
 Feature 09 (`06-DELIVERY-WORKFLOW.md`, Stage 6) ya diseñó la v1: Modo Manual (default — automático

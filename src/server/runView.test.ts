@@ -193,6 +193,27 @@ test("FEATURE-018: toReleaseRoadmapView rechaza valores que no tienen la forma e
   assert.equal(toReleaseRoadmapView("texto plano"), null);
 });
 
+// FEATURE-036, Escenario 8: Roadmap cerrado (sin release siguiente) en la vista backend.
+test("FEATURE-036: toReleaseRoadmapView expone activeReleaseId null sin sustituirlo por el último release completado", () => {
+  const view = toReleaseRoadmapView({
+    releases: [{ id: "r1", nombre: "MVP", alcanceResumen: "Alcance mínimo.", estado: "Completado" }],
+    activeReleaseId: null,
+  });
+
+  assert.notEqual(view, null);
+  assert.equal(view?.activeReleaseId, null);
+  assert.equal(view?.releases[0].estado, "Completado");
+});
+
+test("FEATURE-036: toReleaseRoadmapView rechaza un roadmap inconsistente (activeReleaseId apunta a release completado)", () => {
+  const view = toReleaseRoadmapView({
+    releases: [{ id: "r1", nombre: "MVP", alcanceResumen: "Alcance mínimo.", estado: "Completado" }],
+    activeReleaseId: "r1",
+  });
+
+  assert.equal(view, null);
+});
+
 function event(id: number, eventType: string, payload: unknown): RunEventRow {
   return {
     id,
