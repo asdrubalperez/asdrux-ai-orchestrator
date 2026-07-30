@@ -732,12 +732,17 @@ para instalaciones nuevas).
 
 ### 🟡 FEATURE-032 — Instalación determinística de dependencias antes del build
 
-**Estado:** Confirmada. Prioridad P2.
+**Estado:** Implementada en rama `feature/032-dependency-installer` — pendiente de validación real
+en VPS (Docker con red real) antes de mergear a `main`. Prioridad P2. Diseño original de ARIA (AI
+Product Architect), ampliado antes de implementar con timeouts configurables para los tres pasos
+del loop (`BUILD_TIMEOUT_MS`, `TEST_TIMEOUT_MS`, `DEPENDENCY_INSTALL_TIMEOUT_MS`). Diseño completo
+en `docs/features/FEATURE-032-Instalacion-determinística-de-dependencias-antes-del-build.md`.
 
-El pipeline asume que `node_modules` está disponible. Ya se observó un intento sin `tsc` porque la
-instalación no preparó correctamente las dependencias con `HOME` de solo lectura. Discovery deberá
-determinar si la garantía pertenece a la preparación del worktree, a `BuildExecutor` o a una etapa
-previa del pipeline, incluyendo una caché escribible y reproducible.
+El pipeline asumía que `node_modules` está disponible. Se observó un fallo real (`tsc: not found`)
+durante la validación E2E de FEATURE-029 — el nuevo `DependencyInstaller`
+(`src/testing/dependencyInstaller.ts`) corre entre Developer y `BuildExecutor`, con acceso a red y
+caché npm escribible explícita (el contenedor de Developer no la tiene). Nuevo motivo
+`dependencyInstallationFailureReason`, primero en la cadena de exclusión mutua del loop.
 
 ### 🟡 FEATURE-033 — Lifecycle de `01-PROJECT-BRIEF-TEMPLATE`
 
