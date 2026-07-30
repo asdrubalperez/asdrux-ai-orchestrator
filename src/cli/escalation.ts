@@ -86,6 +86,28 @@ function isReleasePlanFeatureEntry(value: unknown): value is ReleasePlanFeatureE
 }
 
 /**
+ * Corrección del runtime de circuitos (hallazgo confirmado 2026-07-29): lee un campo tanto de la
+ * forma objeto estructurado de Claude (ej. `{ roadmap: "..." }`) como de la forma texto plano que
+ * `PHASE_RESULT_SCHEMA` fuerza en Codex — ahí `outputArtifact` es SIEMPRE `string | null`, nunca
+ * objeto ([codexExecutor.ts], `PHASE_RESULT_SCHEMA`). Antes de esta corrección,
+ * `extractRoadmapApproval`/`extractReleasePlanDeclaration`/`isReleaseCompletionEscalation`
+ * exigían `typeof outputArtifact === "object"` — con Codex, esa condición nunca se cumple, así que
+ * estas tres funciones devolvían siempre `null`/`false` sin importar lo que Codex hubiera
+ * declarado. La forma texto usa la misma convención "ETIQUETA: valor en su propia línea" que ya
+ * usa `extractStructuredValue` en `features/contracts.ts` para estos mismos 5 contratos.
+ */
+function extractTaggedField(outputArtifact: unknown, tag: string, property: string): unknown {
+  if (outputArtifact !== null && typeof outputArtifact === "object" && !Array.isArray(outputArtifact)) {
+    return (outputArtifact as Record<string, unknown>)[property];
+  }
+  if (typeof outputArtifact === "string") {
+    const match = outputArtifact.match(new RegExp(`(?:^|\\n)${tag}:\\s*([^\\n]+)`, "i"));
+    return match ? match[1].trim() : undefined;
+  }
+  return undefined;
+}
+
+/**
  * Parsea el RELEASE_PLAN que Planning boltea a `outputArtifact` (mismo patrón que
  * `comandoTest`/`roadmap`/`features`). Devuelve null si el rol no es Planning, si no hay
  * `releasePlan` en el artifact, o si el JSON es inválido/malformado — riesgo H12 aceptado, mismo
@@ -96,9 +118,8 @@ export function extractReleasePlanDeclaration(
   content: { outputArtifact: unknown }
 ): ReleasePlanDeclaration | null {
   if (artifact.phase !== "planning") return null;
-  if (content.outputArtifact === null || typeof content.outputArtifact !== "object") return null;
 
-  const raw = (content.outputArtifact as { releasePlan?: unknown }).releasePlan;
+  const raw = extractTaggedField(content.outputArtifact, "RELEASE_PLAN", "releasePlan");
   let parsed: unknown = raw;
   if (typeof raw === "string") {
     try {
@@ -114,15 +135,16 @@ export function extractReleasePlanDeclaration(
 /**
  * FEATURE-019: distingue la escalación de "release completo" (Planning no tiene más Features para
  * asignar) de una ambigüedad genérica de Planning — mismo criterio de distinción por contenido que
- * `extractRoadmapApproval`.
+ * `extractRoadmapApproval`. Acepta booleano real o el string `"true"` (mismo criterio dual que
+ * `isNotApplicableOutput`).
  */
 export function isReleaseCompletionEscalation(
   artifact: { phase: AgentRole },
   content: { outputArtifact: unknown }
 ): boolean {
   if (artifact.phase !== "planning") return false;
-  if (content.outputArtifact === null || typeof content.outputArtifact !== "object") return false;
-  return (content.outputArtifact as { releaseCompleto?: unknown }).releaseCompleto === "true";
+  const raw = extractTaggedField(content.outputArtifact, "RELEASE_COMPLETO", "releaseCompleto");
+  return raw === "true" || raw === true;
 }
 
 /**
@@ -143,9 +165,8 @@ export function extractRoadmapApproval(
   content: { outputArtifact: unknown }
 ): RoadmapApprovalPayload | null {
   if (artifact.phase !== "architect") return null;
-  if (content.outputArtifact === null || typeof content.outputArtifact !== "object") return null;
 
-  const raw = (content.outputArtifact as { roadmap?: unknown }).roadmap;
+  const raw = extractTaggedField(content.outputArtifact, "ROADMAP", "roadmap");
   if (typeof raw !== "string") return null;
 
   let parsed: unknown;

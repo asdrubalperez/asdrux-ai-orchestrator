@@ -255,3 +255,45 @@ test("extractRoadmapApproval (movida a escalation.ts) sigue parseando un ROADMAP
   assert.deepEqual(extractRoadmapApproval({ phase: "architect" }, content), VALID_ROADMAP);
   assert.equal(extractRoadmapApproval({ phase: "planning" }, content), null);
 });
+
+// Corrección del runtime de circuitos: paridad Codex para los 3 extractores de Gate.
+// Codex está forzado (PHASE_RESULT_SCHEMA) a que outputArtifact sea SIEMPRE string|null — antes de
+// esta corrección, estas 3 funciones exigían "object" y devolvían siempre null/false con Codex.
+
+test("extractRoadmapApproval reconoce ROADMAP cuando outputArtifact es el string real que produce Codex", () => {
+  const codexOutput = `RESUMEN: listo\nARTEFACTO: null\nROADMAP: ${JSON.stringify(VALID_ROADMAP)}`;
+  assert.deepEqual(extractRoadmapApproval({ phase: "architect" }, { outputArtifact: codexOutput }), VALID_ROADMAP);
+});
+
+test("extractRoadmapApproval devuelve null si el string de Codex no trae la línea ROADMAP", () => {
+  assert.equal(
+    extractRoadmapApproval({ phase: "architect" }, { outputArtifact: "RESUMEN: ambigüedad genérica" }),
+    null
+  );
+});
+
+test("extractReleasePlanDeclaration reconoce RELEASE_PLAN cuando outputArtifact es el string real que produce Codex", () => {
+  const codexOutput = `RESUMEN: plan\nRELEASE_PLAN: ${JSON.stringify(VALID_RELEASE_PLAN_DECLARATION)}\nRELEASE_COMPLETO: null`;
+  assert.deepEqual(
+    extractReleasePlanDeclaration({ phase: "planning" }, { outputArtifact: codexOutput }),
+    VALID_RELEASE_PLAN_DECLARATION
+  );
+});
+
+test("isReleaseCompletionEscalation reconoce RELEASE_COMPLETO cuando outputArtifact es el string real que produce Codex", () => {
+  const codexOutput = "RESUMEN: no queda ninguna Feature pendiente\nRELEASE_COMPLETO: true";
+  assert.equal(isReleaseCompletionEscalation({ phase: "planning" }, { outputArtifact: codexOutput }), true);
+});
+
+test("isReleaseCompletionEscalation sigue aceptando el booleano real ademas del string 'true'", () => {
+  assert.equal(
+    isReleaseCompletionEscalation({ phase: "planning" }, { outputArtifact: { releaseCompleto: true } }),
+    true
+  );
+});
+
+test("classifyGateEscalation también clasifica correctamente con outputArtifact string (forma de Codex)", () => {
+  const roadmapOutput = `RESUMEN: listo\nROADMAP: ${JSON.stringify(VALID_ROADMAP)}`;
+  assert.equal(classifyGateEscalation("architect", roadmapOutput), "roadmap_approval");
+  assert.equal(classifyGateEscalation("planning", "RESUMEN: cierre\nRELEASE_COMPLETO: true"), "release_completion");
+});
