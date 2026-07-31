@@ -180,6 +180,19 @@
   cruzada): la propia bitácora de Planning confirmó textualmente *"Es la primera invocación para el
   release r2 (releasePlan viene null...)"*, sin ningún rastro de Features del release anterior.
   Diseño original de ARIA (AI Product Architect), Discovery cerrado junto con FEATURE-038.
+- FEATURE-037 — Entrega gobernada de reglas del Runbook a Planning, Developer y QA: en cada
+  invocación relevante, Planning recibe `governance.testingPolicy` (`04-TESTING-POLICY.md`, del
+  cual es dueño/consultor directo) para traducirlo al Test Plan de la Feature; Developer recibe
+  `governance.codingStandards` (`05-CODING-STANDARDS.md`, del cual es dueño/consultor directo) en
+  cada intento incluido el turno de readiness; QA solo recibe el Test Plan vigente, sin ninguno de
+  los dos documentos completos — evita múltiples fuentes normativas simultáneas. Entrega fresca sin
+  caché entre invocaciones; `TESTING_POLICY_ASSET`/`CODING_STANDARDS_ASSET` agregados a
+  `REQUIRED_RUNBOOK_ASSETS` (fallo cerrado si faltan); namespace `governance` protegido contra
+  sobrescritura por contexto no confiable; auditoría por evento con solo metadata (rol, path,
+  versión, hash). Validada con 20 tests automatizados. Diseño original de ARIA (AI Product
+  Architect), aprobado con dos correcciones de redacción (la entrada original del Roadmap era
+  ambigua, no decía literalmente lo que el diseño corregía; el patrón de `runbookProvider.readText`
+  para Functional no es precedente de inyección pre-invocación — FEATURE-037 introduce ese patrón).
 
 **🟡 Confirmado**
 - FEATURE-025 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
@@ -190,13 +203,6 @@
 - FEATURE-033 — Lifecycle canónico de `01-PROJECT-BRIEF-TEMPLATE`.
 - FEATURE-034 — Lifecycle canónico de `02-ARCHITECTURE-TEMPLATE`.
 - FEATURE-035 — Lifecycle canónico de `09-RELEASE-PLAN-TEMPLATE`.
-- FEATURE-037 — Entrega garantizada de reglas de gobernanza del Runbook (Testing Policy, Coding
-  Standards) al contexto de QA/Developer en cada invocación. Hoy ninguno de los dos roles tiene
-  tool ni contexto para alcanzar esos documentos (QA: `fs_read` acotado al worktree, sin acceso a
-  `assets/runbook/`; tampoco son artifacts persistidos). Sin persistencia entre invocaciones — debe
-  inyectarse fresco en cada llamada, mismo patrón que ya usa `runbookProvider.readText` para
-  Functional. Motivado por las Reglas 11/12 nuevas de `04-TESTING-POLICY.md` (2026-07-30).
-  Prioridad por definir.
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
@@ -233,7 +239,7 @@ y, dentro de cada nivel, por Impacto y luego por Esfuerzo.
 | FEATURE-030 — Proyecto asociado al repositorio gestionado (P1) | Medio | Alto | Alta |
 | FEATURE-025 — Selección proveedor/modelo/credenciales por rol | Medio | Medio | Alta |
 | FEATURE-032 — Instalación determinística de dependencias (P2) | Medio | Medio | Alta |
-| FEATURE-037 — Entrega garantizada de reglas de gobernanza a QA/Dev (nuevo) | Medio | Medio | Alta |
+| FEATURE-037 — Entrega gobernada de reglas del Runbook a Planning/Developer/QA (nuevo) | Medio | Medio | Alta |
 | FEATURE-038 — Persistencia del estado final del Release Plan al cerrar un release (nuevo) | Medio | Medio | Alta |
 | FEATURE-027 — Continuidad durable Developer↔QA (P0) | Alto | Alto | Alta |
 | FEATURE-026 — Credenciales git por usuario | Alto | Medio | Alta |
@@ -957,6 +963,37 @@ mostrando `f1` `"En curso"`, confirmando el contraste directo con el estado obso
 persistido antes del fix. Al cerrar el proyecto completo (r2, última Feature del release final), la
 UI mostró "Sin release activo" y ambas Features con el check verde de "Completada" — antes del fix,
 la última Feature de cada release quedaba indefinidamente con el ícono "en curso".
+
+### 🟡 FEATURE-037 — Entrega gobernada de reglas del Runbook a Planning, Developer y QA
+
+**Estado:** Implementada en rama `feature/037-runbook-governance-planning-developer` — pendiente de
+validación E2E real en VPS antes de mergear a `main`. Prioridad P1. Diseño original de ARIA (AI
+Product Architect), aprobado con dos correcciones de redacción (sin cambios de alcance): la entrada
+original del Roadmap era genérica, no decía literalmente "inyectar ambos documentos completos a
+QA/Developer"; y el patrón previo de `runbookProvider.readText` (Functional) resuelve el asset
+después de que la fase completó, para persistencia — no es precedente de inyección pre-invocación,
+que es lo que introduce esta Feature. Diseño completo en
+`docs/features/FEATURE-037-Entrega-gobernada-de-reglas-del-Runbook-a-Planning-Developer-y-QA.md`.
+
+Ni Planning, ni Developer, ni QA tenían garantía estructural de recibir las reglas de gobernanza del
+Runbook que les corresponde aplicar. El ownership vigente (`04-TESTING-POLICY.md:6`: *"Dueño y único
+consultor directo: Planning"*; `05-CODING-STANDARDS.md:6-8`: *"Dueño y consultor directo:
+Developer"*) distingue responsabilidades — inyectar ambos documentos completos a todos los roles
+habría contradicho ese ownership y creado múltiples fuentes normativas simultáneas.
+
+**Mecanismo implementado**: Planning recibe `governance.testingPolicy` en cada invocación
+(`withRoleContext`, `runStart.ts`), leído fresco vía `RunbookProvider`, para traducirlo al Test Plan
+de la Feature. Developer recibe `governance.codingStandards` en cada intento del loop
+Developer↔QA, incluido el turno de readiness post-QA (`loadDeveloperGovernance`, nuevo servicio
+inyectable `runbookProvider`) — su presencia no autoriza cambios de código en readiness. QA no
+recibe ninguno de los dos documentos completos, solo el Test Plan vigente ya existente. Namespace
+`governance` protegido: `shapeRoleContext` aplica `shared` siempre al final del merge, así que un
+campo `governance` falso en el contexto entrante nunca sobrescribe el real. `TESTING_POLICY_ASSET`/
+`CODING_STANDARDS_ASSET` agregados a `REQUIRED_RUNBOOK_ASSETS` — el Orquestador falla al arrancar si
+el paquete está incompleto (fallo cerrado, Regla 13). Auditoría vía evento
+`runbook_governance_delivered` con metadata (rol, path, versión, hash), sin persistir el contenido
+completo. Refuerzo mínimo de `planning.txt`/`developer.txt`/`qa.txt` según ownership, sin cambiar el
+formato de respuesta de ningún rol.
 
 ### ⚪ Approval Model por Release
 Feature 09 (`06-DELIVERY-WORKFLOW.md`, Stage 6) ya diseñó la v1: Modo Manual (default — automático

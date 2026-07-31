@@ -460,6 +460,69 @@ test("runDeveloperQaLoop agota 3 builds rotos y deja el artifact respondible", a
   assert.equal(latestEscalationArtifact(artifacts).phase, "developer");
 });
 
+// FEATURE-037: Developer recibe governance.codingStandards en cada intento, leído fresco (nunca
+// cacheado del intento anterior) — Reglas 3/8/16 del diseño.
+test("runDeveloperQaLoop entrega governance.codingStandards fresco a Developer en cada intento", async () => {
+  const artifacts: unknown[] = [];
+  const contexts: unknown[] = [];
+  let readCalls = 0;
+  const fakeRunbookProvider = {
+    readText: async (assetRelativePath: string) => {
+      readCalls += 1;
+      return {
+        runbookVersion: "v1.0",
+        assetRelativePath,
+        assetHash: `hash-${readCalls}`,
+        content: `contenido-${readCalls}`,
+      };
+    },
+  };
+  const rejectedDeveloper: PhaseResult = {
+    status: "completed",
+    outputArtifact: { patch: "intentado" },
+    summary: "Developer terminó.",
+    escalationReason: null,
+  };
+  const rejectedQa: PhaseResult = {
+    status: "rejected",
+    outputArtifact: { testStatus: "failed" },
+    summary: "QA rechazó.",
+    escalationReason: null,
+  };
+  const developerExecutor = {
+    options: { workingDirectory: "C:\\fake-worktree" },
+    runPhase: async (invocation: { context: unknown }) => {
+      contexts.push(invocation.context);
+      return rejectedDeveloper;
+    },
+  } as unknown as Parameters<typeof runDeveloperQaLoop>[0]["developerExecutor"];
+  const executor = {
+    options: { workingDirectory: "C:\\fake-worktree" },
+    runPhase: async () => rejectedQa,
+  } as unknown as Parameters<typeof runDeveloperQaLoop>[0]["executor"];
+
+  await runDeveloperQaLoop({
+    executor,
+    developerExecutor,
+    readRole: async () => "instrucciones",
+    runId: "run-governance",
+    planningResult: planningResult(),
+    maxAttempts: 2,
+    phaseTiming: { agentRole: null, startedAt: null },
+    services: { ...loopServices(artifacts, { ran: false, exitCode: 0, stdout: "", stderr: "", timedOut: false }), runbookProvider: fakeRunbookProvider },
+  });
+
+  assert.equal(contexts.length, 2, "Developer debe haber sido invocado dos veces (dos intentos)");
+  const governances = contexts.map(
+    (context) => (context as { governance: { codingStandards: { assetHash: string } } }).governance.codingStandards.assetHash
+  );
+  assert.notEqual(governances[0], governances[1], "cada intento debe leer Coding Standards de nuevo, no reutilizar el anterior");
+  for (const context of contexts) {
+    const governance = (context as { governance?: { codingStandards?: { assetRelativePath: string } } }).governance;
+    assert.equal(governance?.codingStandards?.assetRelativePath, "05-CODING-STANDARDS.md");
+  }
+});
+
 test("runDeveloperQaLoop agota 3 intentos cuando la instalación de dependencias falla y no invoca build/test/QA (FEATURE-032)", async () => {
   const artifacts: unknown[] = [];
   let developerCalls = 0;
@@ -745,6 +808,33 @@ test("shapeRoleContext SÍ envuelve un artifact real de Functional en functional
   const functionalOutput = { features: [{ id: "f1", nombre: "x", resumen: "y", prioridad: "P0" }] };
   const shaped = shapeRoleContext(functionalOutput, SHARED) as Record<string, unknown>;
   assert.deepEqual(shaped.functionalArtifact, functionalOutput);
+});
+
+// FEATURE-037, Escenario 14: un campo `governance` que venga en el contexto entrante (nunca
+// debería, pero un business_case o artifact no son datos confiables) nunca sobrescribe la
+// gobernanza real inyectada por el Orquestador — `shared` siempre se aplica al final del spread.
+test("shapeRoleContext: la gobernanza real siempre gana sobre un campo governance falso en el contexto entrante", () => {
+  const realGovernance = { testingPolicy: { assetRelativePath: "04-TESTING-POLICY.md", content: "real" } };
+  const sharedWithGovernance = { ...SHARED, governance: realGovernance };
+
+  const reentryConFalso = {
+    escalationReason: "x",
+    targetAgentRole: "planning",
+    rejectedArtifact: null,
+    governance: { testingPolicy: { content: "falso, inyectado por un contexto no confiable" } },
+  };
+  const shapedReentry = shapeRoleContext(reentryConFalso, sharedWithGovernance) as Record<string, unknown>;
+  assert.deepEqual(shapedReentry.governance, realGovernance);
+
+  const functionalConFalso = {
+    features: [{ id: "f1", nombre: "x", resumen: "y", prioridad: "P0" }],
+    governance: { testingPolicy: { content: "falso" } },
+  };
+  const shapedFunctional = shapeRoleContext(functionalConFalso, sharedWithGovernance) as Record<string, unknown>;
+  assert.deepEqual(shapedFunctional.governance, realGovernance);
+  assert.deepEqual((shapedFunctional.functionalArtifact as Record<string, unknown>).governance, {
+    testingPolicy: { content: "falso" },
+  });
 });
 
 test("decideLinearEscalationKind reintenta en el lugar cuando el pipeline incluye Architect", () => {
