@@ -151,10 +151,10 @@
   descubierta durante esa misma validación (`getReleasePlansByRelease` mezclaba historial de ciclos
   de prueba no relacionados — acotado ahora por `root_run_id`). Diseño original de ARIA (AI Product
   Architect), aprobado con una corrección de orden (revisar datos reales antes de endurecer el
-  validador — 0 roadmaps vigentes inconsistentes encontrados). Detectó además un hallazgo separado,
-  documentado como FEATURE-038 (no determinístico, no siempre se dispara): Planning no resetea el
-  scope de Features al cruzar de release, y el último Feature de un release nunca queda marcado
-  `Completada`.
+  validador — 0 roadmaps vigentes inconsistentes encontrados). Detectó además dos hallazgos
+  separados del ciclo de vida del Release Plan: Features de un release anterior reapareciendo en el
+  siguiente (scope de FEATURE-028) y el último Feature de un release nunca marcado `Completada`
+  (FEATURE-038, ver más abajo).
 
 **🟡 Confirmado**
 - FEATURE-025 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
@@ -173,11 +173,10 @@
   inyectarse fresco en cada llamada, mismo patrón que ya usa `runbookProvider.readText` para
   Functional. Motivado por las Reglas 11/12 nuevas de `04-TESTING-POLICY.md` (2026-07-30).
   Prioridad por definir.
-- FEATURE-038 — El `release_plan` no resetea el scope de Features al cruzar a un release nuevo
-  (Features de un release cerrado reaparecen en el siguiente) ni marca el último Feature de un
-  release como `Completada` cuando el turno siguiente de Planning declara `RELEASE_COMPLETO` en vez
-  de un nuevo `RELEASE_PLAN`. Detectado en la validación E2E de FEATURE-036 (2026-07-30). Prioridad
-  por definir.
+- FEATURE-038 — Persistencia del estado final del Release Plan al cerrar un release: el
+  `release_plan` no se volvía a persistir cuando Planning declaraba `RELEASE_COMPLETO` (su resultado
+  tiene `status = escalated`, no `completed`), dejando la última Feature marcada `"En curso"` pese a
+  la aprobación de QA. Detectado en la validación E2E de FEATURE-036 (2026-07-30). Prioridad P1.
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
@@ -215,7 +214,7 @@ y, dentro de cada nivel, por Impacto y luego por Esfuerzo.
 | FEATURE-025 — Selección proveedor/modelo/credenciales por rol | Medio | Medio | Alta |
 | FEATURE-032 — Instalación determinística de dependencias (P2) | Medio | Medio | Alta |
 | FEATURE-037 — Entrega garantizada de reglas de gobernanza a QA/Dev (nuevo) | Medio | Medio | Alta |
-| FEATURE-038 — Ciclo de vida del Release Plan entre releases (scope y cierre del último Feature) (nuevo) | Medio | Medio | Alta |
+| FEATURE-038 — Persistencia del estado final del Release Plan al cerrar un release (nuevo) | Medio | Medio | Alta |
 | FEATURE-027 — Continuidad durable Developer↔QA (P0) | Alto | Alto | Alta |
 | FEATURE-026 — Credenciales git por usuario | Alto | Medio | Alta |
 | FEATURE-033 — Lifecycle 01-PROJECT-BRIEF-TEMPLATE | Alto | Bajo | Media |
@@ -703,6 +702,16 @@ Debe incluir como criterio verificable: activar un Release nuevo no debe dejar e
 ni el `activeReleaseId` del Release anterior como si siguiera vigente — ver FEATURE-036 (release
 activo nominal tras cierre sin release siguiente), hallazgo relacionado de la misma prueba E2E.
 
+**Mecanismo preferido (Discovery cerrado con ARIA/DAIA durante FEATURE-038, 2026-07-30)**: no
+agregar `releaseId` a `ReleasePlanPayload` como primera opción — ya existe una relación auditable y
+persistida para resolver a qué release pertenecía cada versión de `release_plan`, sin tocar el
+contrato que declara Planning: `project_config_versions.release_plan.changed_in_run_id` → el run
+que la escribió → su `release_roadmap` pinneado (`run_config_versions`) → el `activeReleaseId`
+vigente en ese momento. Comparar eso contra el release activo actual, en `withRoleContext`
+(`runStart.ts`), entregando `releasePlan: null` a Planning cuando no coincide. Es la misma relación
+ya usada por el fix de `getReleasePlansByRelease` (ver FEATURE-036, sección técnica). Evaluar
+`releaseId` solo si esta relación resulta insuficiente en el diseño formal.
+
 ### ✅ FEATURE-029 — Contrato determinístico entre build output y `COMANDO_TEST`
 
 **Estado:** Implementada y validada con 13 tests automatizados (unitarios de
@@ -865,39 +874,48 @@ rama correcta. Repetido en `feature/036-release-activo-consistente`: r1 se cerr�
 correctamente; al cerrar r2 sin release pendiente, `project_closed` se registró con
 `activeReleaseId: null` persistido, y la UI mostró "Sin release activo" sin usar el release
 completado como fallback. Durante esa misma validación se descubrió y corrigió aparte un bug de
-`getReleasePlansByRelease` (ver sección técnica arriba) y se documentó un hallazgo separado,
-FEATURE-038, no disparado en la corrida final (comportamiento no determinístico del LLM).
+`getReleasePlansByRelease` (ver sección técnica arriba) y se documentaron dos hallazgos separados
+sobre el ciclo de vida del Release Plan: Features de un release anterior reapareciendo en el
+siguiente (no disparado en la corrida final — comportamiento no determinístico del LLM; scope de
+FEATURE-028) y el último Feature nunca marcado `Completada` (FEATURE-038, sí reproducido).
 
-### 🟡 FEATURE-038 — Ciclo de vida del Release Plan no resetea scope entre releases ni cierra el último Feature
+### 🟡 FEATURE-038 — Persistencia del estado final del Release Plan al cerrar un release
 
-**Estado:** Confirmada contra código real y contra una prueba E2E real (2026-07-30, proyecto
-`pruebas-ia`, caso de dos releases). Prioridad por definir. Detectada durante la validación E2E de
-FEATURE-036 — distinta en alcance (no es sobre `activeReleaseId`, es sobre el `release_plan`
-mismo), se deja como hallazgo separado en vez de mezclarla con esa Feature.
+**Estado:** Implementada en rama `feature/038-release-plan-cierre-consistente` — pendiente de
+validación E2E real en VPS antes de mergear a `main`. Prioridad P1. Diseño original de ARIA (AI
+Product Architect), aprobado con dos ajustes: (1) los cierres inconsistentes usan
+`FeatureLifecycleEscalationError` explícitamente, nunca `throw new Error()` genérico; (2) la
+validación compara `featureJustCompleted` contra el Release Plan vigente de **entrada** (el que
+Planning recibió como contexto), nunca contra el `RELEASE_PLAN` declarado de salida. Diseño completo
+en `docs/features/FEATURE-038-Persistencia-del-estado-final-del-Release-Plan-al-cerrar-un-release.md`.
 
-**Síntoma 1 — Features de un release ya cerrado aparecen también en el release siguiente**: en el
-caso probado, Planning declaró el primer `RELEASE_PLAN` (release r1) incluyendo tanto f1 (asignada
-a r1) como f2 (que Functional ya había asignado explícitamente a r2:
-`"f2 (calculateSplitTip, Release 2, P1)"`). Al abrirse r2, Planning volvió a declarar f1 dentro de
-su secuencia (`"Esta es la única Feature del release además de f1 (ya completada)"`), pese a que f1
-pertenece a r1. `persistReleasePlanIfDeclared` (`src/cli/commands/runStart.ts:845`) persiste el
-`release_plan` tal como Planning lo declara, sin filtrar por release — y la instrucción de
-`planning.txt:57-58` ("declará siempre el estado completo de la secuencia... incluyendo las ya
-completadas") no acota explícitamente que esa secuencia se resetea al cruzar a un release nuevo.
-Efecto visible: `ReleasePlanPanel` muestra el mismo listado de Features duplicado bajo los dos
-releases.
+Detectado durante la validación E2E de FEATURE-036 (2026-07-30, proyecto `pruebas-ia`): el
+`release_plan` persistido solo cambiaba cuando Planning declaraba un `RELEASE_PLAN` con
+`status = completed`. Cuando Planning declaraba `RELEASE_COMPLETO`, su resultado tenía
+`status = escalated` (es un Approval Gate, no un error) — así que el `RELEASE_PLAN` final que
+Planning sí declaraba correctamente (última Feature `Completada`, `featureActualId: null`) nunca
+llegaba a persistirse. La UI mostraba la última Feature con el ícono "en curso" para siempre, pese
+a que QA ya la había aprobado y el release estaba efectivamente cerrado.
 
-**Síntoma 2 — el último Feature de cada release nunca queda marcado "Completada"**: el
-`release_plan` persistido solo cambia cuando Planning declara un `RELEASE_PLAN` nuevo. Cuando un
-Feature es el último del release, el turno siguiente de Planning declara `RELEASE_COMPLETO` (no un
-`RELEASE_PLAN`), así que nadie vuelve a persistir ese Feature con `estado: "Completada"` — queda
-para siempre en el estado ("En curso") de su última declaración real, aunque QA ya la haya
-aprobado. Confirmado en la UI: en el proyecto cerrado, el último Feature de ambos releases se
-mostraba con el ícono "en curso", nunca con el check verde.
+`persistReleasePlanIfDeclared` (`src/cli/commands/runStart.ts`) ahora persiste también cuando
+`status = escalated` con `RELEASE_COMPLETO = true`, siempre que el cierre sea coherente: nueva
+función pura `validateFinalReleasePlanTransition` valida contra el Release Plan vigente de entrada
+(el mismo objeto que ya vio Planning, sin relectura de la base — elimina de fábrica cualquier
+ventana de carrera) que `featureJustCompleted` coincida con la Feature que estaba `"En curso"`,
+que todas las Features finales queden `Completada` sin altas/bajas/duplicados de identidad, y que
+`COMANDO_TEST`/`FEATURE_UPDATE` vengan nulos. Un cierre inconsistente no se persiste y escala
+explícitamente vía `FeatureLifecycleEscalationError` (reutilizado de `src/features/lifecycle.ts`),
+nunca como error genérico de infraestructura ni como un Approval Gate engañoso.
 
-Ambos sin diseñar todavía — requieren decidir si Planning debe recibir explícitamente el scope de
-Features del release activo (no el histórico completo) y si el cierre de un Feature vía
-`RELEASE_COMPLETO` debe forzar una actualización final de `estado` antes de escalar.
+**Discovery cerrado con ARIA**: el hallazgo original de FEATURE-036 traía dos síntomas — Features
+del release anterior reapareciendo en el siguiente (causa distinta: `withRoleContext` entrega el
+`release_plan` vigente a Planning sin verificar que pertenezca al mismo release que `activeRelease`)
+y el síntoma que corrige esta Feature. El primero queda explícitamente dentro del alcance ya
+confirmado de **FEATURE-028** (Release Plan asociado inequívocamente al Release activo) — con un
+mecanismo preferido derivado del Discovery: resolver el release vigente cuando se escribió cada
+versión de `release_plan` vía `changed_in_run_id → run_config_versions → release_roadmap pinneado`
+(la misma relación auditable ya usada por el fix de `getReleasePlansByRelease`), en vez de agregar
+`releaseId` al contrato de Planning.
 
 ### ⚪ Approval Model por Release
 Feature 09 (`06-DELIVERY-WORKFLOW.md`, Stage 6) ya diseñó la v1: Modo Manual (default — automático
