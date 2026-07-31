@@ -202,6 +202,30 @@
 
 ---
 
+## Priorización — Matriz Esfuerzo × Impacto
+
+Ponderación de los ítems 🟡 Confirmado (más FEATURE-029/032/036, ya ✅ Ejecutado, dejados aquí como
+referencia histórica de la corrida de priorización). Ordenada por Ponderación (Alta → Media → Baja)
+y, dentro de cada nivel, por Impacto y luego por Esfuerzo.
+
+| Elemento | Esfuerzo | Impacto | Ponderación |
+|---|---|---|---|
+| FEATURE-028 — Release Plan asociado al Release activo (P1) | Medio | Alto | Alta |
+| FEATURE-030 — Proyecto asociado al repositorio gestionado (P1) | Medio | Alto | Alta |
+| FEATURE-025 — Selección proveedor/modelo/credenciales por rol | Medio | Medio | Alta |
+| FEATURE-032 — Instalación determinística de dependencias (P2) | Medio | Medio | Alta |
+| FEATURE-037 — Entrega garantizada de reglas de gobernanza a QA/Dev (nuevo) | Medio | Medio | Alta |
+| FEATURE-038 — Ciclo de vida del Release Plan entre releases (scope y cierre del último Feature) (nuevo) | Medio | Medio | Alta |
+| FEATURE-027 — Continuidad durable Developer↔QA (P0) | Alto | Alto | Alta |
+| FEATURE-026 — Credenciales git por usuario | Alto | Medio | Alta |
+| FEATURE-033 — Lifecycle 01-PROJECT-BRIEF-TEMPLATE | Alto | Bajo | Media |
+| FEATURE-034 — Lifecycle 02-ARCHITECTURE-TEMPLATE | Alto | Bajo | Media |
+| FEATURE-035 — Lifecycle 09-RELEASE-PLAN-TEMPLATE | Alto | Bajo | Media |
+| FEATURE-036 — Release activo nominal tras cierre (P1) | Bajo | Medio | Baja |
+| FEATURE-029 — Contrato build output / COMANDO_TEST (P1) | Bajo | Bajo | Baja |
+
+---
+
 ## Detalle
 
 ### ✅ Milestone 0
