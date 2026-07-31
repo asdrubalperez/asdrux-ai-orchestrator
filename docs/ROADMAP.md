@@ -168,12 +168,23 @@
   el cierre de un release intermedio como del último release del proyecto. Diseño original de ARIA
   (AI Product Architect), Discovery cerrado junto con FEATURE-028 (que absorbe el otro síntoma —
   Features de un release anterior reapareciendo en el siguiente).
+- FEATURE-028 — Release Plan asociado inequívocamente al Release activo: `withRoleContext` armaba
+  `activeRelease`/`releasePlan` de fuentes independientes sin verificar que pertenecieran al mismo
+  release. Nueva consulta `getReleasePlanAssociationCandidate` (reutiliza el CTE `current_epoch` de
+  `getReleasePlansByRelease`, FEATURE-036) resuelve el `activeReleaseId`/`root_run_id` pinneados en
+  el run que escribió el `release_plan` vigente; nueva función pura
+  `resolveReleasePlanForActiveRelease` exige coincidencia de release **y** de ciclo de negocio —
+  `releasePlan: null` cuando no coincide, sin borrar ni alterar el historial. No se agregó
+  `releaseId` al contrato de Planning. Validada con 7 tests automatizados y con E2E real en VPS
+  (2026-07-31, mismo caso de propinas que en un intento anterior había disparado la contaminación
+  cruzada): la propia bitácora de Planning confirmó textualmente *"Es la primera invocación para el
+  release r2 (releasePlan viene null...)"*, sin ningún rastro de Features del release anterior.
+  Diseño original de ARIA (AI Product Architect), Discovery cerrado junto con FEATURE-038.
 
 **🟡 Confirmado**
 - FEATURE-025 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
 - FEATURE-026 — Credenciales git por usuario para el Orquestador (promovida de ⚪ Tentativo)
 - FEATURE-027 — Continuidad durable del loop Developer ↔ QA. Prioridad P0.
-- FEATURE-028 — Release Plan asociado inequívocamente al Release activo. Prioridad P1.
 - FEATURE-030 — Proyecto del Orquestador asociado correctamente al repositorio gestionado.
   Prioridad P1.
 - FEATURE-033 — Lifecycle canónico de `01-PROJECT-BRIEF-TEMPLATE`.
@@ -699,27 +710,38 @@ permiten auditoría, pero no reconstruir ni continuar el ciclo después de una c
 La Feature deberá hacer reanudables y auditables el intento actual, el último resultado de
 Developer, el último veredicto de QA, el último fallo de build y el motivo inmediato del retry.
 
-### 🟡 FEATURE-028 — Release Plan asociado al Release activo
+### ✅ FEATURE-028 — Release Plan asociado al Release activo
 
-**Estado:** Confirmada. Prioridad P1.
+**Estado:** Implementada y validada con suite automatizada y E2E real en VPS (2026-07-31).
+Prioridad P1. Diseño original de ARIA (AI Product Architect), aprobado con dos ajustes: (1) la
+garantía de "como máximo un `release_roadmap` pinneado por run" queda documentada como dependiente
+de la disciplina del código llamador, no de una constraint de DB; (2) la comparación final se
+implementa como función pura y testeable, separada de la consulta SQL (mismo criterio que
+FEATURE-038). Diseño completo en
+`docs/features/FEATURE-028-Release-Plan-asociado-inequivocamente-al-Release-activo.md`.
 
-Hoy existe un único `release_plan` vigente por proyecto y, al avanzar de Release, Planning puede
-recibir temporalmente el plan anterior. La Feature deberá garantizar que el Release Plan
-entregado a Planning corresponda inequívocamente al Release activo.
+`withRoleContext` combinaba el `release_roadmap` y el `release_plan` vigentes de forma
+independiente, sin verificar que pertenecieran al mismo release — al activar un release nuevo,
+Planning podía recibir el `activeRelease` correcto junto con el plan completo del release anterior.
 
-Debe incluir como criterio verificable: activar un Release nuevo no debe dejar expuesto el plan
-ni el `activeReleaseId` del Release anterior como si siguiera vigente — ver FEATURE-036 (release
-activo nominal tras cierre sin release siguiente), hallazgo relacionado de la misma prueba E2E.
-
-**Mecanismo preferido (Discovery cerrado con ARIA/DAIA durante FEATURE-038, 2026-07-30)**: no
-agregar `releaseId` a `ReleasePlanPayload` como primera opción — ya existe una relación auditable y
-persistida para resolver a qué release pertenecía cada versión de `release_plan`, sin tocar el
-contrato que declara Planning: `project_config_versions.release_plan.changed_in_run_id` → el run
+**Mecanismo implementado**: no se agregó `releaseId` a `ReleasePlanPayload` — se reutiliza la
+relación auditable ya persistida: `project_config_versions.release_plan.changed_in_run_id` → el run
 que la escribió → su `release_roadmap` pinneado (`run_config_versions`) → el `activeReleaseId`
-vigente en ese momento. Comparar eso contra el release activo actual, en `withRoleContext`
-(`runStart.ts`), entregando `releasePlan: null` a Planning cuando no coincide. Es la misma relación
-ya usada por el fix de `getReleasePlansByRelease` (ver FEATURE-036, sección técnica). Evaluar
-`releaseId` solo si esta relación resulta insuficiente en el diseño formal.
+vigente en ese momento, comparado contra el release activo actual. Nueva función de repositorio
+`getReleasePlanAssociationCandidate` (reutiliza el mismo CTE `current_epoch` que
+`getReleasePlansByRelease`, FEATURE-036) resuelve el candidato; nueva función pura
+`resolveReleasePlanForActiveRelease` decide si corresponde (mismo `activeReleaseId` **y** mismo
+`root_run_id`/ciclo de negocio) — `withRoleContext` entrega `releasePlan: null` cuando no coincide,
+sin borrar ni alterar el plan histórico. Refuerzo mínimo en `planning.txt`: `releasePlan: null` tras
+un cambio de release es la primera invocación de ese release, nunca pérdida de datos.
+
+**Validación E2E real (2026-07-31, proyecto `pruebas-ia`, mismo caso de propinas que en un intento
+anterior había disparado la contaminación cruzada original)**: la bitácora de Planning, en su
+primera invocación del release `r2`, declaró textualmente *"Es la primera invocación para el
+release r2 (releasePlan viene null y functionalArtifact trae features). El release r2 contiene una
+única Feature (f2: Prorrateo de propina entre comensales)"* — confirmación directa, no inferida, de
+que `withRoleContext` entregó `releasePlan: null` al cruzar de release, sin ningún rastro de
+`f1`/`calculateTip` del release anterior.
 
 ### ✅ FEATURE-029 — Contrato determinístico entre build output y `COMANDO_TEST`
 

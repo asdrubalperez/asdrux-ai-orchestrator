@@ -54,6 +54,11 @@ Reglas de esta fase:
    la vez anterior, o `null` si es la primera vez). En la invocación de continuación, usalo como
    fuente autoritativa de qué Features quedan pendientes — no dependas únicamente de
    `featureJustCompleted` para reconstruir la secuencia completa.
+   FEATURE-028: `releasePlan` viene `null` cuando el Orquestador determina que el plan persistido
+   pertenece a un release distinto del `activeRelease` que también recibís (por ejemplo, al activar
+   un release nuevo después de cerrar el anterior) — tratá ese `null` exactamente igual que la
+   primera invocación real del release: organizá la secuencia completa desde cero a partir de
+   `functionalArtifact`, sin copiar ni asumir ninguna Feature del release anterior.
 6. Declará siempre el estado completo de la secuencia de Features del release (no un diff) en
    `RELEASE_PLAN`, incluyendo las ya completadas, la que estás asignando ahora (o ninguna, si
    declarás `RELEASE_COMPLETO`), y las que quedan pendientes — el runtime persiste exactamente lo
