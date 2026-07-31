@@ -18,7 +18,7 @@ Versión de plantilla usada: v2.1 (`docs/playbook/07-FEATURE-TEMPLATE.md`)
 - **Name**: Release Plan asociado inequívocamente al Release activo
 - **Type**: Lifecycle Consistency / Context Integrity
 - **Owner**: asdru
-- **Status**: Implementada — pendiente de validación E2E real en VPS antes de merge a `main`
+- **Status**: ✅ Ejecutada — validada con suite automatizada y E2E real en VPS (2026-07-31)
 - **Priority**: P1
 - **Origin**: Hallazgo de la validación E2E de FEATURE-036, Discovery cerrado durante FEATURE-038
 - **Related Features**: FEATURE-018, FEATURE-019, FEATURE-020, FEATURE-036, FEATURE-038
@@ -126,12 +126,15 @@ activo → `null`; mismo ID literal con `root_run_id` distinto (colisión entre 
 `null`; mismo ciclo y mismo ID → entrega el plan. Suite completa: 234 tests, 224 pass, 10 skip
 (específicos de plataforma en Windows), 0 fail. `tsc --noEmit` limpio.
 
-**Pendiente antes de merge a `main`**: evidencia E2E real en VPS con un Roadmap de al menos dos
-releases — confirmar que, al activar el segundo release, la primera invocación de Planning recibe
-`releasePlan: null` (no el plan del release anterior) y que el primer `RELEASE_PLAN` que declara
-contiene únicamente Features del release nuevo, sin arrastrar las del anterior. Confirmar además,
-vía la UI o consulta directa a `project_config_versions`, que el historial del release anterior
-sigue disponible y sin alterar.
+**E2E real en VPS (2026-07-31, proyecto `pruebas-ia`, caso de negocio con dos releases —
+`calculateTip`/r1, `calculateSplitTip`/r2 — el mismo caso que en un intento anterior había disparado
+la contaminación cruzada original)**: la propia bitácora de Planning, en su primera invocación del
+release `r2`, declara textualmente: *"Es la primera invocación para el release r2 (releasePlan
+viene null y functionalArtifact trae features). El release r2 contiene una única Feature (f2:
+Prorrateo de propina entre comensales)"*. Confirma el mecanismo funcionando de punta a punta:
+`withRoleContext` entregó `releasePlan: null` (no el plan de `r1` con `f1` adentro) al cruzar de
+release, y Planning organizó la secuencia de `r2` desde cero, sin ningún rastro de `f1`/`calculateTip`.
+Evidencia textual directa, no inferida — el propio agente declara explícitamente qué recibió.
 
 ---
 
@@ -151,12 +154,13 @@ Feature.
 ## 9. Approval Gate
 
 Aprobado por el owner, con los dos ajustes de la nota de proceso incorporados al documento antes del
-handoff de implementación. Pendiente de validación E2E real en VPS antes de mergear a `main`.
+handoff de implementación. Validado real en VPS — ver sección 7. Mergeada a `main`.
 
 ---
 
 ## Estado de la implementación
 
-**Implementada** en rama `feature/028-release-plan-asociado-al-release-activo` — pendiente de
-validación real en VPS antes de mergear a `main`. `tsc --noEmit` y suite completa (234 tests)
-verificados en la rama.
+**✅ Ejecutada.** Implementada en rama `feature/028-release-plan-asociado-al-release-activo`,
+validada con suite automatizada (`tsc --noEmit` limpio, 234 tests) y con E2E real en VPS —
+confirmada textualmente por la propia bitácora de Planning declarando haber recibido
+`releasePlan: null` en la primera invocación del release siguiente. Mergeada a `main`.

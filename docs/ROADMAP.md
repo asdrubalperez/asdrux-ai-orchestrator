@@ -168,12 +168,23 @@
   el cierre de un release intermedio como del último release del proyecto. Diseño original de ARIA
   (AI Product Architect), Discovery cerrado junto con FEATURE-028 (que absorbe el otro síntoma —
   Features de un release anterior reapareciendo en el siguiente).
+- FEATURE-028 — Release Plan asociado inequívocamente al Release activo: `withRoleContext` armaba
+  `activeRelease`/`releasePlan` de fuentes independientes sin verificar que pertenecieran al mismo
+  release. Nueva consulta `getReleasePlanAssociationCandidate` (reutiliza el CTE `current_epoch` de
+  `getReleasePlansByRelease`, FEATURE-036) resuelve el `activeReleaseId`/`root_run_id` pinneados en
+  el run que escribió el `release_plan` vigente; nueva función pura
+  `resolveReleasePlanForActiveRelease` exige coincidencia de release **y** de ciclo de negocio —
+  `releasePlan: null` cuando no coincide, sin borrar ni alterar el historial. No se agregó
+  `releaseId` al contrato de Planning. Validada con 7 tests automatizados y con E2E real en VPS
+  (2026-07-31, mismo caso de propinas que en un intento anterior había disparado la contaminación
+  cruzada): la propia bitácora de Planning confirmó textualmente *"Es la primera invocación para el
+  release r2 (releasePlan viene null...)"*, sin ningún rastro de Features del release anterior.
+  Diseño original de ARIA (AI Product Architect), Discovery cerrado junto con FEATURE-038.
 
 **🟡 Confirmado**
 - FEATURE-025 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
 - FEATURE-026 — Credenciales git por usuario para el Orquestador (promovida de ⚪ Tentativo)
 - FEATURE-027 — Continuidad durable del loop Developer ↔ QA. Prioridad P0.
-- FEATURE-028 — Release Plan asociado inequívocamente al Release activo. Prioridad P1.
 - FEATURE-030 — Proyecto del Orquestador asociado correctamente al repositorio gestionado.
   Prioridad P1.
 - FEATURE-033 — Lifecycle canónico de `01-PROJECT-BRIEF-TEMPLATE`.
@@ -699,19 +710,19 @@ permiten auditoría, pero no reconstruir ni continuar el ciclo después de una c
 La Feature deberá hacer reanudables y auditables el intento actual, el último resultado de
 Developer, el último veredicto de QA, el último fallo de build y el motivo inmediato del retry.
 
-### 🟡 FEATURE-028 — Release Plan asociado al Release activo
+### ✅ FEATURE-028 — Release Plan asociado al Release activo
 
-**Estado:** Implementada en rama `feature/028-release-plan-asociado-al-release-activo` — pendiente
-de validación E2E real en VPS antes de mergear a `main`. Prioridad P1. Diseño original de ARIA (AI
-Product Architect), aprobado con dos ajustes: (1) la garantía de "como máximo un `release_roadmap`
-pinneado por run" queda documentada como dependiente de la disciplina del código llamador, no de
-una constraint de DB; (2) la comparación final se implementa como función pura y testeable, separada
-de la consulta SQL (mismo criterio que FEATURE-038). Diseño completo en
+**Estado:** Implementada y validada con suite automatizada y E2E real en VPS (2026-07-31).
+Prioridad P1. Diseño original de ARIA (AI Product Architect), aprobado con dos ajustes: (1) la
+garantía de "como máximo un `release_roadmap` pinneado por run" queda documentada como dependiente
+de la disciplina del código llamador, no de una constraint de DB; (2) la comparación final se
+implementa como función pura y testeable, separada de la consulta SQL (mismo criterio que
+FEATURE-038). Diseño completo en
 `docs/features/FEATURE-028-Release-Plan-asociado-inequivocamente-al-Release-activo.md`.
 
-Hoy existía un único `release_plan` vigente por proyecto y, al avanzar de Release, Planning podía
-recibir temporalmente el plan anterior — `withRoleContext` combinaba el `release_roadmap` y el
-`release_plan` vigentes de forma independiente, sin verificar que pertenecieran al mismo release.
+`withRoleContext` combinaba el `release_roadmap` y el `release_plan` vigentes de forma
+independiente, sin verificar que pertenecieran al mismo release — al activar un release nuevo,
+Planning podía recibir el `activeRelease` correcto junto con el plan completo del release anterior.
 
 **Mecanismo implementado**: no se agregó `releaseId` a `ReleasePlanPayload` — se reutiliza la
 relación auditable ya persistida: `project_config_versions.release_plan.changed_in_run_id` → el run
@@ -723,6 +734,14 @@ vigente en ese momento, comparado contra el release activo actual. Nueva funció
 `root_run_id`/ciclo de negocio) — `withRoleContext` entrega `releasePlan: null` cuando no coincide,
 sin borrar ni alterar el plan histórico. Refuerzo mínimo en `planning.txt`: `releasePlan: null` tras
 un cambio de release es la primera invocación de ese release, nunca pérdida de datos.
+
+**Validación E2E real (2026-07-31, proyecto `pruebas-ia`, mismo caso de propinas que en un intento
+anterior había disparado la contaminación cruzada original)**: la bitácora de Planning, en su
+primera invocación del release `r2`, declaró textualmente *"Es la primera invocación para el
+release r2 (releasePlan viene null y functionalArtifact trae features). El release r2 contiene una
+única Feature (f2: Prorrateo de propina entre comensales)"* — confirmación directa, no inferida, de
+que `withRoleContext` entregó `releasePlan: null` al cruzar de release, sin ningún rastro de
+`f1`/`calculateTip` del release anterior.
 
 ### ✅ FEATURE-029 — Contrato determinístico entre build output y `COMANDO_TEST`
 
