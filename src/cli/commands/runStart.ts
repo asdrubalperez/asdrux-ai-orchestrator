@@ -59,8 +59,12 @@ import {
   isFeatureContinuationContext,
   isNotApplicableOutput,
   isReentryContext,
+  isReleaseCompletionEscalation,
+  isReleasePlanDeclaration,
+  isTaggedFieldNull,
   type MergeApprovalPayload,
   type ReentryContext,
+  type ReleasePlanDeclaration,
 } from "../escalation.js";
 import {
   parseDeveloperImplementation,
@@ -406,12 +410,15 @@ export async function executePipelineRun(params: {
       });
 
       if (invocation.agentRole === "planning") {
+        const { featureJustCompleted, inputReleasePlan } = planningInputFieldsFromContext(context);
         await persistReleasePlanIfDeclared({
           projectId,
           runId,
           result,
           fallbackRamaBaseTrabajo: ramaBaseTrabajoFromBusinessCase(initialContext),
           phaseFinishedEventId,
+          featureJustCompleted,
+          inputReleasePlan,
         });
       }
 
@@ -833,6 +840,96 @@ export function ramaBaseTrabajoFromBusinessCase(value: unknown): string | undefi
   return ramaBaseTrabajoFromBusinessCase(record.businessCase);
 }
 
+export type FinalReleasePlanValidation = { valid: true } | { valid: false; reason: string };
+
+/**
+ * FEATURE-038: valida la transición del `RELEASE_PLAN` final que Planning declara al cerrar un
+ * release (`RELEASE_COMPLETO`) contra el Release Plan vigente que Planning recibió como contexto de
+ * ENTRADA en esa misma invocación (`inputReleasePlan` — nunca el declarado de salida, que por
+ * contrato siempre trae `featureActualId: null` en un cierre; comparar contra ese sería trivialmente
+ * inútil). Función pura: no hace I/O, no vuelve a consultar la base — el llamador debe pasarle
+ * exactamente el mismo `releasePlan` que ya viajó en el `context` armado antes de invocar a Planning,
+ * evitando así cualquier ventana de carrera entre lo que Planning vio y lo que se valida.
+ */
+export function validateFinalReleasePlanTransition(params: {
+  featureJustCompleted: string | null;
+  inputReleasePlan: unknown;
+  declaredFinalReleasePlan: ReleasePlanDeclaration;
+  comandoTestIsNull: boolean;
+  featureUpdateIsNull: boolean;
+}): FinalReleasePlanValidation {
+  const { featureJustCompleted, inputReleasePlan, declaredFinalReleasePlan, comandoTestIsNull, featureUpdateIsNull } =
+    params;
+
+  if (!isReleasePlanDeclaration(inputReleasePlan)) {
+    return { valid: false, reason: "no hay un Release Plan vigente de entrada con el que validar el cierre." };
+  }
+  if (inputReleasePlan.featureActualId === null) {
+    return { valid: false, reason: "el Release Plan vigente de entrada no tiene ninguna Feature en curso." };
+  }
+  if (featureJustCompleted !== inputReleasePlan.featureActualId) {
+    return {
+      valid: false,
+      reason: `featureJustCompleted ("${featureJustCompleted}") no coincide con la Feature activa del Release Plan vigente ("${inputReleasePlan.featureActualId}").`,
+    };
+  }
+  const activeInputFeature = inputReleasePlan.features.find(
+    (feature) => feature.id === inputReleasePlan.featureActualId
+  );
+  if (!activeInputFeature) {
+    return {
+      valid: false,
+      reason: `la Feature activa "${inputReleasePlan.featureActualId}" no existe en el Release Plan vigente de entrada.`,
+    };
+  }
+  if (activeInputFeature.estado !== "En curso") {
+    return {
+      valid: false,
+      reason: `la Feature activa "${activeInputFeature.id}" del Release Plan vigente no está "En curso" (está "${activeInputFeature.estado}").`,
+    };
+  }
+
+  if (declaredFinalReleasePlan.featureActualId !== null) {
+    return { valid: false, reason: "el Release Plan final de un cierre debe declarar featureActualId: null." };
+  }
+  if (declaredFinalReleasePlan.features.some((feature) => feature.estado !== "Completada")) {
+    return { valid: false, reason: "el Release Plan final de un cierre debe declarar todas las Features en estado Completada." };
+  }
+  if (!comandoTestIsNull) {
+    return { valid: false, reason: "un cierre de release no debe declarar COMANDO_TEST." };
+  }
+  if (!featureUpdateIsNull) {
+    return { valid: false, reason: "un cierre de release no debe declarar FEATURE_UPDATE." };
+  }
+
+  const finalIds = declaredFinalReleasePlan.features.map((feature) => feature.id);
+  const finalIdSet = new Set(finalIds);
+  if (finalIds.length !== finalIdSet.size) {
+    return { valid: false, reason: "el Release Plan final contiene identidades de Feature duplicadas." };
+  }
+  const inputIdSet = new Set(inputReleasePlan.features.map((feature) => feature.id));
+  if (inputIdSet.size !== finalIdSet.size || [...inputIdSet].some((id) => !finalIdSet.has(id))) {
+    return {
+      valid: false,
+      reason: "el Release Plan final no contiene exactamente las mismas Features que el Release Plan vigente de entrada.",
+    };
+  }
+
+  return { valid: true };
+}
+
+/** FEATURE-038: extrae `featureJustCompleted`/`releasePlan` del contexto ya armado para Planning (`context` en `executePipelineRun`), sin volver a consultar la base. */
+function planningInputFieldsFromContext(context: unknown): { featureJustCompleted: string | null; inputReleasePlan: unknown } {
+  if (context === null || typeof context !== "object") {
+    return { featureJustCompleted: null, inputReleasePlan: null };
+  }
+  const record = context as { featureJustCompleted?: unknown; releasePlan?: unknown };
+  return {
+    featureJustCompleted: typeof record.featureJustCompleted === "string" ? record.featureJustCompleted : null,
+    inputReleasePlan: "releasePlan" in record ? record.releasePlan : null,
+  };
+}
+
 /**
  * FEATURE-019, sección 6.3: persiste el Release Plan que Planning declaró en `RELEASE_PLAN`
  * (estado completo, no un diff) — el runtime solo le agrega `ramaBaseTrabajo`, que Planning no
@@ -848,16 +945,45 @@ export async function persistReleasePlanIfDeclared(params: {
   result: PhaseResult;
   fallbackRamaBaseTrabajo: string | undefined;
   phaseFinishedEventId: string | number;
+  featureJustCompleted: string | null;
+  inputReleasePlan: unknown;
 }): Promise<void> {
-  // Un resultado escalado todavía no es una decisión documental aceptada. Debe continuar por el
-  // circuito existente de handleLinearEscalation sin persistir RELEASE_PLAN ni exigir
-  // FEATURE_UPDATE.
-  if (params.result.status !== "completed") return;
+  // FEATURE-038: excepción exclusiva de persistencia para el cierre de release — RELEASE_COMPLETO
+  // viaja con status "escalated" (es un Approval Gate, no un error), así que sin esta excepción el
+  // guard de abajo descartaría el RELEASE_PLAN final antes de persistirlo, dejando el estado
+  // persistido obsoleto ("En curso") pese al cierre exitoso. Cualquier otra escalación (ambigüedad,
+  // requisitos insuficientes, etc.) sigue el camino existente de handleLinearEscalation sin
+  // persistir nada acá.
+  const isReleaseCompletion =
+    params.result.status === "escalated" &&
+    isReleaseCompletionEscalation({ phase: "planning" }, { outputArtifact: params.result.outputArtifact });
+  if (params.result.status !== "completed" && !isReleaseCompletion) return;
 
   const declaration = extractReleasePlanDeclaration(
     { phase: "planning" },
     { outputArtifact: params.result.outputArtifact }
   );
+
+  if (isReleaseCompletion) {
+    if (!declaration) {
+      throw new FeatureLifecycleEscalationError(
+        `Run ${params.runId}: Planning declaró RELEASE_COMPLETO sin un RELEASE_PLAN final válido.`
+      );
+    }
+    const validation = validateFinalReleasePlanTransition({
+      featureJustCompleted: params.featureJustCompleted,
+      inputReleasePlan: params.inputReleasePlan,
+      declaredFinalReleasePlan: declaration,
+      comandoTestIsNull: isTaggedFieldNull(params.result.outputArtifact, "COMANDO_TEST", "comandoTest"),
+      featureUpdateIsNull: isTaggedFieldNull(params.result.outputArtifact, "FEATURE_UPDATE", "featureUpdate"),
+    });
+    if (!validation.valid) {
+      throw new FeatureLifecycleEscalationError(
+        `Run ${params.runId}: cierre de release inconsistente — ${validation.reason}`
+      );
+    }
+  }
+
   if (!declaration) return;
 
   const existing = await getCurrentProjectConfig(params.projectId, "release_plan");

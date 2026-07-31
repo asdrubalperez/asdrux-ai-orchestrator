@@ -140,6 +140,18 @@ function extractTaggedField(outputArtifact: unknown, tag: string, property: stri
 }
 
 /**
+ * FEATURE-038: determina si un campo etiquetado fue declarado explícitamente como ausente —
+ * usado para exigir COMANDO_TEST/FEATURE_UPDATE = null en el cierre de un release (RELEASE_COMPLETO).
+ * Acepta las tres formas en que "ausente" puede llegar: sin match del tag (`undefined`), `null`
+ * real (forma objeto estructurado de Claude), o el string literal `"null"` (convención de texto
+ * plano de Codex, mismo criterio dual que `isNotApplicableOutput`).
+ */
+export function isTaggedFieldNull(outputArtifact: unknown, tag: string, property: string): boolean {
+  const raw = extractTaggedField(outputArtifact, tag, property);
+  return raw === null || raw === undefined || (typeof raw === "string" && raw.trim().toLowerCase() === "null");
+}
+
+/**
  * Parsea el RELEASE_PLAN que Planning boltea a `outputArtifact` (mismo patrón que
  * `comandoTest`/`roadmap`/`features`). Devuelve null si el rol no es Planning, si no hay
  * `releasePlan` en el artifact, o si el JSON es inválido/malformado — riesgo H12 aceptado, mismo

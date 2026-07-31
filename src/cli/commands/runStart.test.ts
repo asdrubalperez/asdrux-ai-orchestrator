@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { PhaseResult } from "../../contracts/executor.js";
 import { latestEscalationArtifact } from "../respondService.js";
+import { FeatureLifecycleEscalationError } from "../../features/lifecycle.js";
 import {
   decideLinearEscalationKind,
   persistReleasePlanIfDeclared,
   ramaBaseTrabajoFromBusinessCase,
   runDeveloperQaLoop,
   shapeRoleContext,
+  validateFinalReleasePlanTransition,
 } from "./runStart.js";
 
 test("Planning escalado no persiste RELEASE_PLAN ni exige FEATURE_UPDATE", async () => {
@@ -30,7 +32,286 @@ test("Planning escalado no persiste RELEASE_PLAN ni exige FEATURE_UPDATE", async
       result,
       fallbackRamaBaseTrabajo: "main",
       phaseFinishedEventId: 1,
+      featureJustCompleted: null,
+      inputReleasePlan: null,
     })
+  );
+});
+
+// FEATURE-038: validateFinalReleasePlanTransition — función pura, cubre la validación del cierre
+// de release (RELEASE_COMPLETO) contra el Release Plan vigente de ENTRADA (nunca el declarado de
+// salida, que siempre trae featureActualId: null en un cierre).
+
+const INPUT_PLAN_TWO_FEATURES = {
+  ramaBaseTrabajo: "main",
+  features: [
+    { id: "f1", nombre: "Primera", estado: "Completada" as const },
+    { id: "f2", nombre: "Segunda", estado: "En curso" as const },
+  ],
+  featureActualId: "f2",
+};
+
+function validClosureParams(overrides: Partial<Parameters<typeof validateFinalReleasePlanTransition>[0]> = {}) {
+  return {
+    featureJustCompleted: "f2",
+    inputReleasePlan: INPUT_PLAN_TWO_FEATURES,
+    declaredFinalReleasePlan: {
+      features: [
+        { id: "f1", nombre: "Primera", estado: "Completada" as const },
+        { id: "f2", nombre: "Segunda", estado: "Completada" as const },
+      ],
+      featureActualId: null,
+    },
+    comandoTestIsNull: true,
+    featureUpdateIsNull: true,
+    ...overrides,
+  };
+}
+
+test("FEATURE-038, Escenario 2: cierre válido con dos Features", () => {
+  assert.deepEqual(validateFinalReleasePlanTransition(validClosureParams()), { valid: true });
+});
+
+test("FEATURE-038, Escenario 4: sin Release Plan vigente de entrada", () => {
+  const result = validateFinalReleasePlanTransition(validClosureParams({ inputReleasePlan: null }));
+  assert.equal(result.valid, false);
+});
+
+test("FEATURE-038: Release Plan vigente de entrada sin ninguna Feature en curso", () => {
+  const result = validateFinalReleasePlanTransition(
+    validClosureParams({
+      inputReleasePlan: { ...INPUT_PLAN_TWO_FEATURES, featureActualId: null },
+    })
+  );
+  assert.equal(result.valid, false);
+});
+
+test("FEATURE-038, Escenario 12: featureJustCompleted no coincide con la Feature activa del plan de entrada", () => {
+  const result = validateFinalReleasePlanTransition(validClosureParams({ featureJustCompleted: "f1" }));
+  assert.equal(result.valid, false);
+  if (!result.valid) assert.match(result.reason, /no coincide con la Feature activa/);
+});
+
+test("FEATURE-038: la Feature activa del plan de entrada no está En curso", () => {
+  const result = validateFinalReleasePlanTransition(
+    validClosureParams({
+      inputReleasePlan: {
+        ...INPUT_PLAN_TWO_FEATURES,
+        features: [
+          { id: "f1", nombre: "Primera", estado: "Completada" as const },
+          { id: "f2", nombre: "Segunda", estado: "Pendiente" as const },
+        ],
+      },
+    })
+  );
+  assert.equal(result.valid, false);
+  if (!result.valid) assert.match(result.reason, /no está "En curso"/);
+});
+
+test("FEATURE-038, Escenario 5: featureActualId no nulo en el plan final", () => {
+  const result = validateFinalReleasePlanTransition(
+    validClosureParams({
+      declaredFinalReleasePlan: {
+        features: [
+          { id: "f1", nombre: "Primera", estado: "Completada" as const },
+          { id: "f2", nombre: "Segunda", estado: "Completada" as const },
+        ],
+        featureActualId: "f2",
+      },
+    })
+  );
+  assert.equal(result.valid, false);
+});
+
+test("FEATURE-038, Escenario 6/7: Feature Pendiente o En curso en el plan final", () => {
+  const conPendiente = validateFinalReleasePlanTransition(
+    validClosureParams({
+      declaredFinalReleasePlan: {
+        features: [
+          { id: "f1", nombre: "Primera", estado: "Completada" as const },
+          { id: "f2", nombre: "Segunda", estado: "Pendiente" as const },
+        ],
+        featureActualId: null,
+      },
+    })
+  );
+  assert.equal(conPendiente.valid, false);
+
+  const conEnCurso = validateFinalReleasePlanTransition(
+    validClosureParams({
+      declaredFinalReleasePlan: {
+        features: [
+          { id: "f1", nombre: "Primera", estado: "Completada" as const },
+          { id: "f2", nombre: "Segunda", estado: "En curso" as const },
+        ],
+        featureActualId: null,
+      },
+    })
+  );
+  assert.equal(conEnCurso.valid, false);
+});
+
+test("FEATURE-038, Escenario 13: COMANDO_TEST no nulo invalida el cierre", () => {
+  const result = validateFinalReleasePlanTransition(validClosureParams({ comandoTestIsNull: false }));
+  assert.equal(result.valid, false);
+});
+
+test("FEATURE-038, Escenario 14: FEATURE_UPDATE no nulo invalida el cierre", () => {
+  const result = validateFinalReleasePlanTransition(validClosureParams({ featureUpdateIsNull: false }));
+  assert.equal(result.valid, false);
+});
+
+test("FEATURE-038, Escenario 8: Feature eliminada del plan final", () => {
+  const result = validateFinalReleasePlanTransition(
+    validClosureParams({
+      declaredFinalReleasePlan: {
+        features: [{ id: "f2", nombre: "Segunda", estado: "Completada" as const }],
+        featureActualId: null,
+      },
+    })
+  );
+  assert.equal(result.valid, false);
+});
+
+test("FEATURE-038, Escenario 9: Feature agregada en el plan final", () => {
+  const result = validateFinalReleasePlanTransition(
+    validClosureParams({
+      declaredFinalReleasePlan: {
+        features: [
+          { id: "f1", nombre: "Primera", estado: "Completada" as const },
+          { id: "f2", nombre: "Segunda", estado: "Completada" as const },
+          { id: "f3", nombre: "Nueva", estado: "Completada" as const },
+        ],
+        featureActualId: null,
+      },
+    })
+  );
+  assert.equal(result.valid, false);
+});
+
+test("FEATURE-038, Escenario 10: identidad duplicada en el plan final", () => {
+  const result = validateFinalReleasePlanTransition(
+    validClosureParams({
+      declaredFinalReleasePlan: {
+        features: [
+          { id: "f1", nombre: "Primera", estado: "Completada" as const },
+          { id: "f1", nombre: "Primera (dup)", estado: "Completada" as const },
+        ],
+        featureActualId: null,
+      },
+    })
+  );
+  assert.equal(result.valid, false);
+});
+
+test("FEATURE-038, Escenario 1: continuación normal (no es un cierre) queda fuera de esta validación", () => {
+  // Esta función solo se invoca cuando isReleaseCompletionEscalation ya dio true — una continuación
+  // normal (status completed, featureActualId apunta a la siguiente Feature) nunca llega acá; ver
+  // el test de persistReleasePlanIfDeclared para el camino completo.
+  assert.equal(typeof validateFinalReleasePlanTransition, "function");
+});
+
+// FEATURE-038: persistReleasePlanIfDeclared — camino de cierre inconsistente. La validación corre
+// ANTES de cualquier llamada a la base de datos, así que estos tests no necesitan una DB real: si
+// la implementación intentara tocar la base antes de fallar, el test fallaría por timeout/error de
+// conexión en vez de por el `FeatureLifecycleEscalationError` esperado.
+
+function releaseCompletionResult(overrides: {
+  releasePlan: unknown;
+  comandoTest?: string;
+  featureUpdate?: unknown;
+}): PhaseResult {
+  const outputArtifact: Record<string, unknown> = {
+    releasePlan: JSON.stringify(overrides.releasePlan),
+    releaseCompleto: true,
+  };
+  if (overrides.comandoTest !== undefined) outputArtifact.comandoTest = overrides.comandoTest;
+  if (overrides.featureUpdate !== undefined) outputArtifact.featureUpdate = overrides.featureUpdate;
+  return {
+    status: "escalated",
+    outputArtifact,
+    summary: "Planning declaró el release completo.",
+    escalationReason: null,
+  };
+}
+
+test("FEATURE-038: RELEASE_COMPLETO con featureJustCompleted que no coincide escala con FeatureLifecycleEscalationError, sin tocar la base", async () => {
+  const result = releaseCompletionResult({
+    releasePlan: {
+      features: [
+        { id: "f1", nombre: "Primera", estado: "Completada" },
+        { id: "f2", nombre: "Segunda", estado: "Completada" },
+      ],
+      featureActualId: null,
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      persistReleasePlanIfDeclared({
+        projectId: "project-no-debe-consultarse",
+        runId: "run-cierre-invalido",
+        result,
+        fallbackRamaBaseTrabajo: "main",
+        phaseFinishedEventId: 1,
+        featureJustCompleted: "f1",
+        inputReleasePlan: INPUT_PLAN_TWO_FEATURES,
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof FeatureLifecycleEscalationError);
+      assert.match((error as Error).message, /cierre de release inconsistente/);
+      return true;
+    }
+  );
+});
+
+test("FEATURE-038: RELEASE_COMPLETO sin RELEASE_PLAN final escala con FeatureLifecycleEscalationError", async () => {
+  const result: PhaseResult = {
+    status: "escalated",
+    outputArtifact: { releaseCompleto: true },
+    summary: "Planning declaró el release completo sin plan.",
+    escalationReason: null,
+  };
+
+  await assert.rejects(
+    () =>
+      persistReleasePlanIfDeclared({
+        projectId: "project-no-debe-consultarse",
+        runId: "run-sin-plan",
+        result,
+        fallbackRamaBaseTrabajo: "main",
+        phaseFinishedEventId: 1,
+        featureJustCompleted: "f2",
+        inputReleasePlan: INPUT_PLAN_TWO_FEATURES,
+      }),
+    (error: unknown) => error instanceof FeatureLifecycleEscalationError
+  );
+});
+
+test("FEATURE-038: RELEASE_COMPLETO con COMANDO_TEST declarado escala en vez de persistir", async () => {
+  const result = releaseCompletionResult({
+    releasePlan: {
+      features: [
+        { id: "f1", nombre: "Primera", estado: "Completada" },
+        { id: "f2", nombre: "Segunda", estado: "Completada" },
+      ],
+      featureActualId: null,
+    },
+    comandoTest: "node --test src/x.test.mjs",
+  });
+
+  await assert.rejects(
+    () =>
+      persistReleasePlanIfDeclared({
+        projectId: "project-no-debe-consultarse",
+        runId: "run-comando-test-no-nulo",
+        result,
+        fallbackRamaBaseTrabajo: "main",
+        phaseFinishedEventId: 1,
+        featureJustCompleted: "f2",
+        inputReleasePlan: INPUT_PLAN_TWO_FEATURES,
+      }),
+    (error: unknown) => error instanceof FeatureLifecycleEscalationError
   );
 });
 
