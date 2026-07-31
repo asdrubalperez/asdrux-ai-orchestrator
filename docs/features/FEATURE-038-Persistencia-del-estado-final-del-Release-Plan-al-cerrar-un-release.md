@@ -17,7 +17,7 @@ Versión de plantilla usada: v2.1 (`docs/playbook/07-FEATURE-TEMPLATE.md`)
 - **Name**: Persistencia del estado final del Release Plan al cerrar un release
 - **Type**: Lifecycle Consistency / Release Plan Persistence
 - **Owner**: asdru
-- **Status**: Implementada — pendiente de validación E2E real en VPS antes de merge a `main`
+- **Status**: ✅ Ejecutada — validada con suite automatizada y E2E real en VPS (2026-07-31)
 - **Priority**: P1
 - **Origin**: Hallazgo detectado durante la validación E2E de FEATURE-036, el 2026-07-30
 - **Related Features**: FEATURE-018, FEATURE-019, FEATURE-020, FEATURE-023, FEATURE-028,
@@ -139,10 +139,21 @@ vez de por el `FeatureLifecycleEscalationError` esperado): `featureJustCompleted
 `RELEASE_COMPLETO` sin `RELEASE_PLAN`, `COMANDO_TEST` declarado en un cierre. Suite completa: 227
 tests, 217 pass, 10 skip (específicos de plataforma en Windows), 0 fail. `tsc --noEmit` limpio.
 
-**Pendiente antes de merge a `main`**: evidencia E2E real en VPS con un release de al menos dos
-Features — confirmar que la última Feature queda persistida `Completada` (no `"En curso"`) antes de
-que el Approval Gate de cierre quede visible, y que un cierre inconsistente (simulado o real) escala
-explícitamente sin persistir ni abrir un Gate engañoso.
+**E2E real en VPS (2026-07-31, proyecto `pruebas-ia`, caso de negocio con dos releases —
+`calculateTip`/r1, `calculateSplitTip`/r2)**: consultada directamente la tabla
+`project_config_versions` durante la corrida real. Al cerrar r1 (única Feature f1), se confirmó una
+nueva versión de `release_plan` (`changed_in_run_id` = el run donde Planning declaró
+`RELEASE_COMPLETO`) con `valid_from` exactamente en el timestamp del `phase_finished` de Planning —
+21 segundos **antes** de que el humano respondiera al Approval Gate — conteniendo
+`{"features":[{"id":"f1","estado":"Completada",...}],"featureActualId":null}`. La versión
+inmediatamente anterior en la misma consulta seguía mostrando `f1` `"En curso"`, confirmando el
+contraste directo entre el estado obsoleto que quedaba persistido antes del fix y el estado correcto
+persistido ahora. Repetido para el cierre del proyecto completo (r2, última Feature del release
+final): la UI mostró "Sin release activo" y **ambas** Features (`calculateTip` y `calculateSplitTip`)
+con el check verde de "Completada" — antes del fix, la última Feature de cada release quedaba
+indefinidamente con el ícono "en curso" pese a la aprobación de QA. Evidencia real y específica de
+las Reglas 2, 6, 9, 11, 12 y 16 funcionando en runs genuinos, cubriendo tanto el cierre de un release
+intermedio como el cierre del último release del proyecto.
 
 ---
 
@@ -162,12 +173,14 @@ vio Planning; Riesgo 10 (clasificación incorrecta del fallo) — mitigado usand
 ## 9. Approval Gate
 
 Aprobado por el owner, con los dos ajustes de la nota de proceso incorporados al documento antes del
-handoff de implementación. Pendiente de validación E2E real en VPS antes de mergear a `main`.
+handoff de implementación. Validado real en VPS — ver sección 7. Mergeada a `main`.
 
 ---
 
 ## Estado de la implementación
 
-**Implementada** en rama `feature/038-release-plan-cierre-consistente` — pendiente de validación
-real en VPS antes de mergear a `main`. `tsc --noEmit` y suite completa (227 tests) verificados en la
-rama.
+**✅ Ejecutada.** Implementada en rama `feature/038-release-plan-cierre-consistente`, validada con
+suite automatizada (`tsc --noEmit` limpio, 227 tests) y con E2E real en VPS que confirmó, vía consulta
+directa a `project_config_versions`, que el `RELEASE_PLAN` final queda persistido con la Feature en
+`"Completada"` segundos antes de que el Approval Gate reciba respuesta humana — tanto para el cierre
+de un release intermedio como para el cierre del último release del proyecto. Mergeada a `main`.
