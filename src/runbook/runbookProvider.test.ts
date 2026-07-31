@@ -5,11 +5,13 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  CODING_STANDARDS_ASSET,
   DEFAULT_RUNBOOK_ROOT,
   FEATURE_TEMPLATE_ASSET,
   REQUIRED_RUNBOOK_ASSETS,
   RunbookProvider,
   RunbookProviderError,
+  TESTING_POLICY_ASSET,
   assertRunbookAvailableAtStartup,
   normalizeAssetPath,
 } from "./runbookProvider.js";
@@ -18,6 +20,8 @@ async function fixture(version = "v1.0") {
   const root = await mkdtemp(path.join(os.tmpdir(), "runbook-provider-"));
   await writeFile(path.join(root, "VERSION"), `${version}\n`, "utf8");
   await writeFile(path.join(root, FEATURE_TEMPLATE_ASSET), "template\n", "utf8");
+  await writeFile(path.join(root, TESTING_POLICY_ASSET), "testing policy\n", "utf8");
+  await writeFile(path.join(root, CODING_STANDARDS_ASSET), "coding standards\n", "utf8");
   return root;
 }
 
@@ -79,7 +83,12 @@ test("startup valida sólo el catálogo obligatorio actual", async () => {
   const provider = new RunbookProvider({ trustedRoot: root });
 
   await assertRunbookAvailableAtStartup(provider);
-  assert.deepEqual(REQUIRED_RUNBOOK_ASSETS, ["VERSION", FEATURE_TEMPLATE_ASSET]);
+  assert.deepEqual(REQUIRED_RUNBOOK_ASSETS, [
+    "VERSION",
+    FEATURE_TEMPLATE_ASSET,
+    TESTING_POLICY_ASSET,
+    CODING_STANDARDS_ASSET,
+  ]);
 });
 
 test("startup falla si falta VERSION o el template obligatorio", async () => {
@@ -94,6 +103,28 @@ test("startup falla si falta VERSION o el template obligatorio", async () => {
   await writeFile(path.join(missingTemplate, "VERSION"), "v1.0\n");
   await assert.rejects(
     () => assertRunbookAvailableAtStartup(new RunbookProvider({ trustedRoot: missingTemplate })),
+    (error) => assertCode(error, "RUNBOOK_ASSET_NOT_FOUND")
+  );
+});
+
+// FEATURE-037: Testing Policy y Coding Standards pasan a ser assets obligatorios de arranque —
+// Planning/Developer dependen de poder leerlos en cada invocación (fallo cerrado, Regla 13).
+test("startup falla si falta Testing Policy o Coding Standards", async () => {
+  const missingTestingPolicy = await mkdtemp(path.join(os.tmpdir(), "runbook-no-testing-policy-"));
+  await writeFile(path.join(missingTestingPolicy, "VERSION"), "v1.0\n");
+  await writeFile(path.join(missingTestingPolicy, FEATURE_TEMPLATE_ASSET), "template\n");
+  await writeFile(path.join(missingTestingPolicy, CODING_STANDARDS_ASSET), "coding standards\n");
+  await assert.rejects(
+    () => assertRunbookAvailableAtStartup(new RunbookProvider({ trustedRoot: missingTestingPolicy })),
+    (error) => assertCode(error, "RUNBOOK_ASSET_NOT_FOUND")
+  );
+
+  const missingCodingStandards = await mkdtemp(path.join(os.tmpdir(), "runbook-no-coding-standards-"));
+  await writeFile(path.join(missingCodingStandards, "VERSION"), "v1.0\n");
+  await writeFile(path.join(missingCodingStandards, FEATURE_TEMPLATE_ASSET), "template\n");
+  await writeFile(path.join(missingCodingStandards, TESTING_POLICY_ASSET), "testing policy\n");
+  await assert.rejects(
+    () => assertRunbookAvailableAtStartup(new RunbookProvider({ trustedRoot: missingCodingStandards })),
     (error) => assertCode(error, "RUNBOOK_ASSET_NOT_FOUND")
   );
 });

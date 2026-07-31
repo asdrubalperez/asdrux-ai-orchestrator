@@ -5,9 +5,15 @@ import { fileURLToPath } from "node:url";
 
 export const FEATURE_TEMPLATE_ASSET = "07-FEATURE-TEMPLATE.md";
 export const RUNBOOK_VERSION_ASSET = "VERSION";
+/** FEATURE-037: Planning es dueño/consultor directo (04-TESTING-POLICY.md:6). */
+export const TESTING_POLICY_ASSET = "04-TESTING-POLICY.md";
+/** FEATURE-037: Developer es dueño/consultor directo (05-CODING-STANDARDS.md:6-8). */
+export const CODING_STANDARDS_ASSET = "05-CODING-STANDARDS.md";
 export const REQUIRED_RUNBOOK_ASSETS = Object.freeze([
   RUNBOOK_VERSION_ASSET,
   FEATURE_TEMPLATE_ASSET,
+  TESTING_POLICY_ASSET,
+  CODING_STANDARDS_ASSET,
 ]);
 export const SUPPORTED_RUNBOOK_VERSIONS = Object.freeze(["v1.0"]);
 

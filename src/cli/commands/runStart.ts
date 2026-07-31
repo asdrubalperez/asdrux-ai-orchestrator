@@ -88,9 +88,12 @@ import {
 } from "../../features/lifecycle.js";
 import { sha256 } from "../../features/document.js";
 import {
+  CODING_STANDARDS_ASSET,
   defaultRunbookProvider,
   FEATURE_TEMPLATE_ASSET,
+  TESTING_POLICY_ASSET,
   type RunbookProvider,
+  type RunbookTextAsset,
 } from "../../runbook/runbookProvider.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -368,7 +371,7 @@ export async function executePipelineRun(params: {
       await updateRunCurrentPhase(runId, phase.agentRole);
       const baseContext = contextForNextPhase;
       const context =
-        phase.agentRole === "planning" ? await withRoleContext(projectId, baseContext) : baseContext;
+        phase.agentRole === "planning" ? await withRoleContext(projectId, runId, baseContext) : baseContext;
       const roleInstructions = await readRole(phase.agentRole);
       const selection = await resolveSelection(phase.agentRole);
       const executor = buildExecutor(selection, worktree.worktreePath, runId, model);
@@ -802,8 +805,11 @@ export async function persistLoopExhaustionArtifact(
  */
 export function shapeRoleContext(
   incomingContext: unknown,
-  shared: { activeRelease: unknown; releasePlan: unknown }
+  shared: { activeRelease: unknown; releasePlan: unknown; governance?: unknown }
 ): unknown {
+  // FEATURE-037, Regla 13/7.6: `shared` se aplica siempre en último lugar del spread — ningún
+  // campo `governance` que pudiera venir en `incomingContext` (nunca debería, pero un artifact de
+  // rol o el business_case no son datos confiables) puede sobrescribir la gobernanza inyectada acá.
   return isReentryContext(incomingContext) || isFeatureContinuationContext(incomingContext)
     ? { ...incomingContext, ...shared }
     : { functionalArtifact: incomingContext, ...shared };
@@ -832,13 +838,27 @@ export function resolveReleasePlanForActiveRelease(params: {
   return candidate.value;
 }
 
-async function withRoleContext(projectId: string, incomingContext: unknown): Promise<unknown> {
+/**
+ * FEATURE-037: Testing Policy es gobernanza de Planning (dueño/consultor directo — ver
+ * `docs/runbook/04-TESTING-POLICY.md:6`), entregada fresca en cada invocación (Regla 8/7.14, nunca
+ * cacheada entre llamadas) para que Planning la traduzca al Test Plan de la Feature. Developer/QA
+ * no la reciben directamente (Regla 5/6 del diseño) — reciben el Test Plan que Planning produce.
+ */
+async function withRoleContext(projectId: string, runId: string, incomingContext: unknown): Promise<unknown> {
   const roadmap = await getCurrentProjectConfig(projectId, "release_roadmap");
   const activeRelease = activeReleaseFromRoadmap(roadmap?.value ?? null);
   const candidate = await getReleasePlanAssociationCandidate(projectId);
+  const testingPolicy = await defaultRunbookProvider.readText(TESTING_POLICY_ASSET);
+  await recordRunEvent(runId, "runbook_governance_delivered", {
+    role: "planning",
+    assetRelativePath: testingPolicy.assetRelativePath,
+    runbookVersion: testingPolicy.runbookVersion,
+    assetHash: testingPolicy.assetHash,
+  });
   const shared = {
     activeRelease,
     releasePlan: resolveReleasePlanForActiveRelease({ activeReleaseId: activeRelease?.id ?? null, candidate }),
+    governance: { testingPolicy },
   };
   return shapeRoleContext(incomingContext, shared);
 }
@@ -1372,6 +1392,28 @@ export async function createArchitectReentryChildRun(params: {
   return { childRunId, childWorktree };
 }
 
+/**
+ * FEATURE-037: Coding Standards es gobernanza de Developer (dueño/consultor directo — ver
+ * `docs/runbook/05-CODING-STANDARDS.md:6-8`), entregada fresca en cada invocación (Regla 8/16,
+ * incluidos reintentos y el turno de readiness — Regla 17) para que Developer la aplique
+ * directamente al escribir código. No sustituye al Test Plan de Planning, que sigue siendo la única
+ * fuente de alcance de testing (Regla 12).
+ */
+async function loadDeveloperGovernance(
+  runbookProvider: Pick<RunbookProvider, "readText">,
+  recordEvent: (runId: string, eventType: string, payload: unknown) => Promise<string | number | void>,
+  runId: string
+): Promise<{ codingStandards: RunbookTextAsset }> {
+  const codingStandards = await runbookProvider.readText(CODING_STANDARDS_ASSET);
+  await recordEvent(runId, "runbook_governance_delivered", {
+    role: "developer",
+    assetRelativePath: codingStandards.assetRelativePath,
+    runbookVersion: codingStandards.runbookVersion,
+    assetHash: codingStandards.assetHash,
+  });
+  return { codingStandards };
+}
+
 function outputArtifactOf(artifact: ArtifactRow): unknown {
   if (artifact.content !== null && typeof artifact.content === "object" && "outputArtifact" in artifact.content) {
     return (artifact.content as { outputArtifact: unknown }).outputArtifact;
@@ -1401,6 +1443,8 @@ export async function runDeveloperQaLoop(params: {
     persistFeatureContribution?: typeof persistActiveFeatureContribution;
     gitReadinessSnapshot?: typeof gitReadinessSnapshot;
     validateTestCommandContract?: typeof validateTestCommandContract;
+    /** FEATURE-037: Coding Standards es gobernanza de Developer — inyectada fresca en cada intento. */
+    runbookProvider?: Pick<RunbookProvider, "readText">;
   };
 }): Promise<PhaseResult> {
   const { executor, developerExecutor, readRole, runId, planningResult, maxAttempts, phaseTiming } = params;
@@ -1415,6 +1459,7 @@ export async function runDeveloperQaLoop(params: {
     persistFeatureContribution: persistActiveFeatureContribution,
     gitReadinessSnapshot,
     validateTestCommandContract,
+    runbookProvider: defaultRunbookProvider as Pick<RunbookProvider, "readText">,
     ...params.services,
   };
   const testCommand = extractTestCommand(planningResult.outputArtifact);
@@ -1446,11 +1491,14 @@ export async function runDeveloperQaLoop(params: {
     await services.haltIfCancelledExternally(runId);
     await services.updateRunCurrentPhase(runId, "developer");
 
+    const governance = await loadDeveloperGovernance(services.runbookProvider, services.recordRunEvent, runId);
+
     const developerContext =
       attempt === 1
-        ? { plan: planningResult.outputArtifact }
+        ? { plan: planningResult.outputArtifact, governance }
         : {
             plan: planningResult.outputArtifact,
+            governance,
             previousAttemptSummary: lastDeveloperResult?.summary,
             ...(lastDependencyInstallFailureSummary
               ? { dependencyInstallationFailureReason: lastDependencyInstallFailureSummary }
@@ -1709,12 +1757,17 @@ export async function runDeveloperQaLoop(params: {
       };
       const snapshotBefore = await services.gitReadinessSnapshot(readinessWorktree);
       await services.updateRunCurrentPhase(runId, "developer");
+      // FEATURE-037, Regla 17: el turno de readiness también recibe Coding Standards fresco — su
+      // presencia no autoriza cambios de código, solo permite a Developer evaluar el estado
+      // vigente contra el estándar que le corresponde aplicar.
+      const readinessGovernance = await loadDeveloperGovernance(services.runbookProvider, services.recordRunEvent, runId);
       const readinessInvocation: PhaseInvocation = {
         agentRole: "developer",
         roleInstructions: developerRoleInstructions,
         context: {
           readinessRequest: true,
           plan: planningResult.outputArtifact,
+          governance: readinessGovernance,
           qaResult: qaResult.outputArtifact,
           testResult,
           gitSnapshot: snapshotBefore,
