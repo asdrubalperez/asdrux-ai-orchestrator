@@ -20,7 +20,7 @@ Versión de plantilla usada: v2.1 (`docs/playbook/07-FEATURE-TEMPLATE.md`)
 - **Name**: Entrega gobernada de reglas del Runbook a Planning, Developer y QA
 - **Type**: Governance Delivery / Runtime Context Integrity
 - **Owner**: asdru
-- **Status**: Implementada — pendiente de validación E2E real en VPS antes de merge a `main`
+- **Status**: ✅ Ejecutada — validada con suite automatizada y E2E real en VPS (2026-07-31)
 - **Priority**: P1
 - **Origin**: Hallazgo derivado de las Reglas 11 y 12 de `04-TESTING-POLICY.md`
 - **Related Features**: FEATURE-011, FEATURE-020, FEATURE-022, FEATURE-023 Parte 2, FEATURE-029
@@ -150,11 +150,23 @@ envuelta en `functionalArtifact`; `runDeveloperQaLoop`: Developer recibe
 uno — confirma lectura fresca, no cacheada). Suite completa: 237 tests, 227 pass, 10 skip
 (específicos de plataforma en Windows), 0 fail. `tsc --noEmit` limpio.
 
-**Pendiente antes de merge a `main`**: evidencia E2E real en VPS — ejecutar una Feature real
-(Architect → Functional → Planning → Developer → fallo/retry → QA) y confirmar, vía los eventos
-`runbook_governance_delivered` persistidos, que cada rol recibió exactamente la gobernanza que le
-corresponde (Planning: Testing Policy; Developer: Coding Standards, con hash consistente en cada
-intento; QA: ninguno de los dos) y que ningún run se ejecutó con gobernanza parcial.
+**E2E real en VPS (2026-07-31, proyecto reutilizado por FEATURE-030, caso de negocio real de
+`tempo-auto-planner` con integración externa a Tempo/Jira)**: primer intento no llegó a ejercitar el
+fix (Orquestador apuntando por error a la rama anterior — mismo tipo de olvido de checkout que en
+features previas). Repetido en la rama correcta: el evento `runbook_governance_delivered` se
+registró en cada invocación de Planning y de Developer (incluidos los turnos de readiness) a lo
+largo de las tres Features del release (`f1`, `f2`, `f3`), confirmando entrega fresca y consistente
+— cero eventos de este tipo existían en la base antes de correr en la rama correcta, confirmando
+también que el primer intento (rama equivocada) efectivamente no había ejercitado el mecanismo.
+
+**Hallazgo adicional de esta misma validación** (fuera del alcance de FEATURE-037, documentado por
+separado en el Roadmap como FEATURE-039/040): aunque Planning recibió Testing Policy correctamente
+en las tres Features, el mismo riesgo de contrato externo no resuelto (endpoint/campo real de Tempo
+para autorización, explícitamente diferido a "validación experimental") se repitió sin resolución
+entre `f1` y `f3`, y nunca disparó el escalamiento que exige la Regla 11 — QA lo aceptó como "known
+risk" en ambas ocasiones. Confirma que FEATURE-037 garantiza la *entrega* de la política, pero no
+su *cumplimiento* — la aplicación de reglas específicas de comportamiento sigue dependiendo
+enteramente del criterio del LLM en cada turno.
 
 ---
 
@@ -175,13 +187,15 @@ del merge).
 ## 9. Approval Gate
 
 Aprobado por el owner, con las dos correcciones de redacción de la nota de proceso incorporadas al
-documento antes del handoff de implementación. Pendiente de validación E2E real en VPS antes de
-mergear a `main`.
+documento antes del handoff de implementación. Validado real en VPS — ver sección 7. Mergeada a
+`main`.
 
 ---
 
 ## Estado de la implementación
 
-**Implementada** en rama `feature/037-runbook-governance-planning-developer` — pendiente de
-validación real en VPS antes de mergear a `main`. `tsc --noEmit` y suite completa (237 tests)
-verificados en la rama.
+**✅ Ejecutada.** Implementada en rama `feature/037-runbook-governance-planning-developer`,
+validada con suite automatizada (`tsc --noEmit` limpio, 237 tests) y con E2E real en VPS que
+confirmó, vía el evento `runbook_governance_delivered`, la entrega correcta y consistente de
+gobernanza a Planning y Developer a lo largo de un caso de negocio real con integración externa
+(tempo-auto-planner). Mergeada a `main`.

@@ -189,10 +189,13 @@
   caché entre invocaciones; `TESTING_POLICY_ASSET`/`CODING_STANDARDS_ASSET` agregados a
   `REQUIRED_RUNBOOK_ASSETS` (fallo cerrado si faltan); namespace `governance` protegido contra
   sobrescritura por contexto no confiable; auditoría por evento con solo metadata (rol, path,
-  versión, hash). Validada con 20 tests automatizados. Diseño original de ARIA (AI Product
-  Architect), aprobado con dos correcciones de redacción (la entrada original del Roadmap era
-  ambigua, no decía literalmente lo que el diseño corregía; el patrón de `runbookProvider.readText`
-  para Functional no es precedente de inyección pre-invocación — FEATURE-037 introduce ese patrón).
+  versión, hash). Validada con 20 tests automatizados y con E2E real en VPS (2026-07-31, caso real
+  de `tempo-auto-planner` con integración externa): el evento `runbook_governance_delivered` se
+  registró en cada invocación de Planning y Developer a lo largo de tres Features, confirmando
+  entrega fresca y consistente. Diseño original de ARIA (AI Product Architect), aprobado con dos
+  correcciones de redacción (la entrada original del Roadmap era ambigua, no decía literalmente lo
+  que el diseño corregía; el patrón de `runbookProvider.readText` para Functional no es precedente
+  de inyección pre-invocación — FEATURE-037 introduce ese patrón).
 
 **🟡 Confirmado**
 - FEATURE-025 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
@@ -203,6 +206,20 @@
 - FEATURE-033 — Lifecycle canónico de `01-PROJECT-BRIEF-TEMPLATE`.
 - FEATURE-034 — Lifecycle canónico de `02-ARCHITECTURE-TEMPLATE`.
 - FEATURE-035 — Lifecycle canónico de `09-RELEASE-PLAN-TEMPLATE`.
+- FEATURE-039 — La Regla 11 de `04-TESTING-POLICY.md` ("Riesgo de Contrato Externo No Resuelto
+  Escala, No Se Re-anota") no se aplica estructuralmente — nada en el runtime detecta que el mismo
+  riesgo de contrato externo se repite entre Features y fuerza un escalamiento; queda enteramente a
+  criterio del LLM en cada turno. Detectado en la validación E2E de FEATURE-037 (2026-07-31, caso
+  real de `tempo-auto-planner`): el mismo riesgo (endpoint/campo real de Tempo para autorización,
+  diferido a "validación experimental") se repitió sin resolución entre `f1` y `f3`, y QA lo aceptó
+  como "known risk" ambas veces sin escalar. Prioridad por definir.
+- FEATURE-040 — El Gate de aprobación de merge (`respondMergeApproval`) es binario: cualquier
+  respuesta no-abort ejecuta el merge incondicionalmente, y el texto de la respuesta humana solo
+  queda guardado como metadata de auditoría — nunca se reenvía a Developer/Planning para pedir una
+  corrección, a diferencia de las escalaciones genéricas (ambigüedad, Roadmap), que sí se reinyectan
+  vía el mecanismo de reingreso. No hay forma de "rechazar con feedback y reintentar" en este Gate
+  específico. Detectado durante la misma validación de FEATURE-037 (2026-07-31). Prioridad por
+  definir.
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
@@ -964,10 +981,10 @@ persistido antes del fix. Al cerrar el proyecto completo (r2, última Feature de
 UI mostró "Sin release activo" y ambas Features con el check verde de "Completada" — antes del fix,
 la última Feature de cada release quedaba indefinidamente con el ícono "en curso".
 
-### 🟡 FEATURE-037 — Entrega gobernada de reglas del Runbook a Planning, Developer y QA
+### ✅ FEATURE-037 — Entrega gobernada de reglas del Runbook a Planning, Developer y QA
 
-**Estado:** Implementada en rama `feature/037-runbook-governance-planning-developer` — pendiente de
-validación E2E real en VPS antes de mergear a `main`. Prioridad P1. Diseño original de ARIA (AI
+**Estado:** Implementada y validada con suite automatizada y E2E real en VPS (2026-07-31).
+Prioridad P1. Diseño original de ARIA (AI
 Product Architect), aprobado con dos correcciones de redacción (sin cambios de alcance): la entrada
 original del Roadmap era genérica, no decía literalmente "inyectar ambos documentos completos a
 QA/Developer"; y el patrón previo de `runbookProvider.readText` (Functional) resuelve el asset
@@ -994,6 +1011,17 @@ el paquete está incompleto (fallo cerrado, Regla 13). Auditoría vía evento
 `runbook_governance_delivered` con metadata (rol, path, versión, hash), sin persistir el contenido
 completo. Refuerzo mínimo de `planning.txt`/`developer.txt`/`qa.txt` según ownership, sin cambiar el
 formato de respuesta de ningún rol.
+
+**Validación E2E real (2026-07-31, proyecto reutilizado por FEATURE-030, caso de negocio real de
+`tempo-auto-planner` con integración externa a Tempo/Jira)**: primer intento no ejercitó el fix
+(rama equivocada, mismo tipo de olvido de checkout ya visto en otras features). Repetido en la rama
+correcta: el evento `runbook_governance_delivered` se registró en cada invocación de Planning y de
+Developer (incluidos los turnos de readiness) a lo largo de las tres Features del release —
+confirma entrega fresca y consistente. Validación cruzada: 0 eventos de este tipo existían en la
+base antes de correr en la rama correcta, confirmando que el primer intento efectivamente no había
+ejercitado el mecanismo. Ver FEATURE-039/040 para el hallazgo adicional detectado durante esta misma
+validación (la entrega funciona, pero el cumplimiento de reglas específicas de la política —
+Regla 11 — no está garantizado estructuralmente).
 
 ### ⚪ Approval Model por Release
 Feature 09 (`06-DELIVERY-WORKFLOW.md`, Stage 6) ya diseñó la v1: Modo Manual (default — automático
