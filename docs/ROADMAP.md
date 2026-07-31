@@ -138,6 +138,23 @@
   camino exitoso (instalación real de `typescript` vía `npm ci`, build con `tsc` real, y un fallo
   de build genuino y distinto — `TS2307`— correctamente atribuido por separado), hasta la
   aprobación de QA y el escalamiento de merge. Diseño original de ARIA (AI Product Architect).
+- FEATURE-036 — Release activo nominal tras cierre de proyecto sin release siguiente:
+  `activeReleaseId` pasa de `string` a `string | null`; el validador de `RoadmapApprovalPayload`
+  exige el invariante cruzado (ID no nulo ⇒ exactamente un release `Activo` con ese ID; `null` ⇒
+  cero releases `Activo`); `activeReleaseFromRoadmap` filtra también por estado; el cierre del
+  último release (sin siguiente pendiente) persiste `activeReleaseId: null` en vez de dejarlo
+  apuntando al release recién completado; `runView.ts`/`ReleasePlanPanel.tsx` muestran "Sin release
+  activo" sin usar el último release como fallback. Validada con 14 tests automatizados y con E2E
+  real en VPS (2026-07-30/31, proyecto `pruebas-ia`, Roadmap de dos releases): primer intento
+  reprodujo el bug original (Orquestador apuntando por error a otra rama sin el fix), repetido en la
+  rama correcta confirmó el cierre correcto de punta a punta. Incluye una corrección aparte
+  descubierta durante esa misma validación (`getReleasePlansByRelease` mezclaba historial de ciclos
+  de prueba no relacionados — acotado ahora por `root_run_id`). Diseño original de ARIA (AI Product
+  Architect), aprobado con una corrección de orden (revisar datos reales antes de endurecer el
+  validador — 0 roadmaps vigentes inconsistentes encontrados). Detectó además un hallazgo separado,
+  documentado como FEATURE-038 (no determinístico, no siempre se dispara): Planning no resetea el
+  scope de Features al cruzar de release, y el último Feature de un release nunca queda marcado
+  `Completada`.
 
 **🟡 Confirmado**
 - FEATURE-025 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
@@ -149,8 +166,6 @@
 - FEATURE-033 — Lifecycle canónico de `01-PROJECT-BRIEF-TEMPLATE`.
 - FEATURE-034 — Lifecycle canónico de `02-ARCHITECTURE-TEMPLATE`.
 - FEATURE-035 — Lifecycle canónico de `09-RELEASE-PLAN-TEMPLATE`.
-- FEATURE-036 — Release activo nominal tras cierre de proyecto sin release siguiente. Detectado en
-  la prueba E2E real del 2026-07-29 (FEATURE-024). Prioridad P1.
 - FEATURE-037 — Entrega garantizada de reglas de gobernanza del Runbook (Testing Policy, Coding
   Standards) al contexto de QA/Developer en cada invocación. Hoy ninguno de los dos roles tiene
   tool ni contexto para alcanzar esos documentos (QA: `fs_read` acotado al worktree, sin acceso a
@@ -798,13 +813,12 @@ Deberá definir creación, actualización, validación, persistencia DB, ubicaci
 versionado, lectura mediante FEATURE-022 y exposición en UI del Release Plan. No se diseña en
 detalle en esta actualización.
 
-### 🟡 FEATURE-036 — Release activo nominal tras cierre de proyecto sin release siguiente
+### ✅ FEATURE-036 — Release activo nominal tras cierre de proyecto sin release siguiente
 
-**Estado:** Implementada en rama `feature/036-release-activo-consistente` — pendiente de
-validación E2E real en VPS (Roadmap con dos releases) antes de mergear a `main`. Prioridad P1.
-Diseño original de ARIA (AI Product Architect), aprobado con una corrección de orden: la revisión
-de datos reales se corrió como primer paso de la implementación, antes de tocar el validador (0
-roadmaps vigentes inconsistentes encontrados). Diseño completo en
+**Estado:** Implementada y validada con suite automatizada y E2E real en VPS (2026-07-30/31).
+Prioridad P1. Diseño original de ARIA (AI Product Architect), aprobado con una corrección de orden:
+la revisión de datos reales se corrió como primer paso de la implementación, antes de tocar el
+validador (0 roadmaps vigentes inconsistentes encontrados). Diseño completo en
 `docs/features/FEATURE-036-Release-activo-nominal-tras-cierre-de-proyecto.md`.
 
 Detectado en la prueba E2E real del 2026-07-29 (FEATURE-024): cuando se aprueba el cierre del
@@ -818,6 +832,17 @@ ahora persiste `activeReleaseId: null` y garantiza por estado (no por coincidenc
 ningún release quede `Activo`; `runView.ts`/`ReleasePlanPanel.tsx` muestran "Sin release activo" en
 vez de reutilizar el último release completado como fallback. Relacionado con FEATURE-028 (Release
 Plan asociado al Release activo) — mismo tipo de invariante, distinto momento del ciclo de vida.
+
+**Validación E2E real (2026-07-30/31, proyecto `pruebas-ia`, Roadmap de dos releases —
+`calculateTip`/r1, `calculateSplitTip`/r2)**: primer intento con el Orquestador apuntando por error
+a la rama de FEATURE-032 (sin el fix) reprodujo el bug original tal cual — `activeReleaseId` de r2
+seguía `"Activo"` después de `project_closed` — confirmando el diagnóstico antes de repetir en la
+rama correcta. Repetido en `feature/036-release-activo-consistente`: r1 se cerró y activó r2
+correctamente; al cerrar r2 sin release pendiente, `project_closed` se registró con
+`activeReleaseId: null` persistido, y la UI mostró "Sin release activo" sin usar el release
+completado como fallback. Durante esa misma validación se descubrió y corrigió aparte un bug de
+`getReleasePlansByRelease` (ver sección técnica arriba) y se documentó un hallazgo separado,
+FEATURE-038, no disparado en la corrida final (comportamiento no determinístico del LLM).
 
 ### 🟡 FEATURE-038 — Ciclo de vida del Release Plan no resetea scope entre releases ni cierra el último Feature
 

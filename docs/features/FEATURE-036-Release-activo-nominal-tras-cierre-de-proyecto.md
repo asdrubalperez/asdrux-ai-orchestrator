@@ -14,7 +14,7 @@ Versión de plantilla usada: v2.1 (`docs/playbook/07-FEATURE-TEMPLATE.md`)
 - **Name**: Release activo nominal tras cierre de proyecto sin release siguiente
 - **Type**: Lifecycle Consistency / Release Governance
 - **Owner**: asdru
-- **Status**: Implementada — pendiente de validación E2E real en VPS antes de merge a `main`
+- **Status**: ✅ Ejecutada — validada con suite automatizada y E2E real en VPS (2026-07-30/31)
 - **Priority**: P1
 - **Origin**: Hallazgo de la prueba E2E real del 2026-07-29, asociada a FEATURE-024
 - **Related Features**: FEATURE-018, FEATURE-019, FEATURE-020, FEATURE-024
@@ -100,10 +100,17 @@ determinantes:
   cero releases `Activo` cuando no hay siguiente.
 - `src/server/runView.ts`, `web/src/ReleasePlanPanel.tsx`: tipo `activeReleaseId: string | null`;
   el panel muestra "Sin release activo" cuando es `null`.
-- `src/db/repository.ts` (`getReleasePlansByRelease`) y `src/features/lifecycle.ts`
-  (`assertRunProjectAndPinnedRelease`) — revisados, no requirieron cambios: el primero ya filtra
-  `is not null` sobre el JSONB (un `null` real se excluye naturalmente, no se convierte en el
-  string `"null"`); el segundo compara contra un `releaseKey` siempre string, nunca `null`.
+- `src/features/lifecycle.ts` (`assertRunProjectAndPinnedRelease`) — revisado, no requirió cambios:
+  compara contra un `releaseKey` siempre string, nunca `null`.
+- `src/db/repository.ts` (`getReleasePlansByRelease`) — el filtro `is not null` sobre el JSONB no
+  requirió cambios para soportar `activeReleaseId: null` (se excluye naturalmente, no se convierte
+  en el string `"null"`). Sí recibió una corrección aparte, descubierta durante la validación E2E
+  de esta misma Feature (no por el cambio a nullable): la consulta agrupaba por el valor literal de
+  `activeReleaseId` sobre **todo** el historial del proyecto, sin acotar a qué ciclo de negocio
+  pertenecía cada versión — al reutilizar el mismo proyecto entre casos de prueba no relacionados
+  (FEATURE-030), historial de un ciclo distinto se colaba en la vista del ciclo actual. Corregido en
+  rama separada `fix/release-plans-by-release-root-run-scope` (acotando por `root_run_id`) y
+  mergeado dentro de esta rama para validar los dos juntos — ver Validation Evidence.
 
 ---
 
@@ -133,10 +140,25 @@ release realmente Activo; `activeReleaseFromRoadmap` con `null` y con release no
 Suite completa: 211 tests, 201 pass, 10 skip (específicos de plataforma en Windows), 0 fail.
 `tsc --noEmit` limpio en raíz y en `web/`.
 
-**Pendiente antes de merge a `main`**: evidencia E2E real en VPS con un Roadmap de al menos dos
-releases — cerrar el primero y confirmar que el segundo se activa (`activeReleaseId` pasa al
-siguiente, proyecto no se cierra), luego cerrar el último y confirmar `activeReleaseId: null`,
-evento `project_closed`, y que la UI muestra "Sin release activo".
+**E2E real en VPS (2026-07-30/31, proyecto `pruebas-ia`, caso de negocio con dos releases —
+`calculateTip`/r1 y `calculateSplitTip`/r2)**: primer intento con el Orquestador todavía apuntando
+por error a la rama de FEATURE-032 (sin el fix) — reprodujo exactamente el bug original:
+`activeReleaseId` de r2 seguía marcado `"Activo"` después de `project_closed`, confirmando el
+diagnóstico antes de repetir la prueba en la rama correcta. Durante esa misma validación surgieron
+dos hallazgos aparte, documentados como FEATURE-038 (Planning no resetea el scope de Features entre
+releases; el último Feature de un release nunca queda `Completada`) y el hallazgo de
+`getReleasePlansByRelease` ya descrito en la sección 6, corregido y sumado a esta rama.
+
+Repetido con el Orquestador en la rama correcta (`feature/036-release-activo-consistente`, incluido
+el fix de `getReleasePlansByRelease`): el release r1 se cerró y activó r2 correctamente
+(`activeReleaseId` pasó al siguiente, proyecto no se cerró); al cerrar r2 (sin release pendiente) se
+registró `project_closed`, la base quedó con `activeReleaseId: null`, y la UI mostró "Sin release
+activo" sin usar el release completado como fallback — evidencia directa de las Reglas 6, 8 y 10
+funcionando en un run real. La vista del Release Plan además mostró cada release con únicamente su
+propia Feature, sin contaminación de ciclos de prueba anteriores (confirma el fix de
+`getReleasePlansByRelease`). FEATURE-038 (scope de Features entre releases) no se disparó en esta
+corrida en particular — comportamiento no determinístico dependiente de la interpretación del LLM en
+cada corrida, sigue sin corregir y fuera del alcance de esta Feature.
 
 ---
 
@@ -153,13 +175,16 @@ automática incorrecta (evitado explícitamente, sin migración heurística).
 
 ## 9. Approval Gate
 
-Aprobado por el owner, con la corrección de orden indicada en la nota de proceso. Pendiente de
-validación E2E real en VPS (Roadmap con dos releases) antes de mergear a `main`.
+Aprobado por el owner, con la corrección de orden indicada en la nota de proceso. Validado real en
+VPS con Roadmap de dos releases — ver sección 7. Mergeada a `main`.
 
 ---
 
 ## Estado de la implementación
 
-**Implementada** en rama `feature/036-release-activo-consistente` — pendiente de validación E2E
-real en VPS antes de mergear a `main`. `tsc --noEmit` (raíz y `web/`) y suite completa (211 tests)
-verificados en la rama.
+**✅ Ejecutada.** Implementada en rama `feature/036-release-activo-consistente`, validada con suite
+automatizada (`tsc --noEmit` limpio en raíz y `web/`, 211 tests) y con E2E real en VPS que confirmó
+el cierre correcto de un Roadmap de dos releases (`activeReleaseId: null` al cerrar el último,
+`project_closed`, UI sin fallback). Incluye la corrección de `getReleasePlansByRelease` descubierta
+durante esa misma validación. Mergeada a `main`. Hallazgo separado (FEATURE-038, ciclo de vida del
+Release Plan entre releases) queda documentado en el Roadmap, pendiente de diseño propio.
