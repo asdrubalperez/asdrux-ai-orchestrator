@@ -450,6 +450,66 @@ export async function getReleasePlansByRelease(projectId: string): Promise<Relea
   return result.rows;
 }
 
+/**
+ * FEATURE-028: candidato para decidir si el `release_plan` vigente corresponde al release
+ * actualmente activo. Trae, en una sola consulta, tanto el `activeReleaseId` que tenía pinneado el
+ * roadmap del run que escribió ese plan como el `root_run_id` de ese mismo run y el del ciclo de
+ * negocio vigente (mismo CTE `current_epoch` que `getReleasePlansByRelease`) — la comparación en sí
+ * la hace `resolveReleasePlanForActiveRelease` (función pura en `runStart.ts`), no esta consulta:
+ * acá solo se resuelven los datos persistidos, sin decidir nada.
+ */
+export interface ReleasePlanAssociationCandidate {
+  value: unknown;
+  pinnedActiveReleaseId: string | null;
+  writerRootRunId: string;
+  currentEpochRootRunId: string;
+}
+
+export async function getReleasePlanAssociationCandidate(
+  projectId: string
+): Promise<ReleasePlanAssociationCandidate | null> {
+  const result = await pool.query<{
+    value: unknown;
+    pinned_active_release_id: string | null;
+    writer_root_run_id: string;
+    current_epoch_root_run_id: string;
+  }>(
+    `with current_epoch as (
+       select coalesce(r.root_run_id, r.id) as root_run_id
+       from project_config_versions roadmap
+       join runs r on r.id = roadmap.changed_in_run_id
+       where roadmap.project_id = $1
+         and roadmap.config_key = 'release_roadmap'
+         and roadmap.valid_to is null
+       limit 1
+     )
+     select plan.value,
+       roadmap.value ->> 'activeReleaseId' as pinned_active_release_id,
+       coalesce(plan_run.root_run_id, plan_run.id) as writer_root_run_id,
+       current_epoch.root_run_id as current_epoch_root_run_id
+     from project_config_versions plan
+     join run_config_versions pinned on pinned.run_id = plan.changed_in_run_id
+     join project_config_versions roadmap
+       on roadmap.id = pinned.config_version_id
+      and roadmap.config_key = 'release_roadmap'
+     join runs plan_run on plan_run.id = plan.changed_in_run_id
+     cross join current_epoch
+     where plan.project_id = $1
+       and plan.config_key = 'release_plan'
+       and plan.valid_to is null
+     limit 1`,
+    [projectId]
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    value: row.value,
+    pinnedActiveReleaseId: row.pinned_active_release_id,
+    writerRootRunId: row.writer_root_run_id,
+    currentEpochRootRunId: row.current_epoch_root_run_id,
+  };
+}
+
 // FEATURE-016: preferencia de agente (claude|codex) + authMode (api_key|cli_session) por usuario,
 // global (role IS NULL) y con override opcional por rol. Sin versionado a diferencia de
 // project_config_versions — ver Scope/Excluido de FEATURE-016 para la justificación.

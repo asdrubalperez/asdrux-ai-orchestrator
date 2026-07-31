@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { PhaseResult } from "../../contracts/executor.js";
 import { latestEscalationArtifact } from "../respondService.js";
+import type { ReleasePlanAssociationCandidate } from "../../db/repository.js";
 import { FeatureLifecycleEscalationError } from "../../features/lifecycle.js";
 import {
   decideLinearEscalationKind,
   persistReleasePlanIfDeclared,
   ramaBaseTrabajoFromBusinessCase,
+  resolveReleasePlanForActiveRelease,
   runDeveloperQaLoop,
   shapeRoleContext,
   validateFinalReleasePlanTransition,
@@ -313,6 +315,61 @@ test("FEATURE-038: RELEASE_COMPLETO con COMANDO_TEST declarado escala en vez de 
       }),
     (error: unknown) => error instanceof FeatureLifecycleEscalationError
   );
+});
+
+// FEATURE-028: resolveReleasePlanForActiveRelease — función pura, decide si el release_plan
+// vigente corresponde al release activo actual (mismo activeReleaseId pinneado Y mismo
+// root_run_id/ciclo de negocio).
+
+function candidate(overrides: Partial<ReleasePlanAssociationCandidate> = {}): ReleasePlanAssociationCandidate {
+  return {
+    value: { features: [], featureActualId: null, ramaBaseTrabajo: "main" },
+    pinnedActiveReleaseId: "r2",
+    writerRootRunId: "root-run-actual",
+    currentEpochRootRunId: "root-run-actual",
+    ...overrides,
+  };
+}
+
+test("FEATURE-028, Escenario 1: mismo release y mismo ciclo -> entrega el plan", () => {
+  const plan = candidate();
+  assert.equal(
+    resolveReleasePlanForActiveRelease({ activeReleaseId: "r2", candidate: plan }),
+    plan.value
+  );
+});
+
+test("FEATURE-028, Escenario 2: plan de un release distinto -> null", () => {
+  const plan = candidate({ pinnedActiveReleaseId: "r1" });
+  assert.equal(resolveReleasePlanForActiveRelease({ activeReleaseId: "r2", candidate: plan }), null);
+});
+
+test("FEATURE-028, Escenario 6: sin release activo -> null", () => {
+  const plan = candidate();
+  assert.equal(resolveReleasePlanForActiveRelease({ activeReleaseId: null, candidate: plan }), null);
+});
+
+test("FEATURE-028, Escenario 7/8: sin plan vigente resoluble -> null", () => {
+  assert.equal(resolveReleasePlanForActiveRelease({ activeReleaseId: "r1", candidate: null }), null);
+});
+
+test("FEATURE-028, Escenario 9: roadmap pinneado sin release activo (activeReleaseId null) -> null", () => {
+  const plan = candidate({ pinnedActiveReleaseId: null });
+  assert.equal(resolveReleasePlanForActiveRelease({ activeReleaseId: "r1", candidate: plan }), null);
+});
+
+test("FEATURE-028, Escenario 10: mismo ID literal pero ciclo de negocio distinto -> null", () => {
+  const plan = candidate({ pinnedActiveReleaseId: "r1", writerRootRunId: "root-run-anterior" });
+  assert.equal(
+    resolveReleasePlanForActiveRelease({ activeReleaseId: "r1", candidate: plan }),
+    null,
+    "el activeReleaseId coincide pero pertenece a otro ciclo de negocio (root_run_id distinto)"
+  );
+});
+
+test("FEATURE-028, Escenario 11: mismo ciclo y mismo ID -> entrega el plan", () => {
+  const plan = candidate({ pinnedActiveReleaseId: "r1", writerRootRunId: "root-run-x", currentEpochRootRunId: "root-run-x" });
+  assert.equal(resolveReleasePlanForActiveRelease({ activeReleaseId: "r1", candidate: plan }), plan.value);
 });
 
 test("ramaBaseTrabajoFromBusinessCase lee rama_base_trabajo del business_case crudo de un run raíz", () => {

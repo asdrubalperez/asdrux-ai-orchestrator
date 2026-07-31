@@ -27,6 +27,7 @@ import {
   getBusinessCaseForRun,
   getCurrentProjectConfig,
   getProjectForUser,
+  getReleasePlanAssociationCandidate,
   getRunStatus,
   recordArtifact,
   recordRunConfigVersions,
@@ -38,6 +39,7 @@ import {
   type AgentConfig,
   type ArtifactRow,
   type AuthMode,
+  type ReleasePlanAssociationCandidate,
   type RunRow,
 } from "../../db/repository.js";
 import { pool } from "../../db/pool.js";
@@ -807,12 +809,36 @@ export function shapeRoleContext(
     : { functionalArtifact: incomingContext, ...shared };
 }
 
+/**
+ * FEATURE-028: decide si el `release_plan` vigente corresponde al release actualmente activo.
+ * Función pura — no hace I/O — para poder testearla sin base de datos, mismo criterio que
+ * `validateFinalReleasePlanTransition` (FEATURE-038). Ambas condiciones deben cumplirse: el
+ * `activeReleaseId` que tenía pinneado el roadmap del run que escribió el plan debe coincidir con
+ * el release activo actual, Y el plan debe pertenecer al mismo ciclo de negocio (`root_run_id`) que
+ * el roadmap vigente — un `activeReleaseId` idéntico por sí solo no alcanza, porque el mismo
+ * proyecto se reutiliza entre casos de negocio no relacionados que nombran los releases con los
+ * mismos IDs genéricos (ver FEATURE-036/`getReleasePlansByRelease`).
+ */
+export function resolveReleasePlanForActiveRelease(params: {
+  activeReleaseId: string | null;
+  candidate: ReleasePlanAssociationCandidate | null;
+}): unknown {
+  const { activeReleaseId, candidate } = params;
+  if (activeReleaseId === null) return null;
+  if (candidate === null) return null;
+  if (candidate.pinnedActiveReleaseId === null) return null;
+  if (candidate.pinnedActiveReleaseId !== activeReleaseId) return null;
+  if (candidate.writerRootRunId !== candidate.currentEpochRootRunId) return null;
+  return candidate.value;
+}
+
 async function withRoleContext(projectId: string, incomingContext: unknown): Promise<unknown> {
   const roadmap = await getCurrentProjectConfig(projectId, "release_roadmap");
-  const releasePlan = await getCurrentProjectConfig(projectId, "release_plan");
+  const activeRelease = activeReleaseFromRoadmap(roadmap?.value ?? null);
+  const candidate = await getReleasePlanAssociationCandidate(projectId);
   const shared = {
-    activeRelease: activeReleaseFromRoadmap(roadmap?.value ?? null),
-    releasePlan: releasePlan?.value ?? null,
+    activeRelease,
+    releasePlan: resolveReleasePlanForActiveRelease({ activeReleaseId: activeRelease?.id ?? null, candidate }),
   };
   return shapeRoleContext(incomingContext, shared);
 }
