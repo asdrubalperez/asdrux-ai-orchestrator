@@ -213,13 +213,16 @@
   real de `tempo-auto-planner`): el mismo riesgo (endpoint/campo real de Tempo para autorización,
   diferido a "validación experimental") se repitió sin resolución entre `f1` y `f3`, y QA lo aceptó
   como "known risk" ambas veces sin escalar. Prioridad por definir.
-- FEATURE-040 — El Gate de aprobación de merge (`respondMergeApproval`) es binario: cualquier
-  respuesta no-abort ejecuta el merge incondicionalmente, y el texto de la respuesta humana solo
-  queda guardado como metadata de auditoría — nunca se reenvía a Developer/Planning para pedir una
-  corrección, a diferencia de las escalaciones genéricas (ambigüedad, Roadmap), que sí se reinyectan
-  vía el mecanismo de reingreso. No hay forma de "rechazar con feedback y reintentar" en este Gate
-  específico. Detectado durante la misma validación de FEATURE-037 (2026-07-31). Prioridad por
-  definir.
+- FEATURE-040 — Los Gates de gobernanza que no son ambigüedad/Roadmap (aprobación de merge,
+  cierre de release sin release siguiente) son binarios: cualquier respuesta no-abort los ejecuta
+  incondicionalmente, sin reinyectar el texto de la respuesta humana a ningún rol para pedir una
+  corrección — a diferencia de las escalaciones genéricas, que sí se reinyectan vía el mecanismo de
+  reingreso. En `respondMergeApproval` el texto al menos queda guardado como metadata de auditoría;
+  en el cierre de release sin release siguiente (`respondService.ts:190`, evento `project_closed`)
+  ni siquiera eso — el texto no se persiste en ningún lado. No hay forma de "rechazar con feedback y
+  reintentar" en ninguno de los dos. Detectado durante la validación de FEATURE-037 (2026-07-31,
+  caso `tempo-auto-planner`, primero en el Gate de merge y confirmado de nuevo en el Gate de cierre
+  de release). Prioridad por definir.
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
@@ -246,9 +249,9 @@
 
 ## Priorización — Matriz Esfuerzo × Impacto
 
-Ponderación de los ítems 🟡 Confirmado (más FEATURE-029/032/036, ya ✅ Ejecutado, dejados aquí como
-referencia histórica de la corrida de priorización). Ordenada por Ponderación (Alta → Media → Baja)
-y, dentro de cada nivel, por Impacto y luego por Esfuerzo.
+Ponderación de los ítems 🟡 Confirmado (más FEATURE-028/029/032/036/037/038, ya ✅ Ejecutado,
+dejados aquí como referencia histórica de la corrida de priorización). Ordenada por Ponderación
+(Alta → Media → Baja) y, dentro de cada nivel, por Impacto y luego por Esfuerzo.
 
 | Elemento | Esfuerzo | Impacto | Ponderación |
 |---|---|---|---|
@@ -258,6 +261,8 @@ y, dentro de cada nivel, por Impacto y luego por Esfuerzo.
 | FEATURE-032 — Instalación determinística de dependencias (P2) | Medio | Medio | Alta |
 | FEATURE-037 — Entrega gobernada de reglas del Runbook a Planning/Developer/QA (nuevo) | Medio | Medio | Alta |
 | FEATURE-038 — Persistencia del estado final del Release Plan al cerrar un release (nuevo) | Medio | Medio | Alta |
+| FEATURE-039 — Regla 11 de Testing Policy (riesgo de contrato externo repetido) no se aplica estructuralmente (nuevo) | Medio | Medio | Alta |
+| FEATURE-040 — Gates de merge/cierre de release sin camino de rechazo con feedback correctivo (nuevo) | Medio | Medio | Alta |
 | FEATURE-027 — Continuidad durable Developer↔QA (P0) | Alto | Alto | Alta |
 | FEATURE-026 — Credenciales git por usuario | Alto | Medio | Alta |
 | FEATURE-033 — Lifecycle 01-PROJECT-BRIEF-TEMPLATE | Alto | Bajo | Media |
