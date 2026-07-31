@@ -409,10 +409,29 @@ export async function getProjectConfigHistory(
 /**
  * Recupera la última versión del Release Plan asociada a cada release. El JSONB no contiene
  * releaseId: la asociación se resuelve mediante el roadmap fijado para el run que escribió el plan.
+ *
+ * Corrección de bug (hallazgo de validación E2E de FEATURE-036, 2026-07-30): antes de este cambio,
+ * la consulta agrupaba por el valor literal de `activeReleaseId` (ej. "r1", "r2") sobre *todo* el
+ * historial del proyecto, sin filtrar por vigencia ni por a qué ciclo de negocio pertenecía cada
+ * versión. Como el mismo proyecto se reutiliza entre casos de negocio no relacionados (FEATURE-030,
+ * sin resolver todavía) y Architect/Planning nombran los releases siempre con los mismos IDs
+ * genéricos, historial de un ciclo de negocio completamente distinto podía colarse en la vista del
+ * ciclo actual. Se acota ahora al mismo `root_run_id` (raíz del ciclo de negocio) que el run que
+ * escribió el `release_roadmap` actualmente vigente — runs de un ciclo anterior, aunque reusen los
+ * mismos IDs literales, quedan excluidos porque pertenecen a un `root_run_id` distinto.
  */
 export async function getReleasePlansByRelease(projectId: string): Promise<ReleasePlanByReleaseRow[]> {
   const result = await pool.query<ReleasePlanByReleaseRow>(
-    `select distinct on (roadmap.value ->> 'activeReleaseId')
+    `with current_epoch as (
+       select coalesce(r.root_run_id, r.id) as root_run_id
+       from project_config_versions roadmap
+       join runs r on r.id = roadmap.changed_in_run_id
+       where roadmap.project_id = $1
+         and roadmap.config_key = 'release_roadmap'
+         and roadmap.valid_to is null
+       limit 1
+     )
+     select distinct on (roadmap.value ->> 'activeReleaseId')
        roadmap.value ->> 'activeReleaseId' as release_id,
        plan.value
      from project_config_versions plan
@@ -420,6 +439,8 @@ export async function getReleasePlansByRelease(projectId: string): Promise<Relea
      join project_config_versions roadmap
        on roadmap.id = pinned.config_version_id
       and roadmap.config_key = 'release_roadmap'
+     join runs plan_run on plan_run.id = plan.changed_in_run_id
+     join current_epoch on coalesce(plan_run.root_run_id, plan_run.id) = current_epoch.root_run_id
      where plan.project_id = $1
        and plan.config_key = 'release_plan'
        and roadmap.value ->> 'activeReleaseId' is not null

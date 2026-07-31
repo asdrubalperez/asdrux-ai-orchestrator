@@ -167,17 +167,10 @@ export async function respondToEscalation(params: {
       throw new Error(`Run ${params.parentRunId}: no hay release_roadmap persistido — no se puede cerrar el release.`);
     }
     const roadmap = roadmapConfig!.value as RoadmapApprovalPayload;
-    const nextRelease = roadmap.releases.find((release) => release.estado === "Pendiente");
-    releaseClosureRoadmap = {
-      releases: roadmap.releases.map((release) => {
-        if (release.id === roadmap.activeReleaseId) return { ...release, estado: "Completado" as const };
-        if (nextRelease && release.id === nextRelease.id) return { ...release, estado: "Activo" as const };
-        return release;
-      }),
-      activeReleaseId: nextRelease ? nextRelease.id : roadmap.activeReleaseId,
-    };
+    const { roadmap: computedRoadmap, hasNextRelease } = computeReleaseClosureRoadmap(roadmap);
+    releaseClosureRoadmap = computedRoadmap;
 
-    if (!nextRelease) {
+    if (!hasNextRelease) {
       const client = await pool.connect();
       try {
         await client.query("begin");
@@ -471,6 +464,33 @@ function buildReleaseClosureHumanSolution(rawSolution: string): string {
     "Confirmá o ajustá tu diseño para este nuevo release — no vuelvas a proponer el roadmap desde",
     "cero, ya existe una versión vigente aprobada.",
   ].join(" ");
+}
+
+/**
+ * FEATURE-036: computa el Roadmap resultante de cerrar el release actualmente activo. Extraída
+ * como función pura (separada de la lectura/persistencia en DB) para poder testear directamente
+ * los dos caminos (con y sin release siguiente) sin necesitar una conexión real a la base.
+ *
+ * Cierra por estado ("Activo" → "Completado"), no solo por coincidencia con
+ * `roadmap.activeReleaseId` — garantiza determinísticamente que ningún release quede "Activo"
+ * cuando no hay siguiente, sin depender de que el roadmap leído ya tuviera esa relación
+ * perfectamente sincronizada (sección 7.4 del diseño).
+ */
+export function computeReleaseClosureRoadmap(
+  roadmap: RoadmapApprovalPayload
+): { roadmap: RoadmapApprovalPayload; hasNextRelease: boolean } {
+  const nextRelease = roadmap.releases.find((release) => release.estado === "Pendiente");
+  return {
+    roadmap: {
+      releases: roadmap.releases.map((release) => {
+        if (nextRelease && release.id === nextRelease.id) return { ...release, estado: "Activo" as const };
+        if (release.estado === "Activo") return { ...release, estado: "Completado" as const };
+        return release;
+      }),
+      activeReleaseId: nextRelease ? nextRelease.id : null,
+    },
+    hasNextRelease: nextRelease !== undefined,
+  };
 }
 
 /**

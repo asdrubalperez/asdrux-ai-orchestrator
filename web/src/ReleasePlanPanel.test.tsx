@@ -38,3 +38,27 @@ test("ReleasePlanPanel renderiza los tres estados y conserva un release futuro v
   assert.match(html, /aria-label="pending"/);
   assert.match(html, /Release futuro/);
 });
+
+// FEATURE-036, Escenario 9: proyecto cerrado, sin release activo.
+test("ReleasePlanPanel muestra Sin release activo y no marca ningún release como Activo tras el cierre", () => {
+  const html = renderToStaticMarkup(
+    <ReleasePlanPanel
+      releaseRoadmap={{
+        activeReleaseId: null,
+        releases: [
+          {
+            id: "r1",
+            nombre: "Release cerrado",
+            alcanceResumen: "Completo",
+            estado: "Completado",
+            features: [{ id: "f1", nombre: "Terminada", estado: "Completada" }],
+          },
+        ],
+      }}
+    />
+  );
+
+  assert.match(html, /Sin release activo/);
+  assert.match(html, /Release cerrado/);
+  assert.doesNotMatch(html, />Activo</);
+});

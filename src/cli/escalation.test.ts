@@ -71,6 +71,85 @@ test("activeReleaseFromRoadmap devuelve null si el valor no es un roadmap válid
   assert.equal(activeReleaseFromRoadmap({ foo: "bar" }), null);
 });
 
+// FEATURE-036: activeReleaseId nullable representa ausencia real de release activo (proyecto
+// cerrado sin release siguiente) — antes de esta Feature, ese estado no era representable y
+// `activeReleaseId` seguía apuntando al último release, ya "Completado".
+
+const CLOSED_ROADMAP = {
+  releases: [{ id: "r1", nombre: "MVP", alcanceResumen: "Alcance mínimo.", estado: "Completado" }],
+  activeReleaseId: null,
+};
+
+test("isRoadmapApprovalPayload acepta un roadmap cerrado (activeReleaseId null, ningún release Activo)", () => {
+  assert.equal(isRoadmapApprovalPayload(CLOSED_ROADMAP), true);
+});
+
+test("isRoadmapApprovalPayload rechaza activeReleaseId apuntando a un release no Activo (Escenario 3)", () => {
+  assert.equal(
+    isRoadmapApprovalPayload({
+      releases: [{ id: "r1", nombre: "MVP", alcanceResumen: "Alcance mínimo.", estado: "Completado" }],
+      activeReleaseId: "r1",
+    }),
+    false
+  );
+});
+
+test("isRoadmapApprovalPayload rechaza activeReleaseId null cuando hay un release Activo (Escenario 4)", () => {
+  assert.equal(isRoadmapApprovalPayload({ ...VALID_ROADMAP, activeReleaseId: null }), false);
+});
+
+test("isRoadmapApprovalPayload rechaza activeReleaseId no nulo sin ningún release Activo (Escenario 5)", () => {
+  assert.equal(
+    isRoadmapApprovalPayload({
+      releases: [{ id: "r1", nombre: "MVP", alcanceResumen: "Alcance mínimo.", estado: "Pendiente" }],
+      activeReleaseId: "r1",
+    }),
+    false
+  );
+});
+
+test("isRoadmapApprovalPayload rechaza varios releases Activo simultáneos (Escenario 6)", () => {
+  assert.equal(
+    isRoadmapApprovalPayload({
+      releases: [
+        { id: "r1", nombre: "MVP", alcanceResumen: "Alcance mínimo.", estado: "Activo" },
+        { id: "r2", nombre: "Fase 2", alcanceResumen: "Resto del alcance.", estado: "Activo" },
+      ],
+      activeReleaseId: "r1",
+    }),
+    false
+  );
+});
+
+test("isRoadmapApprovalPayload rechaza activeReleaseId distinto del release realmente Activo (Escenario 7)", () => {
+  assert.equal(
+    isRoadmapApprovalPayload({
+      releases: [
+        { id: "r1", nombre: "MVP", alcanceResumen: "Alcance mínimo.", estado: "Activo" },
+        { id: "r2", nombre: "Fase 2", alcanceResumen: "Resto del alcance.", estado: "Pendiente" },
+      ],
+      activeReleaseId: "r2",
+    }),
+    false
+  );
+});
+
+test("activeReleaseFromRoadmap devuelve null cuando activeReleaseId es null", () => {
+  assert.equal(activeReleaseFromRoadmap(CLOSED_ROADMAP), null);
+});
+
+test("activeReleaseFromRoadmap devuelve null si el release referenciado no está Activo, incluso con forma válida", () => {
+  // Defensa local (Regla 8): un payload que ya pasó isRoadmapApprovalPayload no debería llegar
+  // nunca en este estado, pero el helper no debe confiar únicamente en la coincidencia de ID.
+  assert.equal(
+    activeReleaseFromRoadmap({
+      releases: [{ id: "r1", nombre: "MVP", alcanceResumen: "Alcance mínimo.", estado: "Completado" }],
+      activeReleaseId: "r1",
+    }),
+    null
+  );
+});
+
 // FEATURE-019
 
 const VALID_RELEASE_PLAN_DECLARATION = {
