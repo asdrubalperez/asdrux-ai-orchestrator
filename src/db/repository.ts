@@ -753,3 +753,149 @@ export async function getSessionById(sessionId: string): Promise<SessionRow | nu
 export async function revokeSession(sessionId: string): Promise<void> {
   await pool.query("update sessions set revoked_at = now() where id = $1 and revoked_at is null", [sessionId]);
 }
+
+// FEATURE-026: conexión GitHub por usuario (migrations/0015_user_git_connections.sql).
+
+export type GitConnectionProvider = "github";
+export type GitConnectionStatus = "connected" | "invalid" | "revoked";
+
+export interface UserGitConnectionRow {
+  id: string;
+  user_id: string;
+  provider: GitConnectionProvider;
+  external_user_id: string;
+  external_login: string;
+  access_token_ciphertext: string;
+  granted_scopes: string[];
+  status: GitConnectionStatus;
+  connected_at: string;
+  last_validated_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getGitConnectionForUser(
+  userId: string,
+  provider: GitConnectionProvider = "github"
+): Promise<UserGitConnectionRow | null> {
+  const result = await pool.query<UserGitConnectionRow>(
+    "select * from user_git_connections where user_id = $1 and provider = $2",
+    [userId, provider]
+  );
+  return result.rows[0] ?? null;
+}
+
+// Regla 3: soporta el chequeo de "esta identidad de GitHub ya pertenece a otro usuario".
+export async function getGitConnectionByExternalIdentity(
+  provider: GitConnectionProvider,
+  externalUserId: string
+): Promise<UserGitConnectionRow | null> {
+  const result = await pool.query<UserGitConnectionRow>(
+    "select * from user_git_connections where provider = $1 and external_user_id = $2",
+    [provider, externalUserId]
+  );
+  return result.rows[0] ?? null;
+}
+
+// Regla 30: misma identidad externa reconectando -- reemplaza el token, conserva la fila.
+// Cuenta nueva (identidad externa distinta): reemplaza igual, porque Regla 2 exige una sola
+// conexión activa por (user_id, provider) -- el cambio de cuenta (Reglas 27-30) queda para
+// cuando se implemente esa capacidad; esta función solo garantiza la unicidad de base.
+export async function upsertGitConnection(params: {
+  userId: string;
+  provider: GitConnectionProvider;
+  externalUserId: string;
+  externalLogin: string;
+  accessTokenCiphertext: string;
+  grantedScopes: string[];
+}): Promise<UserGitConnectionRow> {
+  const result = await pool.query<UserGitConnectionRow>(
+    `insert into user_git_connections
+       (user_id, provider, external_user_id, external_login, access_token_ciphertext, granted_scopes,
+        status, connected_at, last_validated_at, revoked_at, updated_at)
+     values ($1, $2, $3, $4, $5, $6, 'connected', now(), now(), null, now())
+     on conflict (user_id, provider)
+     do update set external_user_id = excluded.external_user_id,
+                   external_login = excluded.external_login,
+                   access_token_ciphertext = excluded.access_token_ciphertext,
+                   granted_scopes = excluded.granted_scopes,
+                   status = 'connected',
+                   connected_at = now(),
+                   last_validated_at = now(),
+                   revoked_at = null,
+                   updated_at = now()
+     returning *`,
+    [
+      params.userId,
+      params.provider,
+      params.externalUserId,
+      params.externalLogin,
+      params.accessTokenCiphertext,
+      params.grantedScopes,
+    ]
+  );
+  return result.rows[0];
+}
+
+// Regla 18/23/24: transición de estado sin fallback -- 'invalid' ante rechazo de GitHub,
+// 'revoked' ante desconexión explícita del usuario.
+export async function markGitConnectionStatus(
+  userId: string,
+  provider: GitConnectionProvider,
+  status: GitConnectionStatus
+): Promise<void> {
+  await pool.query(
+    `update user_git_connections
+     set status = $3,
+         revoked_at = case when $3 = 'revoked' then now() else revoked_at end,
+         updated_at = now()
+     where user_id = $1 and provider = $2`,
+    [userId, provider, status]
+  );
+}
+
+export interface OAuthStateRow {
+  id: string;
+  user_id: string;
+  session_id: string;
+  provider: GitConnectionProvider;
+  state_hash: string;
+  return_path: string | null;
+  expires_at: string;
+  consumed_at: string | null;
+  created_at: string;
+}
+
+export async function createOAuthState(params: {
+  userId: string;
+  sessionId: string;
+  provider: GitConnectionProvider;
+  stateHash: string;
+  returnPath: string | null;
+  expiresAt: Date;
+}): Promise<OAuthStateRow> {
+  const result = await pool.query<OAuthStateRow>(
+    `insert into oauth_states (user_id, session_id, provider, state_hash, return_path, expires_at)
+     values ($1, $2, $3, $4, $5, $6)
+     returning *`,
+    [params.userId, params.sessionId, params.provider, params.stateHash, params.returnPath, params.expiresAt]
+  );
+  return result.rows[0];
+}
+
+/**
+ * Regla 11: consumo atómico y de un solo uso -- el UPDATE...WHERE...RETURNING es la propia
+ * garantía de atomicidad (dos requests concurrentes con el mismo state_hash: como mucho uno
+ * obtiene una fila de vuelta, porque el segundo ya no matchea `consumed_at is null`).
+ */
+export async function consumeOAuthState(stateHash: string): Promise<OAuthStateRow | null> {
+  const result = await pool.query<OAuthStateRow>(
+    `update oauth_states
+     set consumed_at = now()
+     where state_hash = $1 and consumed_at is null and expires_at > now()
+     returning *`,
+    [stateHash]
+  );
+  return result.rows[0] ?? null;
+}
