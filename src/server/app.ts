@@ -17,6 +17,17 @@ import {
 } from "../auth/webSession.js";
 import { getCurrentProjectConfig, getReleasePlansByRelease, getRunDetailForUser } from "../db/repository.js";
 import {
+  completeGitHubOAuth,
+  disconnectGitHub,
+  getConnectionStatus,
+  GitConnectionInvalidError,
+  GitConnectionRequiredError,
+  GitHubIdentityAlreadyLinkedError,
+  listUserAccessibleRepositories,
+  OAuthStateInvalidError,
+  startGitHubOAuth,
+} from "../auth/gitConnectionService.js";
+import {
   EscalationRunNotFoundError,
   respondToEscalation,
   type EscalationResponseAction,
@@ -109,6 +120,89 @@ export function createApp(config: ServerConfig): express.Express {
 
   app.get("/auth/me", requireSession, (req: AuthenticatedRequest, res) => {
     res.json({ user: publicUser(req.user) });
+  });
+
+  // FEATURE-026: navegación top-level (el usuario hace click y el browser sigue el redirect a
+  // GitHub) -- no lleva `requireAllowedOrigin`, mismo criterio que el resto de los GET de este
+  // archivo. La cookie de sesión sí viaja porque `sessionCookieHeader` usa `SameSite=None`.
+  app.get("/auth/github/start", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const returnPath = typeof req.query.returnPath === "string" ? req.query.returnPath : null;
+      const { authorizeUrl } = await startGitHubOAuth({
+        userId: req.user!.id,
+        sessionId: req.sessionId!,
+        returnPath,
+      });
+      res.redirect(authorizeUrl);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Regla 11: el callback no confía en ningún userId recibido por query -- `req.user`/
+  // `req.sessionId` vienen de `requireSession` (la cookie de sesión propia del Orquestador, no de
+  // GitHub), y se validan contra lo persistido junto al `state` en `completeGitHubOAuth`.
+  app.get("/auth/github/callback", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const code = typeof req.query.code === "string" ? req.query.code : null;
+      const state = typeof req.query.state === "string" ? req.query.state : null;
+      if (!code || !state) {
+        res.status(400).json({ error: "invalid_oauth_callback" });
+        return;
+      }
+
+      const connection = await completeGitHubOAuth({
+        userId: req.user!.id,
+        sessionId: req.sessionId!,
+        code,
+        state,
+      });
+      res.status(200).json({ connection });
+    } catch (err) {
+      if (err instanceof OAuthStateInvalidError) {
+        res.status(409).json({ error: "oauth_state_invalid" });
+        return;
+      }
+      if (err instanceof GitHubIdentityAlreadyLinkedError) {
+        res.status(409).json({ error: "github_identity_already_linked" });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  app.get("/auth/github/status", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const connection = await getConnectionStatus(req.user!.id);
+      res.json({ connection });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/auth/github/disconnect", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      await disconnectGitHub(req.user!.id);
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Sección 4.4: bajo demanda, sin sincronización permanente. FEATURE-042 (en pausa) consumirá
+  // este endpoint para la selección de repositorio; por ahora es una capacidad standalone.
+  app.get("/auth/github/repositories", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const repositories = await listUserAccessibleRepositories(req.user!.id);
+      res.json({ repositories });
+    } catch (err) {
+      if (err instanceof GitConnectionRequiredError || err instanceof GitConnectionInvalidError) {
+        res.status(409).json({ error: "git_connection_required" });
+        return;
+      }
+      next(err);
+    }
   });
 
   app.get("/runs/:id", requireSession, async (req: AuthenticatedRequest, res, next) => {

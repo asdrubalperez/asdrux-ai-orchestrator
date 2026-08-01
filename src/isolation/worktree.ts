@@ -19,9 +19,44 @@ const execFileAsync = promisify(execFile);
  * llegar; `GIT_ASKPASS=echo` bloquea también cualquier askpass gráfico configurado en el host.
  * Antes de este fix, solo `cloneRunRepository` (más abajo) lo tenía — hallazgo real de FEATURE-017
  * que no se había propagado al resto de las funciones de este archivo.
+ *
+ * FEATURE-026, Regla 17: entorno mínimo por allowlist en vez de heredar `process.env` completo —
+ * mismo patrón que `runtimeEnvironment()` en `src/executor/isolated-tools/roleRuntime.ts:176-184`,
+ * ya usado para los `docker run` del sistema. `extra` fusiona variables específicas de la
+ * operación (p. ej. `GIT_ASKPASS`/el token efímero de `createGitProcessAuth`), pisando el default
+ * de `GIT_ASKPASS=echo` cuando corresponde autenticar contra GitHub en nombre de un usuario.
  */
-function gitNoPromptEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "echo" };
+const GIT_PROCESS_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "USERPROFILE",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "SystemRoot",
+  "windir",
+  "LANG",
+  "LC_ALL",
+] as const;
+
+function gitNoPromptEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "echo" };
+  for (const key of GIT_PROCESS_ENV_ALLOWLIST) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  return { ...env, ...extra };
+}
+
+/**
+ * FEATURE-026, sección 7.9/7.10: contrato mínimo que `worktree.ts` acepta para autenticar contra
+ * GitHub en nombre de un usuario. Deliberadamente ciego a OAuth/Postgres/cifrado — solo conoce
+ * variables de entorno ya resueltas y una función de normalización de URL. La resolución real
+ * (`run.owner_id` -> conexión -> token descifrado) vive en `src/auth/gitConnectionService.ts` y se
+ * invoca en la capa de aplicación, no acá.
+ */
+export interface GitProcessAuth {
+  authEnv: NodeJS.ProcessEnv;
+  cloneUrl(repoUrl: string): string;
 }
 
 export interface RunWorktree {
@@ -100,10 +135,10 @@ export async function commitAllChanges(worktree: RunWorktree, message: string): 
  * propio worktree. Solo se llama cuando QA aprueba dentro del límite de intentos — si el run
  * escala, no hay push y el worktree permanece vivo (política de retención de 21 días).
  */
-export async function pushRunBranch(worktree: RunWorktree): Promise<void> {
+export async function pushRunBranch(worktree: RunWorktree, gitAuth?: GitProcessAuth): Promise<void> {
   await execFileAsync("git", ["push", "origin", worktree.branchName], {
     cwd: worktree.worktreePath,
-    env: gitNoPromptEnv(),
+    env: gitNoPromptEnv(gitAuth?.authEnv),
   });
 }
 
@@ -387,9 +422,13 @@ export async function assertRunWorktreeAvailable(repoRoot: string, worktree: Run
  * rama inexistente, sin permisos), se corta acá — antes de invocar al Architect — con un error
  * explícito de infraestructura, nunca un problema de negocio para que el agente lo note.
  *
- * Credencial git: ninguna nueva — se asume la misma configuración ambiente de git del host/VPS
- * que ya usa `pushRunBranch` para push a `origin` (SSH agent / credential helper ya configurado).
- * No se introduce manejo de tokens/API keys de git en esta función.
+ * Credencial git: por defecto (sin `gitAuth`), la misma configuración ambiente de git del
+ * host/VPS que ya usa `pushRunBranch` para push a `origin` (SSH agent / credential helper ya
+ * configurado) -- flujo legacy, sin cambios. FEATURE-026 agrega `gitAuth` como parámetro opcional:
+ * cuando el caller lo provee (`src/auth/gitConnectionService.ts:createGitProcessAuth`), el clon
+ * usa la conexión GitHub del owner del run en vez de la identidad global del host. Sin `gitAuth`,
+ * el comportamiento es exactamente el de antes -- este archivo no decide cuándo corresponde cada
+ * modo, eso es responsabilidad del caller (ver Regla 32, modo `user_oauth` vs `server_legacy`).
  */
 export class RunRepoCloneError extends Error {}
 
@@ -413,11 +452,12 @@ export async function cloneRunRepository(params: {
   runId: string;
   repoUrl: string;
   baseRef: string;
+  gitAuth?: GitProcessAuth;
 }): Promise<RunWorktree> {
   const branchName = `run/${params.runId}`;
   const clonesBaseDir = process.env.RUN_CLONES_BASE_DIR ?? path.resolve(os.homedir(), "ai-orchestrator-case-clones");
   const worktreePath = path.join(clonesBaseDir, params.runId);
-  const cloneUrl = normalizeGitCloneUrl(params.repoUrl);
+  const cloneUrl = params.gitAuth ? params.gitAuth.cloneUrl(params.repoUrl) : normalizeGitCloneUrl(params.repoUrl);
 
   try {
     // Confirmado en una corrida real (2026-07-25): sin esto, un repo privado/inexistente-pero-
@@ -426,10 +466,14 @@ export async function cloneRunRepository(params: {
     // HTTP para siempre. GIT_TERMINAL_PROMPT=0 hace que git falle al instante en vez de esperar
     // input que nunca va a llegar (proceso no interactivo, sin terminal real); GIT_ASKPASS=echo
     // bloquea también cualquier askpass gráfico configurado en el host como vía alternativa.
+    // FEATURE-026: antes este env se armaba inline (bug lateral encontrado en la validación
+    // técnica -- duplicaba `gitNoPromptEnv()` sin usarla). Ahora reusa la misma función que el
+    // resto del archivo, así el fix del allowlist (Regla 17) y la inyección de `gitAuth` aplican
+    // acá también, no solo en las otras funciones.
     await execFileAsync(
       "git",
       ["clone", "--branch", params.baseRef, "--single-branch", cloneUrl, worktreePath],
-      { env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "echo" } }
+      { env: gitNoPromptEnv(params.gitAuth?.authEnv) }
     );
   } catch (err) {
     throw new RunRepoCloneError(
