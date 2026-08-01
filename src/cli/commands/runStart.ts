@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readValidSession } from "../../auth/session.js";
+import { createGitProcessAuth } from "../../auth/gitConnectionService.js";
 import { ClaudeCodeExecutor } from "../../executor/claudeCodeExecutor.js";
 import { CodexExecutor } from "../../executor/codexExecutor.js";
 import {
@@ -474,7 +475,7 @@ export async function executePipelineRun(params: {
           console.log(
             `[run:start] fase "${phase.agentRole}" abrió un Approval Gate (${gateKind}) — pipeline detenido para aprobación humana.`
           );
-          await finishRun(projectRepoRoot, runId, worktree, result, { pushAndClean: false, cleanupStrategy });
+          await finishRun(projectRepoRoot, runId, worktree, result, { pushAndClean: false, cleanupStrategy }, userId);
           return;
         }
 
@@ -542,12 +543,12 @@ export async function executePipelineRun(params: {
         }
 
         console.log(`[run:start] fase "${phase.agentRole}" terminó con status "${result.status}" — pipeline detenido.`);
-        await finishRun(projectRepoRoot, runId, worktree, result, { pushAndClean: false, cleanupStrategy });
+        await finishRun(projectRepoRoot, runId, worktree, result, { pushAndClean: false, cleanupStrategy }, userId);
         return;
       }
 
       console.log(`[run:start] fase "${phase.agentRole}" terminó con status "${result.status}" — pipeline detenido.`);
-      await finishRun(projectRepoRoot, runId, worktree, result, { pushAndClean: false, cleanupStrategy });
+      await finishRun(projectRepoRoot, runId, worktree, result, { pushAndClean: false, cleanupStrategy }, userId);
       return;
     }
 
@@ -582,14 +583,18 @@ export async function executePipelineRun(params: {
         return;
       }
 
-      await finishRun(projectRepoRoot, runId, worktree, finalResult, { pushAndClean: false, cleanupStrategy });
+      await finishRun(projectRepoRoot, runId, worktree, finalResult, { pushAndClean: false, cleanupStrategy }, userId);
       return;
     }
 
-    await finishRun(projectRepoRoot, runId, worktree, previousResult as PhaseResult, {
-      pushAndClean: false,
-      cleanupStrategy,
-    });
+    await finishRun(
+      projectRepoRoot,
+      runId,
+      worktree,
+      previousResult as PhaseResult,
+      { pushAndClean: false, cleanupStrategy },
+      userId
+    );
   } catch (err) {
     if (err instanceof RunCancelledExternallyError) {
       // El run ya fue finalizado (aborted) por forceUserEscalation + respondToEscalation antes de
@@ -618,10 +623,14 @@ export async function executePipelineRun(params: {
         artifactId: artifact.id,
         reason: "feature_lifecycle_validation",
       });
-      await finishRun(projectRepoRoot, runId, worktree, escalation, {
-        pushAndClean: false,
-        cleanupStrategy,
-      });
+      await finishRun(
+        projectRepoRoot,
+        runId,
+        worktree,
+        escalation,
+        { pushAndClean: false, cleanupStrategy },
+        userId
+      );
       return;
     }
 
@@ -634,7 +643,7 @@ export async function executePipelineRun(params: {
       escalationReason: null,
     };
     await recordRunEvent(runId, "run_error", { message, agentRole: phaseTiming.agentRole, durationMs });
-    await finishRun(projectRepoRoot, runId, worktree, failure, { pushAndClean: false, cleanupStrategy });
+    await finishRun(projectRepoRoot, runId, worktree, failure, { pushAndClean: false, cleanupStrategy }, userId);
     throw err;
   }
 }
@@ -1157,7 +1166,14 @@ async function continueReleaseAfterFeatureApproved(params: {
     remoteSha = null;
   }
   if (remoteSha !== commitSha) {
-    await pushRunBranch(worktree);
+    // FEATURE-042 (cableado con FEATURE-026): credencial efímera del owner del run, nunca la
+    // clave SSH legacy del host — se crea justo antes de pushear y se descarta enseguida.
+    const gitAuth = await createGitProcessAuth(userId);
+    try {
+      await pushRunBranch(worktree, gitAuth);
+    } finally {
+      await gitAuth.dispose();
+    }
     remoteSha = await remoteBranchSha(worktree);
   }
   if (remoteSha !== commitSha) {
@@ -1873,7 +1889,8 @@ async function finishRun(
   runId: string,
   worktree: RunWorktree,
   finalResult: PhaseResult,
-  opts: { pushAndClean: boolean; cleanupStrategy: "shared-worktree" | "standalone-clone" }
+  opts: { pushAndClean: boolean; cleanupStrategy: "shared-worktree" | "standalone-clone" },
+  userId: string
 ): Promise<void> {
   await finalizeRun(runId, finalResult);
 
@@ -1882,7 +1899,14 @@ async function finishRun(
     await recordRunEvent(runId, "run_committed", { committed });
     console.log(committed ? `[run:start] cambios commiteados en la rama.` : `[run:start] no había cambios sin commitear.`);
 
-    await pushRunBranch(worktree);
+    // FEATURE-042 (cableado con FEATURE-026): mismo criterio que en
+    // continueReleaseAfterFeatureApproved -- credencial efímera del owner, no la clave del host.
+    const gitAuth = await createGitProcessAuth(userId);
+    try {
+      await pushRunBranch(worktree, gitAuth);
+    } finally {
+      await gitAuth.dispose();
+    }
     await recordRunEvent(runId, "run_pushed", { branchName: worktree.branchName });
     console.log(`[run:start] push real de la rama "${worktree.branchName}" a origin.`);
 

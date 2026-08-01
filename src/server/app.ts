@@ -363,6 +363,14 @@ export function createApp(config: ServerConfig): express.Express {
         res.status(422).json({ error: "repo_clone_failed", message: result.message });
         return;
       }
+      if (result.kind === "git_connection_required") {
+        // FEATURE-042 (cableado con FEATURE-026): mismo criterio de corte técnico que
+        // repo_clone_failed, pero distinguible -- el frontend debe ofrecer "Conectar GitHub",
+        // no un mensaje genérico de fallo de clonado. Mismo status 409 que ya usa
+        // GET /auth/github/repositories para este mismo tipo de error.
+        res.status(409).json({ error: "git_connection_required", message: result.message });
+        return;
+      }
 
       res.status(202).json({ run: result.run });
       void result.execute().catch((err) => {

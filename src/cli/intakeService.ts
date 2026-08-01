@@ -16,6 +16,11 @@ import {
   type RunRow,
 } from "../db/repository.js";
 import { cloneRunRepository, headSha, removeRunClone, RunRepoCloneError } from "../isolation/worktree.js";
+import {
+  createGitProcessAuth,
+  GitConnectionInvalidError,
+  GitConnectionRequiredError,
+} from "../auth/gitConnectionService.js";
 import { FULL_PIPELINE, PIPELINES } from "../pipelines/definitions.js";
 import { parsePipelineDefinitionRow } from "./escalation.js";
 import { executePipelineRun } from "./commands/runStart.js";
@@ -87,6 +92,7 @@ export type StartPendingRunResult =
   | { kind: "not_found" }
   | { kind: "conflict" }
   | { kind: "repo_clone_failed"; message: string }
+  | { kind: "git_connection_required"; message: string }
   | { kind: "started"; run: RunRow; execute: () => Promise<void> };
 
 function isBusinessCaseValues(value: unknown): value is BusinessCaseValues {
@@ -108,6 +114,25 @@ async function failPendingRunTechnically(
   });
   await recordRunEvent(runId, "repo_clone_failed", { message });
   return { kind: "repo_clone_failed", message };
+}
+
+/**
+ * FEATURE-042 (cableado con FEATURE-026): mismo corte técnico que `failPendingRunTechnically`,
+ * pero con un `kind`/evento distinto para que el frontend pueda distinguir "no pudimos clonar tu
+ * repo" de "conectá tu cuenta de GitHub" -- nunca un 500 genérico indistinguible de un bug.
+ */
+async function failGitConnectionRequired(
+  runId: string,
+  message: string
+): Promise<{ kind: "git_connection_required"; message: string }> {
+  await finalizeRun(runId, {
+    status: "failed",
+    outputArtifact: null,
+    summary: `Corte técnico antes de invocar al Architect: ${message}`,
+    escalationReason: null,
+  });
+  await recordRunEvent(runId, "git_connection_required", { message });
+  return { kind: "git_connection_required", message };
 }
 
 /**
@@ -151,14 +176,30 @@ export async function startPendingRun(params: { runId: string; userId: string })
   }
   const projectId = run.project_id;
 
+  // FEATURE-042 (cableado con FEATURE-026), Regla 9 de FEATURE-026 ("sin fallback silencioso"):
+  // todo run web resuelve su credencial contra la conexión GitHub del owner -- nunca contra la
+  // clave SSH legacy del host. Sin conexión válida, el run se corta técnicamente acá, antes de
+  // invocar al Architect, con un estado distinguible (no un 500 genérico).
+  let gitAuth;
+  try {
+    gitAuth = await createGitProcessAuth(params.userId);
+  } catch (err) {
+    if (err instanceof GitConnectionRequiredError || err instanceof GitConnectionInvalidError) {
+      return failGitConnectionRequired(run.id, err.message);
+    }
+    throw err;
+  }
+
   let worktree;
   try {
-    worktree = await cloneRunRepository({ runId: run.id, repoUrl: repositorio, baseRef: ramaBase });
+    worktree = await cloneRunRepository({ runId: run.id, repoUrl: repositorio, baseRef: ramaBase, gitAuth });
   } catch (err) {
     if (err instanceof RunRepoCloneError) {
       return failPendingRunTechnically(run.id, err.message);
     }
     throw err;
+  } finally {
+    await gitAuth.dispose();
   }
 
   const promoted = await promoteRunToRunning({
