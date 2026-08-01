@@ -280,12 +280,15 @@ dejados aquí como referencia histórica de la corrida de priorización). Ordena
 | FEATURE-039 — Regla 11 de Testing Policy (riesgo de contrato externo repetido) no se aplica estructuralmente (nuevo) | Medio | Medio | Alta |
 | FEATURE-040 — Gates de merge/cierre de release sin camino de rechazo con feedback correctivo (nuevo) | Medio | Medio | Alta |
 | FEATURE-027 — Continuidad durable Developer↔QA (P0) | Alto | Alto | Alta |
+| FEATURE-041 — Creación y gestión de cuentas de usuario (self-service) (nuevo) | Alto | Alto | Alta |
+| FEATURE-042 — Creación y gestión de proyectos ("Mis proyectos") (nuevo) | Alto | Alto | Alta |
 | FEATURE-026 — Credenciales git por usuario | Alto | Medio | Alta |
 | FEATURE-033 — Lifecycle 01-PROJECT-BRIEF-TEMPLATE | Alto | Bajo | Media |
 | FEATURE-034 — Lifecycle 02-ARCHITECTURE-TEMPLATE | Alto | Bajo | Media |
 | FEATURE-035 — Lifecycle 09-RELEASE-PLAN-TEMPLATE | Alto | Bajo | Media |
 | FEATURE-036 — Release activo nominal tras cierre (P1) | Bajo | Medio | Baja |
 | FEATURE-029 — Contrato build output / COMANDO_TEST (P1) | Bajo | Bajo | Baja |
+| FEATURE-043 — Separar caso de negocio de repositorio/rama en el intake (nuevo) | Bajo | Bajo | Baja |
 
 ---
 
