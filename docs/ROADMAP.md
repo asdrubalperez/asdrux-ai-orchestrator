@@ -196,13 +196,31 @@
   correcciones de redacción (la entrada original del Roadmap era ambigua, no decía literalmente lo
   que el diseño corregía; el patrón de `runbookProvider.readText` para Functional no es precedente
   de inyección pre-invocación — FEATURE-037 introduce ese patrón).
+- FEATURE-026 — Autenticación GitHub por usuario para operaciones Git: nueva entidad
+  `user_git_connections` (token cifrado con AES-256-GCM — primer mecanismo de cifrado reversible
+  del proyecto; el precedente de FEATURE-016 solo persistía una preferencia de modo, nunca
+  credenciales reales) más flujo OAuth completo (`state` de un solo uso persistido en
+  `oauth_states`, callback, listado de repositorios accesibles vía API de GitHub). `worktree.ts`
+  gana un parámetro `gitAuth` opcional en `cloneRunRepository`/`pushRunBranch` para autenticar con
+  la conexión del owner en vez de la clave SSH compartida del host, y pasa a un entorno de proceso
+  por allowlist (reutiliza el patrón de `runtimeEnvironment()` de `isolated-tools`) en vez de
+  heredar `process.env` completo. Incremento deliberadamente parcial: no incluye UI de conexión,
+  listado/selección de repositorio en el intake, validación o creación de ramas, ni cambio de
+  cuenta con análisis de impacto — eso queda para FEATURE-042, que también absorbe el cableado
+  real de `gitAuth` en el arranque/push de runs (parcialmente adelantado, ver FEATURE-042).
+  **Validación E2E real (2026-08-01/02, infraestructura productiva real:
+  `aio.asdru.space`/`api.aio.asdru.space`, Caddy con HTTPS automático, `systemd`)**: flujo OAuth
+  completo probado con la cuenta real del owner — `GET /auth/github/status` devolvió
+  `{"status":"connected","externalLogin":"asdrubalperez","scopes":["repo"]}` tras completar la
+  autorización real contra GitHub, sin intervención manual de datos. Diseño original de ARIA (AI
+  Product Architect), con varias rondas de revisión técnica contra el código real (incluida
+  verificación contra documentación oficial de GitHub para el ciclo de vida del token) antes de
+  aprobar. Diseño completo en
+  `docs/features/FEATURE-026-Autenticación-Github-por-Usuario-para-Operaciones-Git.md`.
 
 **🟡 Confirmado**
 - FEATURE-025 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
-- FEATURE-026 — Credenciales git por usuario para el Orquestador (promovida de ⚪ Tentativo)
 - FEATURE-027 — Continuidad durable del loop Developer ↔ QA. Prioridad P0.
-- FEATURE-030 — Proyecto del Orquestador asociado correctamente al repositorio gestionado.
-  Prioridad P1.
 - FEATURE-033 — Lifecycle canónico de `01-PROJECT-BRIEF-TEMPLATE`.
 - FEATURE-034 — Lifecycle canónico de `02-ARCHITECTURE-TEMPLATE`.
 - FEATURE-035 — Lifecycle canónico de `09-RELEASE-PLAN-TEMPLATE`.
@@ -227,12 +245,21 @@
   de registro real — el único mecanismo es `seed:user` (comando CLI de administración manual, sin
   UI). La tabla `users` no tiene columnas de perfil (correo, nombre, apellido), solo `id`, `handle`,
   `password_hash`, `created_at`. Prioridad por definir.
-- FEATURE-042 — Creación y gestión de proyectos ("Mis proyectos"). Hoy no existe ningún flujo de
-  creación de proyectos — el único `insert into projects` en todo el código es un backfill de
-  migración (`migrations/0003_users_projects_phase_b.sql`) que crea un único proyecto fijo. Cada run
-  reutiliza ese proyecto (o el más antiguo del usuario, ver FEATURE-030) sin que exista una forma de
-  crear uno nuevo explícitamente. Relacionado con FEATURE-030, que corrige el síntoma de reuso
-  incorrecto pero no resuelve la ausencia de un flujo de creación. Prioridad por definir.
+- FEATURE-042 — Creación, selección y configuración de proyectos ("Mis proyectos"). Prioridad P1.
+  **Absorbe el alcance completo de FEATURE-030** (retirada como Feature independiente, ver nota en
+  su antigua entrada de detalle) — el gate de entrada explícito que exige seleccionar o crear un
+  proyecto antes de habilitar el intake elimina de raíz la necesidad de que el sistema "adivine" un
+  proyecto cuando no hay `projectId` explícito, que era el problema original de FEATURE-030. Hoy no
+  existe ningún flujo de creación de proyectos — el único `insert into projects` en todo el código
+  es un backfill de migración (`migrations/0003_users_projects_phase_b.sql`). El repositorio pasa a
+  ser configuración canónica del proyecto (campos directos en `projects`, sin entidad `Repository`
+  separada — FEATURE-026 ya expone la identidad real bajo demanda vía `GET
+  /auth/github/repositories`), no un campo del intake. El cableado real con FEATURE-026
+  (`createGitProcessAuth` en los tres call-sites de clonado/push de runs) ya está implementado
+  (rama `feature/042-cableado-github-auth-runs`, sin mergear) — el resto (modelo de datos
+  definitivo, endpoints de proyecto, decisión de routing en `web/`, validación/creación de ramas, UI)
+  sigue en diseño con ARIA. Propuesta de alcance completa en
+  `docs/features/FEATURE-042-propuesta-de-alcance-revisado-absorbe-FEATURE-030.md`.
 - FEATURE-043 — Separar el caso de negocio del repositorio/rama en el formulario de intake. Hoy los
   12 campos de `intake_field_definitions` (10 descriptivos del caso de negocio + `repositorio` +
   `rama_base_trabajo`) viven en la misma tabla plana, mismo `field_order` secuencial, renderizados
@@ -265,14 +292,15 @@
 
 ## Priorización — Matriz Esfuerzo × Impacto
 
-Ponderación de los ítems 🟡 Confirmado (más FEATURE-028/029/032/036/037/038, ya ✅ Ejecutado,
-dejados aquí como referencia histórica de la corrida de priorización). Ordenada por Ponderación
-(Alta → Media → Baja) y, dentro de cada nivel, por Impacto y luego por Esfuerzo.
+Ponderación de los ítems 🟡 Confirmado (más FEATURE-026/028/029/032/036/037/038, ya ✅ Ejecutado,
+dejados aquí como referencia histórica de la corrida de priorización). FEATURE-030 fue retirada de
+esta matriz — su alcance quedó absorbido por FEATURE-042 (ver detalle en la sección de abajo).
+Ordenada por Ponderación (Alta → Media → Baja) y, dentro de cada nivel, por Impacto y luego por
+Esfuerzo.
 
 | Elemento | Esfuerzo | Impacto | Ponderación |
 |---|---|---|---|
 | FEATURE-028 — Release Plan asociado al Release activo (P1) | Medio | Alto | Alta |
-| FEATURE-030 — Proyecto asociado al repositorio gestionado (P1) | Medio | Alto | Alta |
 | FEATURE-025 — Selección proveedor/modelo/credenciales por rol | Medio | Medio | Alta |
 | FEATURE-032 — Instalación determinística de dependencias (P2) | Medio | Medio | Alta |
 | FEATURE-037 — Entrega gobernada de reglas del Runbook a Planning/Developer/QA (nuevo) | Medio | Medio | Alta |
@@ -281,8 +309,8 @@ dejados aquí como referencia histórica de la corrida de priorización). Ordena
 | FEATURE-040 — Gates de merge/cierre de release sin camino de rechazo con feedback correctivo (nuevo) | Medio | Medio | Alta |
 | FEATURE-027 — Continuidad durable Developer↔QA (P0) | Alto | Alto | Alta |
 | FEATURE-041 — Creación y gestión de cuentas de usuario (self-service) (nuevo) | Alto | Alto | Alta |
-| FEATURE-042 — Creación y gestión de proyectos ("Mis proyectos") (nuevo) | Alto | Alto | Alta |
-| FEATURE-026 — Credenciales git por usuario | Alto | Medio | Alta |
+| FEATURE-042 — Creación, selección y configuración de proyectos (P1, absorbe FEATURE-030) | Alto | Alto | Alta |
+| FEATURE-026 — Autenticación GitHub por usuario (✅ Ejecutado) | Alto | Medio | Alta |
 | FEATURE-033 — Lifecycle 01-PROJECT-BRIEF-TEMPLATE | Alto | Bajo | Media |
 | FEATURE-034 — Lifecycle 02-ARCHITECTURE-TEMPLATE | Alto | Bajo | Media |
 | FEATURE-035 — Lifecycle 09-RELEASE-PLAN-TEMPLATE | Alto | Bajo | Media |
@@ -735,18 +763,47 @@ la misma pantalla de Disparo de la UI:
   que el resto de los roles, no quedar como excepción fija. Pendiente de diseño técnico (el mapeo no
   usa Executor/holder-worker hoy, por no necesitar tools — ver FEATURE-017 Regla 5 y Risks).
 
-### 🟡 FEATURE-026 — Credenciales git por usuario para el Orquestador
-Promovido de ⚪ Tentativo a 🟡 Confirmado.
-Hoy el clonado de repos (FEATURE-017, `cloneRunRepository`) usa una única identidad git fija a
-nivel de servidor — la clave SSH del usuario del sistema que corre el proceso del Orquestador.
-Funciona porque hoy hay un solo usuario real (el owner) trabajando sobre sus propios repos. Para
-que cualquier otro usuario pueda usar sus propios repos privados sin intervención manual (agregar
-deploy keys a mano, repo por repo), hace falta un mecanismo de autenticación por usuario — la misma
-idea que ya resolvió FEATURE-016 para los modelos de IA (`authMode`: API key vs OAuth, por usuario),
-pero aplicada al acceso a Git: cada usuario debería poder autenticar su propia cuenta de GitHub
-(patrón tipo GitHub App, o al menos una clave SSH/token por usuario en vez de una fija del
-servidor), de forma similar a como ya se pide autenticación de cuenta personal para Claude/Codex.
-No diseñado todavía — Discovery pendiente.
+### ✅ FEATURE-026 — Autenticación GitHub por usuario para operaciones Git
+
+**Estado:** Implementada y mergeada a `main` (`cfd89c8`). Prioridad P1. Diseño original de ARIA (AI
+Product Architect), con varias rondas de revisión técnica contra el código real antes de aprobar.
+Diseño completo en
+`docs/features/FEATURE-026-Autenticación-Github-por-Usuario-para-Operaciones-Git.md`.
+
+Hasta esta Feature, el clonado de repos (FEATURE-017, `cloneRunRepository`) usaba una única
+identidad git fija a nivel de servidor — la clave SSH del usuario del sistema que corre el proceso
+del Orquestador, funcional solo porque había un único usuario real trabajando sobre sus propios
+repos. FEATURE-016 (`authMode` para proveedores de IA) resultó insuficiente como precedente
+directo: esa Feature solo persiste una preferencia de modo, nunca credenciales reales — las
+credenciales de los Executors siguen siendo un recurso compartido del servidor en ambos modos. Este
+diseño necesitó ir más allá.
+
+**Qué se implementó**: `user_git_connections` (token OAuth cifrado con AES-256-GCM vía
+`node:crypto` — primer mecanismo de cifrado reversible del proyecto) + `oauth_states` (`state` de
+un solo uso, hash persistido, expiración corta, asociado a usuario y sesión). Flujo OAuth completo
+(`GET /auth/github/start|callback|status`, `POST /auth/github/disconnect`,
+`GET /auth/github/repositories`) contra un cliente propio de GitHub API vía `fetch` nativo (sin
+Octokit). `src/isolation/worktree.ts` gana un contrato `GitProcessAuth` (`authEnv`, `cloneUrl`) y
+un parámetro `gitAuth` opcional en `cloneRunRepository`/`pushRunBranch` — retrocompatible: sin él,
+comportamiento legacy idéntico al de antes de esta Feature. Entorno de proceso Git por allowlist
+explícita (reutiliza el patrón de `runtimeEnvironment()` de `src/executor/isolated-tools/`) en vez
+de heredar `process.env` completo.
+
+**Alcance deliberadamente parcial** (comunicado y documentado en el momento de implementar, no un
+recorte silencioso): no incluye UI de conexión (solo backend, navegación manual por URL), listado o
+selección de repositorio en el intake, validación o creación de ramas, ni cambio de cuenta GitHub
+con análisis de impacto sobre proyectos existentes. El cableado real de `gitAuth` en el
+arranque/push de runs (`intakeService.ts`, `runStart.ts`) se implementó parcialmente después, como
+parte de FEATURE-042 — ver esa entrada.
+
+**Validación E2E real (2026-08-01/02, infraestructura productiva real desplegada durante esta
+validación: `aio.asdru.space` en Vercel, `api.aio.asdru.space` en el VPS detrás de Caddy con HTTPS
+automático vía Let's Encrypt, proceso del Orquestador bajo `systemd`)**: se registró una GitHub
+OAuth App real, se completó el flujo de conexión con la cuenta real del owner, y
+`GET /auth/github/status` devolvió `{"status":"connected","externalLogin":"asdrubalperez",
+"scopes":["repo"],"connectedAt":"2026-08-01T23:09:30.490Z"}` — confirmación directa de que el
+intercambio de código OAuth, el cifrado del token y su persistencia funcionan de punta a punta
+contra la API real de GitHub, no solo en el diseño.
 
 ### 🟡 FEATURE-027 — Continuidad durable del loop Developer ↔ QA
 
@@ -833,14 +890,24 @@ del comportamiento de un LLM), que sí ejercitan el mecanismo directamente. Dise
 detalle de los intentos en
 `docs/features/FEATURE-029-Contrato-determinístico-entre-build-output-y-COMANDO_TEST.md`.
 
-### 🟡 FEATURE-030 — Proyecto asociado correctamente al repositorio gestionado
+### FEATURE-030 — Proyecto asociado correctamente al repositorio gestionado (retirada, absorbida por FEATURE-042)
 
-**Estado:** Confirmada. Prioridad P1.
+**Estado:** Retirada como Feature independiente (2026-08-02). Su alcance fue absorbido por
+FEATURE-042 — ver esa entrada. Se conserva este historial por trazabilidad, no se elimina.
 
-El Orquestador puede reutilizar el proyecto más antiguo del usuario para casos dirigidos a
-repositorios distintos, mezclando Roadmaps, Release Plans y estado persistido. La identidad del
-proyecto deberá distinguir correctamente el repositorio gestionado y evitar esa reutilización
-accidental.
+Problema original: el Orquestador podía reutilizar el proyecto más antiguo del usuario para casos
+dirigidos a repositorios distintos, mezclando Roadmaps, Release Plans y estado persistido
+(`getProjectForUser` sin `projectId` explícito, `order by created_at asc limit 1`).
+
+**Por qué se absorbe en vez de implementarse por separado**: el diseño de FEATURE-042 introduce un
+gate de entrada que exige seleccionar o crear un proyecto explícitamente antes de habilitar el
+intake. Bajo ese flujo, el sistema nunca llega a un punto donde tenga que *adivinar* un proyecto —
+el problema que esta Feature iba a resolver desaparece como síntoma independiente. La alternativa
+de implementar primero un parche automático (crear un proyecto en silencio cuando se detecta un
+repositorio nuevo) se descartó explícitamente: contradice el propio propósito del gate de FEATURE-042
+(que la creación de proyecto sea siempre un acto intencional del usuario) y generaría entradas en
+"Mis proyectos" que el usuario nunca decidió crear. Análisis completo en
+`docs/features/FEATURE-042-propuesta-de-alcance-revisado-absorbe-FEATURE-030.md`.
 
 ### ✅ FEATURE-031 — Mapping confiable de `tipo_solucion` y simplificación de `canales`
 
