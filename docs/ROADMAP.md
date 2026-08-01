@@ -223,6 +223,22 @@
   reintentar" en ninguno de los dos. Detectado durante la validación de FEATURE-037 (2026-07-31,
   caso `tempo-auto-planner`, primero en el Gate de merge y confirmado de nuevo en el Gate de cierre
   de release). Prioridad por definir.
+- FEATURE-041 — Creación y gestión de cuentas de usuario (self-service). Hoy no existe ningún flujo
+  de registro real — el único mecanismo es `seed:user` (comando CLI de administración manual, sin
+  UI). La tabla `users` no tiene columnas de perfil (correo, nombre, apellido), solo `id`, `handle`,
+  `password_hash`, `created_at`. Prioridad por definir.
+- FEATURE-042 — Creación y gestión de proyectos ("Mis proyectos"). Hoy no existe ningún flujo de
+  creación de proyectos — el único `insert into projects` en todo el código es un backfill de
+  migración (`migrations/0003_users_projects_phase_b.sql`) que crea un único proyecto fijo. Cada run
+  reutiliza ese proyecto (o el más antiguo del usuario, ver FEATURE-030) sin que exista una forma de
+  crear uno nuevo explícitamente. Relacionado con FEATURE-030, que corrige el síntoma de reuso
+  incorrecto pero no resuelve la ausencia de un flujo de creación. Prioridad por definir.
+- FEATURE-043 — Separar el caso de negocio del repositorio/rama en el formulario de intake. Hoy los
+  12 campos de `intake_field_definitions` (10 descriptivos del caso de negocio + `repositorio` +
+  `rama_base_trabajo`) viven en la misma tabla plana, mismo `field_order` secuencial, renderizados
+  juntos en el mismo modal (`ReviewModal.tsx`), sin ninguna separación estructural — son
+  conceptualmente dos cosas distintas: la descripción del caso de negocio y la configuración técnica
+  del repositorio destino. Prioridad por definir.
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
