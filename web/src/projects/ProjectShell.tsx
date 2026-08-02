@@ -1,7 +1,7 @@
 import React from "react";
 import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, FolderGit2, ListChecks, LogOut, Plus, Settings } from "lucide-react";
+import { Bot, ChevronDown, FolderGit2, ListChecks, LogOut, Plus, Settings } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { listProjects, selectProject } from "./api";
 import { queryClient } from "../lib/queryClient";
@@ -105,6 +105,10 @@ export function ProjectShell(props: { user: CurrentUser; onLogout: () => Promise
             >
               <Settings className="h-4 w-4" />
               Repositorio
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => navigate("/settings/agents")}>
+              <Bot className="h-4 w-4" />
+              Agentes
             </Button>
           </div>
           <Button

@@ -84,6 +84,13 @@ export interface ClaudeCodeExecutorOptions {
    * `--setting-sources ""` para suprimir hooks y auto-discovery de CLAUDE.md.
    */
   authMode?: "api_key" | "cli_session";
+  /**
+   * FEATURE-025-Parte-1, Regla 5.4.3: requerida cuando authMode === "api_key" -- la resuelve el
+   * caller (`resolveExecutorAuthentication`, contra la credencial propia del usuario dueño del
+   * run) antes de construir el Executor. Este Executor ya no lee ANTHROPIC_API_KEY del entorno del
+   * proceso como fuente de ejecución -- sin fallback a una clave global del host.
+   */
+  apiKey?: string;
 }
 
 interface RawCliResult {
@@ -142,9 +149,12 @@ export class ClaudeCodeExecutor implements Executor {
       return this.runRoleIsolated(invocation, { authMode, oauthCacheDir }, options);
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    // FEATURE-025-Parte-1: sin fallback a ANTHROPIC_API_KEY del proceso -- el caller resuelve la
+    // credencial propia del usuario antes de construir este Executor (resolveExecutorAuthentication)
+    // y la pasa acá. Este chequeo es defensivo (nunca debería dispararse en el camino real).
+    const apiKey = this.options.apiKey;
     if (!apiKey) {
-      throw new Error("ANTHROPIC_API_KEY no está definida en el entorno del proceso.");
+      throw new Error("apiKey no fue provista para authMode=api_key (esperada de resolveExecutorAuthentication).");
     }
 
     return this.runRoleIsolated(invocation, { authMode, apiKey }, options);

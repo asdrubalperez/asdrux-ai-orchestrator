@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readValidSession } from "../../auth/session.js";
 import { createGitProcessAuth } from "../../auth/gitConnectionService.js";
+import { resolveExecutorAuthentication } from "../../auth/aiCredentialService.js";
 import { ClaudeCodeExecutor } from "../../executor/claudeCodeExecutor.js";
 import { CodexExecutor } from "../../executor/codexExecutor.js";
 import {
@@ -41,6 +42,7 @@ import {
   type AgentConfig,
   type ArtifactRow,
   type AuthMode,
+  type EffectiveAgentConfig,
   type ReleasePlanAssociationCandidate,
   type RunRow,
 } from "../../db/repository.js";
@@ -346,8 +348,12 @@ export async function executePipelineRun(params: {
     cleanupStrategy = "shared-worktree",
     runbookProvider = defaultRunbookProvider,
   } = params;
-  const resolveSelection = (role: AgentRole): Promise<AgentConfig> =>
-    cliAgentOverride ? Promise.resolve(cliAgentOverride) : resolveAgentConfig(userId, role);
+  // FEATURE-025-Parte-1, sección 5.8: se resuelve por invocación, nunca una sola vez para todo el
+  // run. Bajo cliAgentOverride (flags de CLI, Regla 2 de FEATURE-016: nunca consulta la DB), el
+  // modelo sigue siendo el `--model` de CLI aplicado a todas las fases -- mismo comportamiento que
+  // antes de esta Feature, sin tocarlo (sección 7.12 del diseño).
+  const resolveSelection = (role: AgentRole): Promise<EffectiveAgentConfig> =>
+    cliAgentOverride ? Promise.resolve({ ...cliAgentOverride, model: model ?? null }) : resolveAgentConfig(userId, role);
   const readRole = (agentRole: string) =>
     readFile(path.join(orchestratorRoot, "src", "executor", "roles", `${agentRole}.txt`), "utf8");
 
@@ -383,7 +389,7 @@ export async function executePipelineRun(params: {
         phase.agentRole === "planning" ? await withRoleContext(projectId, runId, baseContext) : baseContext;
       const roleInstructions = await readRole(phase.agentRole);
       const selection = await resolveSelection(phase.agentRole);
-      const executor = buildExecutor(selection, worktree.worktreePath, runId, model);
+      const executor = await buildExecutor(selection, worktree.worktreePath, runId, userId);
 
       const invocation: PhaseInvocation = {
         agentRole: phase.agentRole,
@@ -576,8 +582,10 @@ export async function executePipelineRun(params: {
     if (pipelineSpec.definition.loop) {
       const developerSelection = await resolveSelection("developer");
       const qaSelection = await resolveSelection("qa");
-      const developerExecutor = buildExecutor(developerSelection, worktree.worktreePath, runId, model, { sandbox: "container" });
-      const qaExecutor = buildExecutor(qaSelection, worktree.worktreePath, runId, model);
+      const developerExecutor = await buildExecutor(developerSelection, worktree.worktreePath, runId, userId, {
+        sandbox: "container",
+      });
+      const qaExecutor = await buildExecutor(qaSelection, worktree.worktreePath, runId, userId);
       const finalResult = await runDeveloperQaLoop({
         executor: qaExecutor,
         developerExecutor,
@@ -1323,8 +1331,14 @@ export async function createPlanningToQaChildRun(params: {
   const pipelineDefinition = await ensurePipelineDefinition(PLANNING_TO_QA);
   const childWorktree = await createRunWorktree(params.repoRoot, childRunId, params.baseBranch);
   const baseCommitSha = await headSha(childWorktree);
-  const firstPhaseSelection: AgentConfig =
-    params.cliAgentOverride ?? (await resolveAgentConfig(params.userId, "planning"));
+  // FEATURE-025-Parte-1, sección 5.12: reingreso automático -- la resolución de modelo/credencial
+  // efectiva ocurre igual que en cualquier fase, en el `executePipelineRun` que sigue a esta
+  // función (mismo `cliAgentOverride`/`model`, ver call site). Acá solo se persiste el valor
+  // resuelto en el evento `run_started` para que quede disponible si este run hijo escala y se
+  // reintenta más adelante (respondService.ts, sección 5.9 del diseño).
+  const firstPhaseSelection: EffectiveAgentConfig = params.cliAgentOverride
+    ? { ...params.cliAgentOverride, model: params.model ?? null }
+    : await resolveAgentConfig(params.userId, "planning");
 
   const client = await pool.connect();
   try {
@@ -1349,7 +1363,7 @@ export async function createPlanningToQaChildRun(params: {
         worktreePath: childWorktree.worktreePath,
         provider: firstPhaseSelection.executorProvider,
         authMode: firstPhaseSelection.authMode,
-        model: params.model ?? null,
+        model: firstPhaseSelection.model,
         pipeline: `${PLANNING_TO_QA.name}@${PLANNING_TO_QA.version}`,
         projectId: params.projectId,
         repoPath: childWorktree.worktreePath,
@@ -1391,8 +1405,10 @@ export async function createArchitectReentryChildRun(params: {
   const pipelineDefinition = await ensurePipelineDefinition(FULL_PIPELINE);
   const childWorktree = await createRunWorktree(params.repoRoot, childRunId, params.baseBranch);
   const baseCommitSha = await headSha(childWorktree);
-  const firstPhaseSelection: AgentConfig =
-    params.cliAgentOverride ?? (await resolveAgentConfig(params.userId, "architect"));
+  // FEATURE-025-Parte-1, sección 5.12: ver comentario equivalente en createPlanningToQaChildRun.
+  const firstPhaseSelection: EffectiveAgentConfig = params.cliAgentOverride
+    ? { ...params.cliAgentOverride, model: params.model ?? null }
+    : await resolveAgentConfig(params.userId, "architect");
 
   const client = await pool.connect();
   try {
@@ -1417,7 +1433,7 @@ export async function createArchitectReentryChildRun(params: {
         worktreePath: childWorktree.worktreePath,
         provider: firstPhaseSelection.executorProvider,
         authMode: firstPhaseSelection.authMode,
-        model: params.model ?? null,
+        model: firstPhaseSelection.model,
         pipeline: `${FULL_PIPELINE.name}@${FULL_PIPELINE.version}`,
         projectId: params.projectId,
         repoPath: childWorktree.worktreePath,
@@ -1987,16 +2003,28 @@ export function parseAuthMode(value: string): AuthMode {
   throw new Error(`authMode desconocido: "${value}". Disponibles: api_key, cli_session`);
 }
 
-function buildExecutor(
-  selection: AgentConfig,
+/**
+ * FEATURE-025-Parte-1, sección 5.10: corte técnico previo a la invocación -- resuelve la
+ * autenticación efectiva (credencial propia del usuario para `api_key`, nada para `cli_session`)
+ * antes de construir el Executor. Si falta la credencial, `resolveExecutorAuthentication` lanza
+ * `AgentCredentialMissingError`, que se propaga y cae en el catch genérico de
+ * `executePipelineRun` (mismo mecanismo que cualquier otro error técnico mid-run: finaliza el run
+ * como `failed` con un evento `run_error`, nunca invoca al agente).
+ */
+async function buildExecutor(
+  selection: EffectiveAgentConfig,
   workingDirectory: string,
   requestingRunId: string,
-  model: string | undefined,
+  userId: string,
   opts: { sandbox?: "host" | "container" } = {}
-): RunExecutor {
+): Promise<RunExecutor> {
+  const authentication = await resolveExecutorAuthentication(userId, selection);
+  const apiKey = authentication.mode === "api_key" ? authentication.apiKey : undefined;
+  const model = selection.model ?? undefined;
+
   if (selection.executorProvider === "codex") {
-    return new CodexExecutor({ workingDirectory, requestingRunId, model, authMode: selection.authMode, ...opts });
+    return new CodexExecutor({ workingDirectory, requestingRunId, model, authMode: selection.authMode, apiKey, ...opts });
   }
 
-  return new ClaudeCodeExecutor({ workingDirectory, requestingRunId, model, authMode: selection.authMode, ...opts });
+  return new ClaudeCodeExecutor({ workingDirectory, requestingRunId, model, authMode: selection.authMode, apiKey, ...opts });
 }

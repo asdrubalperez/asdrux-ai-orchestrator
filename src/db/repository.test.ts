@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import { createRun, createRunPendingStart, getRootRunExecutionContext } from "./repository.js";
+import {
+  createRun,
+  createRunPendingStart,
+  deleteRoleAgentConfigOverride,
+  getGlobalAgentConfig,
+  getRoleAgentConfigOverride,
+  getRootRunExecutionContext,
+  resolveAgentConfig,
+  setGlobalAgentConfig,
+  setRoleAgentConfigOverride,
+} from "./repository.js";
 import { pool } from "./pool.js";
 
 // FEATURE-043, sección 5.5/7.6: valida el mecanismo central que el diseño identificó como
@@ -94,5 +104,63 @@ test("createRunPendingStart persiste base_branch_name separado de business_case;
   } finally {
     await client.query("rollback");
     client.release();
+  }
+});
+
+// FEATURE-025-Parte-1, sección 5.1/5.7: precedencia rol -> global -> default, y el modelo viaja
+// junto con provider/authMode en la misma fila (sección 7.1). Sin transacción/rollback -- estas
+// funciones usan `pool` directamente (mismo criterio que gitConnectionService.ts, sin client
+// inyectado); limpieza manual en el finally.
+test("resolveAgentConfig: precedencia rol > global > default, incluido el modelo", async (t) => {
+  try {
+    await pool.query("select 1");
+  } catch (error) {
+    if (error instanceof AggregateError || (error as NodeJS.ErrnoException).code === "ECONNREFUSED") {
+      t.skip("PostgreSQL integration database unavailable; covered on VPS");
+      return;
+    }
+    throw error;
+  }
+  const prerequisite = await pool.query<{ owner_id: string }>(
+    "select id as owner_id from users order by created_at asc limit 1"
+  );
+  if (!prerequisite.rows[0]) {
+    t.skip("Requires at least one user in the integration database");
+    return;
+  }
+  const userId = prerequisite.rows[0].owner_id;
+
+  try {
+    // Sin ninguna fila -> default (claude/api_key, sin modelo).
+    const withoutConfig = await resolveAgentConfig(userId, "architect");
+    assert.deepEqual(withoutConfig, { executorProvider: "claude", authMode: "api_key", model: null });
+
+    // Configuración global -> todos los roles sin override la heredan.
+    const global = await setGlobalAgentConfig(userId, {
+      executorProvider: "codex",
+      authMode: "api_key",
+      model: "gpt-5.6-luna",
+    });
+    assert.deepEqual(global, { executorProvider: "codex", authMode: "api_key", model: "gpt-5.6-luna" });
+    assert.deepEqual(await getGlobalAgentConfig(userId), global);
+    assert.deepEqual(await resolveAgentConfig(userId, "developer"), global);
+
+    // Override de rol -> ese rol usa su propia combinación; los demás siguen en la global.
+    const roleOverride = await setRoleAgentConfigOverride(userId, "developer", {
+      executorProvider: "claude",
+      authMode: "cli_session",
+      model: "claude-opus-5",
+    });
+    assert.deepEqual(await getRoleAgentConfigOverride(userId, "developer"), roleOverride);
+    assert.deepEqual(await resolveAgentConfig(userId, "developer"), roleOverride);
+    assert.deepEqual(await resolveAgentConfig(userId, "qa"), global);
+
+    // Eliminar el override -> ese rol vuelve a heredar la global (Regla 5.1.3).
+    await deleteRoleAgentConfigOverride(userId, "developer");
+    assert.equal(await getRoleAgentConfigOverride(userId, "developer"), null);
+    assert.deepEqual(await resolveAgentConfig(userId, "developer"), global);
+  } finally {
+    await deleteRoleAgentConfigOverride(userId, "developer").catch(() => {});
+    await pool.query("delete from user_agent_config where user_id = $1 and role is null", [userId]).catch(() => {});
   }
 });

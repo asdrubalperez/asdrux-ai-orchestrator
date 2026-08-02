@@ -16,7 +16,26 @@ import {
   WEB_SESSION_TTL_MS,
   type AuthenticatedRequest,
 } from "../auth/webSession.js";
-import { getCurrentProjectConfig, getReleasePlansByRelease, getRunDetailForUser } from "../db/repository.js";
+import {
+  getCurrentProjectConfig,
+  getReleasePlansByRelease,
+  getRunDetailForUser,
+  getGlobalAgentConfig,
+  getRoleAgentConfigOverride,
+  setGlobalAgentConfig,
+  setRoleAgentConfigOverride,
+  deleteRoleAgentConfigOverride,
+  type AuthMode,
+  type EffectiveAgentConfig,
+  type ExecutorProviderName,
+} from "../db/repository.js";
+import {
+  listAiCredentialStatuses,
+  removeAiCredential,
+  setAiCredential,
+} from "../auth/aiCredentialService.js";
+import { AGENT_MODEL_CATALOG, isModelSupportedByProvider } from "../executor/agentModelCatalog.js";
+import { isAgentRole } from "../cli/escalation.js";
 import {
   completeGitHubOAuth,
   disconnectGitHub,
@@ -223,6 +242,120 @@ export function createApp(config: ServerConfig): express.Express {
         res.status(409).json({ error: "git_connection_required" });
         return;
       }
+      next(err);
+    }
+  });
+
+  // FEATURE-025-Parte-1: configuración de asistente/modelo/authMode por agente (global y por rol)
+  // y credenciales de IA propias por usuario -- self-service, reemplaza CLI/DB directa (secciones
+  // 7.13/7.14 del diseño). Ninguna respuesta de credenciales devuelve el secreto (Regla 5.6.5/5.6.6).
+  const ALL_AGENT_ROLES = ["architect", "functional", "planning", "developer", "qa"] as const;
+
+  app.get("/agent-config", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const userId = req.user!.id;
+      const global = await getGlobalAgentConfig(userId);
+      const roleEntries = await Promise.all(
+        ALL_AGENT_ROLES.map(async (role) => [role, await getRoleAgentConfigOverride(userId, role)] as const)
+      );
+      const roles: Partial<Record<(typeof ALL_AGENT_ROLES)[number], EffectiveAgentConfig | null>> = {};
+      for (const [role, value] of roleEntries) roles[role] = value;
+      res.json({ global, roles, catalog: AGENT_MODEL_CATALOG });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.put("/agent-config", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const body = agentConfigBody(req.body);
+      if (!body) {
+        res.status(400).json({ error: "invalid_agent_config_body" });
+        return;
+      }
+      const saved = await setGlobalAgentConfig(req.user!.id, body);
+      res.json({ config: saved });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.put("/agent-config/:role", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const role = stringParam(req.params.role);
+      if (!role || !isAgentRole(role)) {
+        res.status(400).json({ error: "invalid_role" });
+        return;
+      }
+      const body = agentConfigBody(req.body);
+      if (!body) {
+        res.status(400).json({ error: "invalid_agent_config_body" });
+        return;
+      }
+      const saved = await setRoleAgentConfigOverride(req.user!.id, role, body);
+      res.json({ config: saved });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.delete("/agent-config/:role", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const role = stringParam(req.params.role);
+      if (!role || !isAgentRole(role)) {
+        res.status(400).json({ error: "invalid_role" });
+        return;
+      }
+      await deleteRoleAgentConfigOverride(req.user!.id, role);
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/agent-credentials", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const credentials = await listAiCredentialStatuses(req.user!.id);
+      res.json({ credentials });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.put("/agent-credentials/:provider", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const provider = stringParam(req.params.provider);
+      if (provider !== "claude" && provider !== "codex") {
+        res.status(400).json({ error: "invalid_provider" });
+        return;
+      }
+      const body = agentCredentialBody(req.body);
+      if (!body) {
+        res.status(400).json({ error: "invalid_credential_body" });
+        return;
+      }
+      const credential = await setAiCredential(req.user!.id, provider, body.apiKey);
+      res.json({ credential });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.delete("/agent-credentials/:provider", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const provider = stringParam(req.params.provider);
+      if (provider !== "claude" && provider !== "codex") {
+        res.status(400).json({ error: "invalid_provider" });
+        return;
+      }
+      await removeAiCredential(req.user!.id, provider);
+      res.status(200).json({ ok: true });
+    } catch (err) {
       next(err);
     }
   });
@@ -739,6 +872,27 @@ function loginBody(body: unknown): { handle: string | null; password: string | n
     handle: typeof record.handle === "string" ? record.handle : null,
     password: typeof record.password === "string" ? record.password : null,
   };
+}
+
+// FEATURE-025-Parte-1, sección 5.3: el modelo no puede persistirse como string libre -- se valida
+// acá, antes de llegar a repository.ts, contra el catálogo cerrado server-side.
+function agentConfigBody(body: unknown): EffectiveAgentConfig | null {
+  if (body === null || typeof body !== "object") return null;
+  const record = body as Record<string, unknown>;
+  const executorProvider = record.executorProvider;
+  if (executorProvider !== "claude" && executorProvider !== "codex") return null;
+  const authMode = record.authMode;
+  if (authMode !== "api_key" && authMode !== "cli_session") return null;
+  const model = typeof record.model === "string" && record.model.trim().length > 0 ? record.model : null;
+  if (model !== null && !isModelSupportedByProvider(executorProvider, model)) return null;
+  return { executorProvider, authMode: authMode as AuthMode, model };
+}
+
+function agentCredentialBody(body: unknown): { apiKey: string } | null {
+  if (body === null || typeof body !== "object") return null;
+  const record = body as Record<string, unknown>;
+  if (typeof record.apiKey !== "string" || record.apiKey.trim().length === 0) return null;
+  return { apiKey: record.apiKey };
 }
 
 function intakeMapBody(body: unknown): { inputText: string; previousValues?: BusinessCaseValues } | null {

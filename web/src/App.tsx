@@ -7,6 +7,7 @@ import { ProjectsListPage } from "./projects/ProjectsListPage";
 import { NewProjectPage } from "./projects/NewProjectPage";
 import { RepositorySettingsPage } from "./projects/RepositorySettingsPage";
 import { ProjectShell } from "./projects/ProjectShell";
+import { AgentConfigPage } from "./agentConfig/AgentConfigPage";
 import { CasesList } from "./intake/CasesList";
 import { DisparoScreen } from "./intake/DisparoScreen";
 import { RunDetailPage } from "./runs/RunDetailPage";
@@ -38,6 +39,8 @@ export function App() {
         <Route path="/" element={<ProjectGate />} />
         <Route path="/projects" element={<ProjectsListPage />} />
         <Route path="/projects/new" element={<NewProjectPage />} />
+        {/* FEATURE-025-Parte-1: configuración de usuario, no de proyecto -- fuera de ProjectShell. */}
+        <Route path="/settings/agents" element={<AgentConfigPage />} />
         <Route path="/projects/:projectId" element={<ProjectShell user={user} onLogout={auth.logout} />}>
           <Route index element={<Navigate to="cases" replace />} />
           <Route path="cases" element={<CasesList />} />

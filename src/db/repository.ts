@@ -120,17 +120,43 @@ export interface AgentConfig {
   authMode: AuthMode;
 }
 
+/**
+ * FEATURE-025-Parte-1, sección 6.2: superset de `AgentConfig` con el modelo resuelto. Se mantiene
+ * `AgentConfig` intacto (en vez de agregarle `model` directamente) porque el camino de override por
+ * CLI (`cliAgentOverride`, Regla 2 de FEATURE-016: nunca consulta la DB) sigue construyéndose como
+ * un `AgentConfig` literal a partir de flags -- `EffectiveAgentConfig` es exclusivamente la forma
+ * que devuelve la resolución contra `user_agent_config`.
+ */
+export interface EffectiveAgentConfig extends AgentConfig {
+  model: string | null;
+}
+
 export interface UserAgentConfigRow {
   id: string;
   user_id: string;
   role: AgentRole | null;
   executor_provider: ExecutorProviderName;
   auth_mode: AuthMode;
+  model: string | null;
   created_at: string;
   updated_at: string;
 }
 
-const DEFAULT_AGENT_CONFIG: AgentConfig = { executorProvider: "claude", authMode: "api_key" };
+/**
+ * FEATURE-025-Parte-1, sección 7.2: credencial de IA propia del usuario, cifrada. Misma convención
+ * de almacenamiento que `UserGitConnectionRow` (FEATURE-026) -- un solo campo de texto con el
+ * ciphertext ya empaquetado, no columnas separadas de iv/authTag.
+ */
+export interface UserAiProviderCredentialRow {
+  id: string;
+  user_id: string;
+  provider: ExecutorProviderName;
+  credential_ciphertext: string;
+  created_at: string;
+  updated_at: string;
+}
+
+const DEFAULT_AGENT_CONFIG: EffectiveAgentConfig = { executorProvider: "claude", authMode: "api_key", model: null };
 
 /**
  * Busca o crea la fila de `pipeline_definitions` para un `PipelineSpec` dado. La secuencia de
@@ -563,35 +589,39 @@ export async function getReleasePlanAssociationCandidate(
 // FEATURE-016: preferencia de agente (claude|codex) + authMode (api_key|cli_session) por usuario,
 // global (role IS NULL) y con override opcional por rol. Sin versionado a diferencia de
 // project_config_versions — ver Scope/Excluido de FEATURE-016 para la justificación.
-function toAgentConfig(row: UserAgentConfigRow): AgentConfig {
-  return { executorProvider: row.executor_provider, authMode: row.auth_mode };
+// FEATURE-025-Parte-1: agrega `model` a la misma fila -- mismo ciclo de vida y precedencia que
+// executor_provider/auth_mode, no justifica una tabla separada (sección 7.1 del diseño).
+function toEffectiveAgentConfig(row: UserAgentConfigRow): EffectiveAgentConfig {
+  return { executorProvider: row.executor_provider, authMode: row.auth_mode, model: row.model };
 }
 
-export async function getGlobalAgentConfig(userId: string): Promise<AgentConfig | null> {
+const AGENT_CONFIG_COLUMNS = "id, user_id, role, executor_provider, auth_mode, model, created_at, updated_at";
+
+export async function getGlobalAgentConfig(userId: string): Promise<EffectiveAgentConfig | null> {
   const result = await pool.query<UserAgentConfigRow>(
-    `select id, user_id, role, executor_provider, auth_mode, created_at, updated_at
+    `select ${AGENT_CONFIG_COLUMNS}
      from user_agent_config
      where user_id = $1 and role is null`,
     [userId]
   );
-  return result.rows[0] ? toAgentConfig(result.rows[0]) : null;
+  return result.rows[0] ? toEffectiveAgentConfig(result.rows[0]) : null;
 }
 
-export async function getRoleAgentConfigOverride(userId: string, role: AgentRole): Promise<AgentConfig | null> {
+export async function getRoleAgentConfigOverride(userId: string, role: AgentRole): Promise<EffectiveAgentConfig | null> {
   const result = await pool.query<UserAgentConfigRow>(
-    `select id, user_id, role, executor_provider, auth_mode, created_at, updated_at
+    `select ${AGENT_CONFIG_COLUMNS}
      from user_agent_config
      where user_id = $1 and role = $2`,
     [userId, role]
   );
-  return result.rows[0] ? toAgentConfig(result.rows[0]) : null;
+  return result.rows[0] ? toEffectiveAgentConfig(result.rows[0]) : null;
 }
 
 /**
  * Regla 2 de FEATURE-016 (sin el flag de CLI, resuelto antes de llamar a esta función):
- * override de rol -> global -> default (claude + api_key).
+ * override de rol -> global -> default (claude + api_key, sin modelo).
  */
-export async function resolveAgentConfig(userId: string, role: AgentRole): Promise<AgentConfig> {
+export async function resolveAgentConfig(userId: string, role: AgentRole): Promise<EffectiveAgentConfig> {
   const override = await getRoleAgentConfigOverride(userId, role);
   if (override) return override;
   const global = await getGlobalAgentConfig(userId);
@@ -599,36 +629,93 @@ export async function resolveAgentConfig(userId: string, role: AgentRole): Promi
   return DEFAULT_AGENT_CONFIG;
 }
 
-export async function setGlobalAgentConfig(userId: string, config: AgentConfig): Promise<AgentConfig> {
+export async function setGlobalAgentConfig(userId: string, config: EffectiveAgentConfig): Promise<EffectiveAgentConfig> {
   const result = await pool.query<UserAgentConfigRow>(
-    `insert into user_agent_config (user_id, role, executor_provider, auth_mode)
-     values ($1, null, $2, $3)
+    `insert into user_agent_config (user_id, role, executor_provider, auth_mode, model)
+     values ($1, null, $2, $3, $4)
      on conflict (user_id) where role is null
      do update set executor_provider = excluded.executor_provider,
                    auth_mode = excluded.auth_mode,
+                   model = excluded.model,
                    updated_at = now()
-     returning id, user_id, role, executor_provider, auth_mode, created_at, updated_at`,
-    [userId, config.executorProvider, config.authMode]
+     returning ${AGENT_CONFIG_COLUMNS}`,
+    [userId, config.executorProvider, config.authMode, config.model]
   );
-  return toAgentConfig(result.rows[0]);
+  return toEffectiveAgentConfig(result.rows[0]);
 }
 
 export async function setRoleAgentConfigOverride(
   userId: string,
   role: AgentRole,
-  config: AgentConfig
-): Promise<AgentConfig> {
+  config: EffectiveAgentConfig
+): Promise<EffectiveAgentConfig> {
   const result = await pool.query<UserAgentConfigRow>(
-    `insert into user_agent_config (user_id, role, executor_provider, auth_mode)
-     values ($1, $2, $3, $4)
+    `insert into user_agent_config (user_id, role, executor_provider, auth_mode, model)
+     values ($1, $2, $3, $4, $5)
      on conflict (user_id, role) where role is not null
      do update set executor_provider = excluded.executor_provider,
                    auth_mode = excluded.auth_mode,
+                   model = excluded.model,
                    updated_at = now()
-     returning id, user_id, role, executor_provider, auth_mode, created_at, updated_at`,
-    [userId, role, config.executorProvider, config.authMode]
+     returning ${AGENT_CONFIG_COLUMNS}`,
+    [userId, role, config.executorProvider, config.authMode, config.model]
   );
-  return toAgentConfig(result.rows[0]);
+  return toEffectiveAgentConfig(result.rows[0]);
+}
+
+export async function deleteRoleAgentConfigOverride(userId: string, role: AgentRole): Promise<void> {
+  await pool.query("delete from user_agent_config where user_id = $1 and role = $2", [userId, role]);
+}
+
+// FEATURE-025-Parte-1, sección 7.2: CRUD crudo de credenciales de IA -- cifrado/descifrado y
+// resolución de autenticación en runtime viven en src/auth/aiCredentialService.ts (capa de
+// servicio), no acá, mismo criterio de capas que gitConnectionService.ts sobre user_git_connections.
+
+export async function getAiProviderCredential(
+  userId: string,
+  provider: ExecutorProviderName
+): Promise<UserAiProviderCredentialRow | null> {
+  const result = await pool.query<UserAiProviderCredentialRow>(
+    `select id, user_id, provider, credential_ciphertext, created_at, updated_at
+     from user_ai_provider_credentials
+     where user_id = $1 and provider = $2`,
+    [userId, provider]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function listAiProviderCredentials(userId: string): Promise<UserAiProviderCredentialRow[]> {
+  const result = await pool.query<UserAiProviderCredentialRow>(
+    `select id, user_id, provider, credential_ciphertext, created_at, updated_at
+     from user_ai_provider_credentials
+     where user_id = $1
+     order by provider asc`,
+    [userId]
+  );
+  return result.rows;
+}
+
+export async function upsertAiProviderCredential(
+  userId: string,
+  provider: ExecutorProviderName,
+  credentialCiphertext: string
+): Promise<UserAiProviderCredentialRow> {
+  const result = await pool.query<UserAiProviderCredentialRow>(
+    `insert into user_ai_provider_credentials (user_id, provider, credential_ciphertext)
+     values ($1, $2, $3)
+     on conflict (user_id, provider)
+     do update set credential_ciphertext = excluded.credential_ciphertext, updated_at = now()
+     returning id, user_id, provider, credential_ciphertext, created_at, updated_at`,
+    [userId, provider, credentialCiphertext]
+  );
+  return result.rows[0];
+}
+
+export async function deleteAiProviderCredential(userId: string, provider: ExecutorProviderName): Promise<void> {
+  await pool.query("delete from user_ai_provider_credentials where user_id = $1 and provider = $2", [
+    userId,
+    provider,
+  ]);
 }
 
 export async function recordRunConfigVersions(runId: string, client?: PoolClient): Promise<void> {

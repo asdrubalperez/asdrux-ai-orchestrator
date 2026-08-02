@@ -95,6 +95,13 @@ export interface CodexExecutorOptions {
    * docs/features/FEATURE-016-auth-oauth-executors.md sección 7.3).
    */
   authMode?: "api_key" | "cli_session";
+  /**
+   * FEATURE-025-Parte-1, Regla 5.4.3: requerida cuando authMode === "api_key" -- la resuelve el
+   * caller (`resolveExecutorAuthentication`, contra la credencial propia del usuario dueño del
+   * run) antes de construir el Executor. Este Executor ya no lee CODEX_API_KEY del entorno del
+   * proceso como fuente de ejecución -- sin fallback a una clave global del host.
+   */
+  apiKey?: string;
 }
 
 interface RawCodexResult {
@@ -155,9 +162,12 @@ export class CodexExecutor implements Executor {
       return this.runRoleIsolated(invocation, { authMode, oauthCacheDir }, options);
     }
 
-    const apiKey = process.env.CODEX_API_KEY;
+    // FEATURE-025-Parte-1: sin fallback a CODEX_API_KEY del proceso -- el caller resuelve la
+    // credencial propia del usuario antes de construir este Executor (resolveExecutorAuthentication)
+    // y la pasa acá. Este chequeo es defensivo (nunca debería dispararse en el camino real).
+    const apiKey = this.options.apiKey;
     if (!apiKey) {
-      throw new Error("CODEX_API_KEY no esta definida en el entorno del proceso.");
+      throw new Error("apiKey no fue provista para authMode=api_key (esperada de resolveExecutorAuthentication).");
     }
 
     return this.runRoleIsolated(invocation, { authMode, apiKey }, options);
