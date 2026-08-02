@@ -1,6 +1,7 @@
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Play, Eye, XCircle } from "lucide-react";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,11 +19,20 @@ import { queryClient } from "../lib/queryClient";
 import { statusLabel, statusVariant } from "./statusDisplay";
 import type { RunCaseSummary } from "./types";
 
-export function CasesList(props: { onOpenRun: (runId: string) => void; onNewCase: () => void }) {
+// FEATURE-042, sección B.7/E.6: filtra exclusivamente por el proyecto activo -- ya no consume
+// listRunsForUser(userId) sin scope de proyecto.
+export function CasesList() {
+  const params = useParams<{ projectId: string }>();
+  const projectId = params.projectId ?? "";
+  const navigate = useNavigate();
+
   const query = useQuery({
-    queryKey: ["runs", "mine"],
+    queryKey: ["projects", projectId, "cases"],
+    enabled: projectId.length > 0,
     queryFn: async () => {
-      const response = await fetch(apiUrl("/runs"), { credentials: "include" });
+      const response = await fetch(apiUrl(`/projects/${encodeURIComponent(projectId)}/cases`), {
+        credentials: "include",
+      });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const body = (await response.json()) as { runs: RunCaseSummary[] };
       return body.runs;
@@ -34,7 +44,7 @@ export function CasesList(props: { onOpenRun: (runId: string) => void; onNewCase
   const [cancelling, setCancelling] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const refresh = () => void queryClient.invalidateQueries({ queryKey: ["runs", "mine"] });
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ["projects", projectId, "cases"] });
 
   const iniciar = async (runId: string) => {
     setStartingId(runId);
@@ -45,16 +55,24 @@ export function CasesList(props: { onOpenRun: (runId: string) => void; onNewCase
         credentials: "include",
       });
       if (response.status === 422) {
-        // FEATURE-017: corte técnico explícito (ej. no se pudo clonar el repo del caso) — el run
-        // ya quedó en status="failed", no hace falta reintentar la petición.
-        const body = (await response.json()) as { message?: string };
+        const body = (await response.json()) as { error?: string; message?: string };
         setError(body.message ?? "No se pudo iniciar el run: falló un chequeo técnico previo al Architect.");
+        refresh();
+        return;
+      }
+      if (response.status === 409) {
+        const body = (await response.json()) as { error?: string; message?: string };
+        setError(
+          body.error === "git_connection_required"
+            ? "Tu conexión GitHub no es válida -- reconectala antes de iniciar este caso."
+            : (body.message ?? "No se pudo iniciar el run.")
+        );
         refresh();
         return;
       }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       refresh();
-      props.onOpenRun(runId);
+      navigate(`/projects/${projectId}/cases/${runId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo iniciar el run.");
     } finally {
@@ -84,8 +102,8 @@ export function CasesList(props: { onOpenRun: (runId: string) => void; onNewCase
   return (
     <section className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6 lg:px-8">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Mis casos</h2>
-        <Button onClick={props.onNewCase}>Nuevo caso</Button>
+        <h2 className="text-lg font-semibold">Casos</h2>
+        <Button onClick={() => navigate(`/projects/${projectId}/cases/new`)}>Nuevo caso</Button>
       </div>
 
       {error ? <p className="text-sm text-rose-700">{error}</p> : null}
@@ -99,7 +117,7 @@ export function CasesList(props: { onOpenRun: (runId: string) => void; onNewCase
 
       {query.data && query.data.length === 0 ? (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-8 text-center text-sm text-zinc-600">
-          Todavía no cargaste ningún caso. Empezá con "Nuevo caso".
+          Todavía no cargaste ningún caso en este proyecto. Empezá con "Nuevo caso".
         </div>
       ) : null}
 
@@ -134,7 +152,7 @@ export function CasesList(props: { onOpenRun: (runId: string) => void; onNewCase
                 </Button>
               ) : null}
               {run.status !== "sin_iniciar" ? (
-                <Button size="sm" variant="outline" onClick={() => props.onOpenRun(run.id)}>
+                <Button size="sm" variant="outline" onClick={() => navigate(`/projects/${projectId}/cases/${run.id}`)}>
                   <Eye className="h-4 w-4" />
                   Visualizar
                 </Button>

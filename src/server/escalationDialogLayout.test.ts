@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const source = readFileSync(new URL("../../web/src/main.tsx", import.meta.url), "utf8");
+// FEATURE-042: EscalationResponseDialog se movió de main.tsx a runs/RunDetailPage.tsx cuando se
+// introdujo el router (sección C del diseño aprobado) -- el contenido de la función es idéntico.
+const source = readFileSync(new URL("../../web/src/runs/RunDetailPage.tsx", import.meta.url), "utf8");
 const dialogStart = source.indexOf('function EscalationResponseDialog(');
 const dialogEnd = source.indexOf("\nfunction escalationMotiveText(", dialogStart);
 const dialog = source.slice(dialogStart, dialogEnd);

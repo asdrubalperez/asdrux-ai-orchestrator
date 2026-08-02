@@ -1,11 +1,19 @@
 import React from "react";
-import { Loader2, Upload } from "lucide-react";
+import { AlertTriangle, Loader2, Upload } from "lucide-react";
+import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { apiUrl } from "../lib/api";
+import { queryClient } from "../lib/queryClient";
 import { ReviewModal } from "./ReviewModal";
-import type { BusinessCaseValues, IntakeFieldDefinition, RunCaseSummary } from "./types";
+import type { BusinessCaseValues, IntakeFieldDefinition } from "./types";
 
-export function DisparoScreen(props: { onConfirmed: (run: RunCaseSummary) => void }) {
+// FEATURE-042, sección E.7. `projectId` viene de la ruta -- el repositorio se muestra como
+// contexto no editable (ver aviso más abajo), nunca se pide en este formulario.
+export function DisparoScreen() {
+  const params = useParams<{ projectId: string }>();
+  const projectId = params.projectId ?? "";
+  const navigate = useNavigate();
+
   const [inputText, setInputText] = React.useState("");
   const [mapping, setMapping] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -47,8 +55,12 @@ export function DisparoScreen(props: { onConfirmed: (run: RunCaseSummary) => voi
       <div className="rounded-lg border border-zinc-200 bg-white p-5">
         <h2 className="text-lg font-semibold">Nuevo caso de negocio</h2>
         <p className="mt-1 text-sm text-zinc-600">
-          Pegá el texto de un relevamiento o cargá un archivo .md/.txt. El Orquestador va a mapearlo contra los 12
+          Pegá el texto de un relevamiento o cargá un archivo .md/.txt. El Orquestador va a mapearlo contra los
           campos predeterminados, sin inventar contenido — lo que no encuentre queda vacío para que lo completes vos.
+        </p>
+        <p className="mt-2 flex items-center gap-1.5 text-xs text-zinc-500">
+          <AlertTriangle className="h-3.5 w-3.5" />
+          El repositorio de este caso es el que ya configuraste en el proyecto — no se pide acá.
         </p>
 
         <textarea
@@ -86,13 +98,18 @@ export function DisparoScreen(props: { onConfirmed: (run: RunCaseSummary) => voi
       <ReviewModal
         open={reviewOpen}
         onOpenChange={setReviewOpen}
+        projectId={projectId}
         fields={fields}
         initialValues={values}
-        onConfirmed={(run) => {
+        onConfirmed={(_run, branchWarning) => {
           setInputText("");
           setFields([]);
           setValues({});
-          props.onConfirmed(run);
+          void queryClient.invalidateQueries({ queryKey: ["projects", projectId, "cases"] });
+          if (branchWarning) {
+            window.alert(branchWarning);
+          }
+          navigate(`/projects/${projectId}/cases`);
         }}
       />
     </section>

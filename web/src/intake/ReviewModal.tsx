@@ -13,20 +13,38 @@ import { Input } from "../components/ui/input";
 import { apiUrl } from "../lib/api";
 import type { BusinessCaseValues, IntakeFieldDefinition, RunCaseSummary } from "./types";
 
-// FEATURE-017, Regla 4: Rama Base de Trabajo tiene default "main" si el usuario no indica nada,
-// pero cuenta como completa con ese default — no exige que el usuario la toque para llegar al 100%.
+// FEATURE-042, sección B.9: el repositorio deja de pedirse en el intake -- se obtiene siempre
+// desde el proyecto activo. `rama_base_trabajo` sigue siendo del caso (Regla D.9/E.7).
 const RAMA_BASE_KEY = "rama_base_trabajo";
+const REPOSITORIO_KEY = "repositorio";
 const TIPO_SOLUCION_KEY = "tipo_solucion";
-// Sección 7.1: el schema de intake_field_definitions no tiene columna de opciones — las del único
-// campo `select` del MVP (tipo_solucion) quedan fijas acá, no leídas de la definición.
 const TIPO_SOLUCION_OPTIONS = [
   { value: "nueva", label: "Nueva" },
   { value: "mejora_existente", label: "Mejora de una solución ya existente" },
 ];
 
-function withDefaults(values: BusinessCaseValues): BusinessCaseValues {
+// Mismo criterio de slug que suggestBranchName (src/auth/branchValidationService.ts) -- se
+// duplica en el frontend porque es una sugerencia editable, no una validación de autoridad (esa
+// vive en el backend, D.9, y se revalida igual al confirmar).
+function suggestBranchName(seed: string): string {
+  const slug = seed
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+  return `feature/${slug || "caso"}`;
+}
+
+function withDefaults(values: BusinessCaseValues, fields: IntakeFieldDefinition[]): BusinessCaseValues {
   if (values[RAMA_BASE_KEY]) return values;
-  return { ...values, [RAMA_BASE_KEY]: "main" };
+  const seedField = fields.find((f) => f.field_key !== RAMA_BASE_KEY && f.field_key !== REPOSITORIO_KEY);
+  const seed = seedField ? (values[seedField.field_key] ?? "") : "";
+  return { ...values, [RAMA_BASE_KEY]: suggestBranchName(seed) };
 }
 
 function completenessPercent(values: BusinessCaseValues, fields: IntakeFieldDefinition[]): number {
@@ -41,22 +59,26 @@ function completenessPercent(values: BusinessCaseValues, fields: IntakeFieldDefi
 export function ReviewModal(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  projectId: string;
   fields: IntakeFieldDefinition[];
   initialValues: BusinessCaseValues;
-  onConfirmed: (run: RunCaseSummary) => void;
+  onConfirmed: (run: RunCaseSummary, branchWarning: string | null) => void;
 }) {
-  const [values, setValues] = React.useState<BusinessCaseValues>(() => withDefaults(props.initialValues));
+  // Sección B.9: el repositorio no se pide más en el intake nuevo.
+  const visibleFields = props.fields.filter((f) => f.field_key !== REPOSITORIO_KEY);
+  const [values, setValues] = React.useState<BusinessCaseValues>(() => withDefaults(props.initialValues, visibleFields));
   const [confirming, setConfirming] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (props.open) {
-      setValues(withDefaults(props.initialValues));
+      setValues(withDefaults(props.initialValues, visibleFields));
       setError(null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.open, props.initialValues]);
 
-  const percent = completenessPercent(values, props.fields);
+  const percent = completenessPercent(values, visibleFields);
   const canContinue = percent === 100 && !confirming;
 
   const setFieldValue = (fieldKey: string, value: string) => {
@@ -67,15 +89,29 @@ export function ReviewModal(props: {
     setConfirming(true);
     setError(null);
     try {
-      const response = await fetch(apiUrl("/runs"), {
+      const response = await fetch(apiUrl(`/projects/${encodeURIComponent(props.projectId)}/cases`), {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ businessCase: values }),
       });
+      if (response.status === 422) {
+        const body = (await response.json()) as { message?: string };
+        setError(body.message ?? "La rama indicada no se puede usar en este repositorio.");
+        return;
+      }
+      if (response.status === 409) {
+        const body = (await response.json()) as { error?: string; message?: string };
+        setError(
+          body.error === "project_not_configured"
+            ? "Este proyecto todavía no tiene repositorio configurado."
+            : (body.message ?? "No se pudo confirmar el caso.")
+        );
+        return;
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const body = (await response.json()) as { run: RunCaseSummary };
-      props.onConfirmed(body.run);
+      const body = (await response.json()) as { run: RunCaseSummary; branchWarning: string | null };
+      props.onConfirmed(body.run, body.branchWarning);
       props.onOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo confirmar el caso.");
@@ -90,13 +126,13 @@ export function ReviewModal(props: {
         <DialogHeader>
           <DialogTitle>Revisión del caso de negocio</DialogTitle>
           <DialogDescription>
-            {percent}% completo ({props.fields.length} campos). Lo que el mapeo no pudo completar queda vacío — nunca
+            {percent}% completo ({visibleFields.length} campos). Lo que el mapeo no pudo completar queda vacío — nunca
             se inventa contenido.
           </DialogDescription>
         </DialogHeader>
 
         <div className="max-h-[55vh] space-y-4 overflow-y-auto pr-1 text-sm">
-          {props.fields.map((field) => (
+          {visibleFields.map((field) => (
             <FieldEditor key={field.field_key} field={field} value={values[field.field_key] ?? null} onChange={setFieldValue} />
           ))}
           {error ? <p className="text-sm text-rose-700">{error}</p> : null}
@@ -123,6 +159,7 @@ function FieldEditor({
   onChange: (fieldKey: string, value: string) => void;
 }) {
   const isComplete = typeof value === "string" && value.trim().length > 0;
+  const isBranchField = field.field_key === RAMA_BASE_KEY;
 
   return (
     <div className="space-y-1">
@@ -132,7 +169,9 @@ function FieldEditor({
           {isComplete ? "Completo" : "Vacío"}
         </span>
       </div>
-      <p className="text-xs text-zinc-500">{field.description}</p>
+      <p className="text-xs text-zinc-500">
+        {isBranchField ? "Sugerida automáticamente. Podés editarla antes de confirmar." : field.description}
+      </p>
       {field.field_key === TIPO_SOLUCION_KEY ? (
         <select
           className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-950 outline-none focus:border-zinc-900"
