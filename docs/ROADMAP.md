@@ -254,7 +254,26 @@
   `docs/features/FEATURE-043-Separar-configuración-de-ejecución-del-caso-de-negocio.md`.
 
 **🟡 Confirmado**
-- FEATURE-025 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
+- FEATURE-025-Parte-1 — Asistente IA, modelo y credenciales API por agente. Prioridad Alta (próxima
+  a encarar, ver handoff de priorización). División de alcance decidida el 2026-08-02: el punto de
+  selección de asistente por rol ya está casi resuelto desde FEATURE-016
+  (`user_agent_config`/`resolveAgentConfig`); el modelo por agente no existe en absoluto (hoy es un
+  flag de CLI global al run, sin persistir); y el modo de autenticación por API key sigue
+  dependiendo de una clave compartida del host (`ANTHROPIC_API_KEY`/`CODEX_API_KEY`) en vez de la
+  credencial propia del usuario — el hueco de seguridad real que esta parte cierra, reutilizando el
+  cifrado AES-256-GCM ya construido en FEATURE-026. Diseño preliminar en
+  `docs/features/FEATURE-025-Parte-1-Asistente-Modelo-y-Credenciales-API-por-Agente.md`.
+- FEATURE-025-Parte-2 — OAuth personal por proveedor de IA (Claude/Codex). Prioridad Media, después
+  de Parte 1. El modo `cli_session` ya existe como selector por usuario/rol, pero el secreto real
+  detrás es hoy una sesión OAuth compartida del host (`CLAUDE_OAUTH_CACHE_DIR`/
+  `CODEX_OAUTH_CACHE_DIR`, variables de entorno globales) — mismo problema de credencial compartida
+  que Parte 1 resuelve para `api_key`. Se separó de Parte 1 porque su viabilidad técnica no está
+  confirmada (a diferencia de GitHub/FEATURE-026, no se sabe si Claude Code CLI/Codex CLI exponen
+  un OAuth delegable equivalente) — requiere un spike técnico antes de cerrar el diseño funcional.
+  Diseño preliminar en
+  `docs/features/FEATURE-025-Parte-2-OAuth-Personal-por-Proveedor-de-IA.md`. Contexto completo de
+  la priorización y la división en
+  `docs/research/HANDOFF-FEATURE-025-priorizacion-y-division-en-dos-partes.md`.
 - FEATURE-027 — Continuidad durable del loop Developer ↔ QA. Prioridad P0.
 - FEATURE-033 — Lifecycle canónico de `01-PROJECT-BRIEF-TEMPLATE`.
 - FEATURE-034 — Lifecycle canónico de `02-ARCHITECTURE-TEMPLATE`.
@@ -315,7 +334,8 @@ Esfuerzo.
 | Elemento | Esfuerzo | Impacto | Ponderación |
 |---|---|---|---|
 | FEATURE-028 — Release Plan asociado al Release activo (P1) | Medio | Alto | Alta |
-| FEATURE-025 — Selección proveedor/modelo/credenciales por rol | Medio | Medio | Alta |
+| FEATURE-025-Parte-1 — Asistente/modelo/credenciales API por agente (próxima a encarar) | Medio | Medio | Alta |
+| FEATURE-025-Parte-2 — OAuth personal por proveedor de IA (después de Parte 1, requiere spike) | Alto | Medio | Media |
 | FEATURE-032 — Instalación determinística de dependencias (P2) | Medio | Medio | Alta |
 | FEATURE-037 — Entrega gobernada de reglas del Runbook a Planning/Developer/QA (nuevo) | Medio | Medio | Alta |
 | FEATURE-038 — Persistencia del estado final del Release Plan al cerrar un release (nuevo) | Medio | Medio | Alta |
@@ -757,25 +777,48 @@ recorre secuencialmente los pasos intermedios aunque no tengan nada que resolver
 optimización futura: permitir que el circuito llegue directo al dueño real sin recorrer los pasos
 intermedios, cuando el costo de la v1 secuencial resulte un problema real en la práctica.
 
-### 🟡 FEATURE-025 — Selección de proveedor/modelo/credenciales por rol
-Promovido de ⚪ Tentativo a 🟡 Confirmado.
-Ítem ampliado en la sesión de FEATURE-007, cubre tres superficies de configuración, todas parte de
-la misma pantalla de Disparo de la UI:
-- Selección de proveedor (Claude Code / Codex / futuro) por rol.
+### 🟡 FEATURE-025-Parte-1 — Asistente IA, modelo y credenciales API por agente
+Promovido de ⚪ Tentativo a 🟡 Confirmado (ítem ampliado en la sesión de FEATURE-007). Dividido en
+dos partes el 2026-08-02 tras un análisis de dependencia con FEATURE-041 que reveló una asimetría
+real entre las tres superficies de configuración originales — contexto completo en
+`docs/research/HANDOFF-FEATURE-025-priorizacion-y-division-en-dos-partes.md`.
+
+- Selección de proveedor (Claude Code / Codex / futuro) por rol — ya casi resuelto desde
+  FEATURE-016 (`user_agent_config`/`resolveAgentConfig`), falta solo UI.
 - Selección de modelo dentro de ese proveedor, por rol (motivado por H12: Haiku no siempre
-  respeta convenciones de formato estrictas).
+  respeta convenciones de formato estrictas) — no existe en absoluto hoy, ni columna ni resolución;
+  el `--model` de CLI es un string suelto, global al run, sin validar contra el proveedor.
 - Configuración de credenciales/API token por agente o global. Hoy resuelto a mano vía
-  `.env.local` (`ANTHROPIC_API_KEY`, `CODEX_API_KEY`) porque el Orquestador todavía se construye a
-  sí mismo; cuando exista la UI real, cada usuario va a necesitar cargar sus propias credenciales,
-  no las de desarrollo. Sin diseño todavía de dónde/cómo se almacenan (relacionado con el ítem
-  "Approval Model por Release", para cuando el Orquestador opere sobre proyectos externos).
-- El mismo toggle "misma configuración para todos los agentes" vs "una configuración por agente"
-  aplica a los tres puntos — proveedor, modelo y credenciales — no solo a proveedor/modelo.
+  `.env.local` (`ANTHROPIC_API_KEY`, `CODEX_API_KEY`), compartido por todos los usuarios sin
+  importar quién esté logueado — el hueco de seguridad real que esta parte cierra, reutilizando el
+  cifrado AES-256-GCM ya construido en FEATURE-026 (`user_git_connections`).
+- El owner confirmó que la personalización debe ser libre por agente, sin forzar "mismo asistente
+  para todos" — el schema actual ya lo permite tal cual está, sin cambios adicionales.
 - El paso de mapeo del intake (FEATURE-017, `mapBusinessCase.ts`) hoy usa una llamada directa fija
   (Claude Haiku + API key, sin pasar por `authMode`/`resolveAgentConfig`) — decisión explícita del
   owner de que, a futuro, este paso también debe respetar la misma configuración de agente/authMode
   que el resto de los roles, no quedar como excepción fija. Pendiente de diseño técnico (el mapeo no
   usa Executor/holder-worker hoy, por no necesitar tools — ver FEATURE-017 Regla 5 y Risks).
+
+Diseño preliminar completo (Scope, Functional Rules borrador, modelo de datos abierto, Risks) en
+`docs/features/FEATURE-025-Parte-1-Asistente-Modelo-y-Credenciales-API-por-Agente.md`.
+
+### 🟡 FEATURE-025-Parte-2 — OAuth personal por proveedor de IA
+Separada de Parte 1 el 2026-08-02. El modo de autenticación `cli_session` ya existe como selector
+por usuario/rol desde FEATURE-016, pero el secreto real detrás es hoy una única sesión OAuth
+**compartida del host** (`CLAUDE_OAUTH_CACHE_DIR`/`CODEX_OAUTH_CACHE_DIR`, variables de entorno
+globales del proceso, confirmado contra `claudeCodeExecutor.ts`/`codexExecutor.ts`) — el selector
+aparenta ser por-usuario pero no lo es, mismo problema de credencial compartida que Parte 1 resuelve
+para `api_key`.
+
+Se separó de Parte 1 porque, a diferencia de GitHub (FEATURE-026, OAuth Apps estándar y bien
+documentados), no está confirmado que Claude Code CLI o Codex CLI expongan un mecanismo de OAuth
+delegable equivalente — requiere un spike técnico antes de poder cerrar el diseño funcional
+completo con la misma confianza que Parte 1. No bloquea ni depende de Parte 1 más allá de compartir
+la misma UI/tabla de configuración de agente.
+
+Diseño preliminar (con el spike técnico requerido explícito en la sección 7.1) en
+`docs/features/FEATURE-025-Parte-2-OAuth-Personal-por-Proveedor-de-IA.md`.
 
 ### ✅ FEATURE-026 — Autenticación GitHub por usuario para operaciones Git
 
