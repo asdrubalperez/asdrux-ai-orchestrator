@@ -7,6 +7,7 @@ import {
   clientIpForRateLimit,
   createWebLoginSession,
   expiredSessionCookieHeader,
+  isAllowedWebOrigin,
   loginRateLimitExceeded,
   recordFailedLogin,
   requireAllowedOrigin,
@@ -664,14 +665,18 @@ async function requireSession(req: AuthenticatedRequest, res: express.Response, 
 function corsMiddleware(allowedOrigin: string): express.RequestHandler {
   return (req, res, next) => {
     const origin = req.header("Origin");
-    if (origin === allowedOrigin) {
-      res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+    const isAllowed = origin !== undefined && isAllowedWebOrigin(origin, allowedOrigin);
+    if (isAllowed) {
+      // CORS exige reflejar el origen real de la request, no un valor fijo -- un preview de
+      // Vercel nunca coincide con `allowedOrigin` (la producción), así que enviar ese valor fijo
+      // rompería el preflight para cualquier origen que matcheara solo por el patrón.
+      res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Access-Control-Allow-Credentials", "true");
       res.setHeader("Vary", "Origin");
     }
 
     if (req.method === "OPTIONS") {
-      if (origin !== allowedOrigin) {
+      if (!isAllowed) {
         res.status(403).end();
         return;
       }

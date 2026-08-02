@@ -82,14 +82,24 @@ export function expiredSessionCookieHeader(params: { secure: boolean; domain?: s
   return sessionCookieHeader({ value: "", maxAgeSeconds: 0, secure: params.secure, domain: params.domain });
 }
 
+// Previews de Vercel de este proyecto -- patrón acotado al nombre del proyecto, no "*.vercel.app"
+// entero (eso aceptaría el origen de cualquier proyecto ajeno de cualquiera con cuenta Vercel).
+// Cada rama/deploy nuevo genera un subdominio distinto, impredecible de antemano, así que no
+// alcanza con una lista fija en una env var -- de ahí el patrón en vez de un valor exacto.
+const VERCEL_PREVIEW_ORIGIN_PATTERN = /^https:\/\/asdrux-ai-orchestrator-[a-z0-9-]+\.vercel\.app$/;
+
+export function isAllowedWebOrigin(origin: string, allowedOrigin: string): boolean {
+  return origin === allowedOrigin || VERCEL_PREVIEW_ORIGIN_PATTERN.test(origin);
+}
+
 export function allowedOriginForRequest(req: Request, allowedOrigin: string): boolean {
   const origin = req.header("Origin");
-  if (origin) return origin === allowedOrigin;
+  if (origin) return isAllowedWebOrigin(origin, allowedOrigin);
 
   const referer = req.header("Referer");
   if (!referer) return false;
   try {
-    return new URL(referer).origin === allowedOrigin;
+    return isAllowedWebOrigin(new URL(referer).origin, allowedOrigin);
   } catch {
     return false;
   }

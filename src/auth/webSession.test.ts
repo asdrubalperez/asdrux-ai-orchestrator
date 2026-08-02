@@ -63,6 +63,21 @@ test("validacion de origen acepta Origin o Referer exactos", () => {
   );
 });
 
+test("isAllowedWebOrigin acepta previews de Vercel del proyecto, rechaza cualquier otro *.vercel.app", () => {
+  const allowedOrigin = "https://aio.asdru.space";
+  assert.equal(
+    webSession.isAllowedWebOrigin(
+      "https://asdrux-ai-orchestrator-git-feature-042-proyectos-github-asdrubalperezs-projects.vercel.app",
+      allowedOrigin
+    ),
+    true
+  );
+  assert.equal(webSession.isAllowedWebOrigin("https://asdrux-ai-orchestrator-abc123.vercel.app", allowedOrigin), true);
+  // No cualquier *.vercel.app -- solo los que empiezan con el nombre de este proyecto.
+  assert.equal(webSession.isAllowedWebOrigin("https://otro-proyecto-cualquiera.vercel.app", allowedOrigin), false);
+  assert.equal(webSession.isAllowedWebOrigin("https://asdrux-ai-orchestrator.evil.com", allowedOrigin), false);
+});
+
 function requestWithHeaders(headers: Record<string, string>) {
   return {
     header(name: string) {
