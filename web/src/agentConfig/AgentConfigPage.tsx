@@ -30,7 +30,8 @@ const ROLE_LABELS: Record<AgentRole, string> = {
 // timeline de un run), pero se configura con exactamente el mismo mecanismo -- override propio o
 // herencia de la config global. Hoy solo funciona con Claude + API key propia (Codex/OAuth quedan
 // para FEATURE-025-Parte-3).
-const ALL_ROLES: AgentRole[] = ["architect", "functional", "planning", "developer", "qa", "intake"];
+// Orden del flujo real: el mapeo de intake ocurre antes que cualquier fase del pipeline.
+const ALL_ROLES: AgentRole[] = ["intake", "architect", "functional", "planning", "developer", "qa"];
 
 const PROVIDER_LABELS: Record<ExecutorProviderName, string> = {
   claude: "Claude Code",
