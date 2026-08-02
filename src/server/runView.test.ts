@@ -47,6 +47,46 @@ test("mantiene timeline fijo de 6 nodos para un pipeline corto", () => {
   );
 });
 
+// FEATURE-025-Parte-1: el asistente/modelo/authMode reales de cada fase ya se persistían en su
+// propio evento phase_finished (executorMetadata) pero ninguna vista los exponía.
+test("FEATURE-025-Parte-1: expone executorMetadata por fase, distinto entre fases", () => {
+  const timeline = buildTimeline(baseRun, [
+    event(1, "run_started", {}),
+    event(2, "phase_finished", {
+      agentRole: "architect",
+      result: {
+        status: "completed",
+        summary: "ok",
+        outputArtifact: {},
+        escalationReason: null,
+        executorMetadata: { provider: "codex", model: "gpt-5.6-luna", authMode: "api_key" },
+      },
+    }),
+    event(3, "phase_finished", {
+      agentRole: "functional",
+      result: {
+        status: "completed",
+        summary: "ok",
+        outputArtifact: {},
+        escalationReason: null,
+        executorMetadata: { provider: "claude-code-cli", model: "claude-sonnet-5", authMode: "api_key" },
+      },
+    }),
+  ]);
+
+  assert.deepEqual(timeline.find((node) => node.id === "architect")?.executorMetadata, {
+    provider: "codex",
+    model: "gpt-5.6-luna",
+    authMode: "api_key",
+  });
+  assert.deepEqual(timeline.find((node) => node.id === "functional")?.executorMetadata, {
+    provider: "claude-code-cli",
+    model: "claude-sonnet-5",
+    authMode: "api_key",
+  });
+  assert.equal(timeline.find((node) => node.id === "qa")?.executorMetadata, null);
+});
+
 test("marca una fase en curso cuando existe phase_started sin phase_finished posterior", () => {
   const timeline = buildTimeline(baseRun, [
     event(1, "run_started", {}),

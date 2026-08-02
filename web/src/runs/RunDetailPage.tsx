@@ -58,6 +58,8 @@ interface RunViewModel {
     label: string;
     status: TimelineStatus;
     summary: string | null;
+    /** FEATURE-025-Parte-1: asistente/modelo/authMode reales que corrieron esta fase. */
+    executorMetadata: { provider: string; model: string | null; authMode: "api_key" | "cli_session" | null } | null;
   }>;
   narrative: Array<{
     id: string;
@@ -430,12 +432,25 @@ function Timeline({ nodes }: { nodes: RunViewModel["timeline"] }) {
               <p className="text-sm font-medium">{node.label}</p>
               <Badge variant={statusVariant(node.status)}>{statusLabel(node.status)}</Badge>
             </div>
+            {node.executorMetadata ? (
+              <p className="mt-2 truncate text-center text-xs text-zinc-500" title={executorMetadataLabel(node.executorMetadata)}>
+                {executorMetadataLabel(node.executorMetadata)}
+              </p>
+            ) : null}
             {node.summary ? <p className="mt-3 line-clamp-3 text-sm text-zinc-600">{node.summary}</p> : null}
           </div>
         ))}
       </div>
     </section>
   );
+}
+
+// FEATURE-025-Parte-1: el owner pidió poder confirmar, antes de correr un caso real, qué
+// asistente/modelo/modo de autenticación se usó efectivamente en cada fase -- el dato ya se
+// persistía por fase (PhaseResult.executorMetadata, FEATURE-017) pero ninguna pantalla lo mostraba.
+function executorMetadataLabel(metadata: NonNullable<RunViewModel["timeline"][number]["executorMetadata"]>): string {
+  const parts = [metadata.provider, metadata.model, metadata.authMode === "cli_session" ? "OAuth" : "API key"];
+  return parts.filter(Boolean).join(" · ");
 }
 
 function RoleAvatar({ nodeId, status }: { nodeId: TimelineNodeId; status: TimelineStatus }) {

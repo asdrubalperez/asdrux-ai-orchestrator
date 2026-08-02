@@ -88,6 +88,8 @@ export interface TimelineNode {
   label: string;
   status: TimelineNodeStatus;
   summary: string | null;
+  /** FEATURE-025-Parte-1: asistente/modelo/authMode reales de esta fase, null hasta que termine. */
+  executorMetadata: TimelineExecutorMetadata | null;
 }
 
 export interface NarrativeEntry {
@@ -150,10 +152,11 @@ export function buildTimeline(run: RunRow, events: RunEventRow[]): TimelineNode[
     label: "User",
     status: events.some((event) => event.event_type === "run_started") ? "iniciado" : "pendiente",
     summary: null,
+    executorMetadata: null,
   });
 
   for (const agent of AGENT_NODES) {
-    nodes.set(agent.id, { id: agent.id, label: agent.label, status: "pendiente", summary: null });
+    nodes.set(agent.id, { id: agent.id, label: agent.label, status: "pendiente", summary: null, executorMetadata: null });
   }
 
   for (const event of events) {
@@ -173,6 +176,7 @@ export function buildTimeline(run: RunRow, events: RunEventRow[]): TimelineNode[
       if (node) {
         node.status = statusForPhaseResult(payload.status);
         node.summary = payload.summary;
+        node.executorMetadata = payload.executorMetadata;
       }
     }
 
@@ -289,7 +293,9 @@ function statusForPhaseResult(status: string): TimelineNodeStatus {
   return "fallido";
 }
 
-function phaseFinishedPayload(payload: unknown): { agentRole: string; status: string; summary: string | null } | null {
+function phaseFinishedPayload(
+  payload: unknown
+): { agentRole: string; status: string; summary: string | null; executorMetadata: TimelineExecutorMetadata | null } | null {
   if (!isRecord(payload) || typeof payload.agentRole !== "string" || !isRecord(payload.result)) return null;
   const status = typeof payload.result.status === "string" ? payload.result.status : null;
   if (!status) return null;
@@ -297,6 +303,25 @@ function phaseFinishedPayload(payload: unknown): { agentRole: string; status: st
     agentRole: payload.agentRole,
     status,
     summary: typeof payload.result.summary === "string" ? payload.result.summary : null,
+    executorMetadata: executorMetadataFromResult(payload.result.executorMetadata),
+  };
+}
+
+// FEATURE-025-Parte-1: cada fase ya persistía provider/model/authMode reales en su propio evento
+// `phase_finished` (PhaseResult.executorMetadata, FEATURE-017), pero ningún lugar de la UI lo
+// mostraba -- solo era auditable consultando run_events directamente.
+export interface TimelineExecutorMetadata {
+  provider: string;
+  model: string | null;
+  authMode: "api_key" | "cli_session" | null;
+}
+
+function executorMetadataFromResult(value: unknown): TimelineExecutorMetadata | null {
+  if (!isRecord(value) || typeof value.provider !== "string") return null;
+  return {
+    provider: value.provider,
+    model: typeof value.model === "string" ? value.model : null,
+    authMode: value.authMode === "api_key" || value.authMode === "cli_session" ? value.authMode : null,
   };
 }
 
