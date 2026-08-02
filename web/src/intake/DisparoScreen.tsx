@@ -55,7 +55,13 @@ export function DisparoScreen() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ inputText }),
       });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) {
+        // FEATURE-025-Parte-1 (ampliación): 409 con mensaje claro cuando el "Asistente de Entrada"
+        // no tiene credencial propia, o resuelve a un proveedor/modo que el mapeo todavía no
+        // soporta (Codex/OAuth, ver FEATURE-025-Parte-3) -- se muestra tal cual, no un HTTP genérico.
+        const errorBody = (await response.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(errorBody?.message ?? `HTTP ${response.status}`);
+      }
       const body = (await response.json()) as { fields: IntakeFieldDefinition[]; values: BusinessCaseValues };
       setFields(body.fields);
       setValues(body.values);

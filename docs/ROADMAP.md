@@ -261,7 +261,15 @@
   flag de CLI global al run, sin persistir); y el modo de autenticación por API key sigue
   dependiendo de una clave compartida del host (`ANTHROPIC_API_KEY`/`CODEX_API_KEY`) en vez de la
   credencial propia del usuario — el hueco de seguridad real que esta parte cierra, reutilizando el
-  cifrado AES-256-GCM ya construido en FEATURE-026. Diseño preliminar en
+  cifrado AES-256-GCM ya construido en FEATURE-026. **Ampliación decidida durante la
+  implementación (2026-08-02)**: el mapeo de intake (texto libre -> campos del caso de negocio,
+  `mapBusinessCase.ts`, FEATURE-017) usaba la misma clave global que esta parte retira para los 5
+  roles reales, sin estar identificado como "un agente" — se agregó `"intake"` ("Asistente de
+  Entrada") como un sexto rol configurable más, con el mismo mecanismo de resolución
+  (`resolveAgentConfig`/`resolveExecutorAuthentication`, migración `0022`). Corta explícitamente si
+  resuelve a Codex o a `cli_session` (sin soporte todavía, ver FEATURE-025-Parte-3). Implementada en
+  la rama `feature/025-parte-1-asistente-modelo-credenciales`, pendiente de validación E2E en VPS.
+  Diseño en
   `docs/features/FEATURE-025-Parte-1-Asistente-Modelo-y-Credenciales-API-por-Agente.md`.
 - FEATURE-025-Parte-2 — OAuth personal por proveedor de IA (Claude/Codex). Prioridad Media, después
   de Parte 1. El modo `cli_session` ya existe como selector por usuario/rol, pero el secreto real
@@ -274,6 +282,13 @@
   `docs/features/FEATURE-025-Parte-2-OAuth-Personal-por-Proveedor-de-IA.md`. Contexto completo de
   la priorización y la división en
   `docs/research/HANDOFF-FEATURE-025-priorizacion-y-division-en-dos-partes.md`.
+- FEATURE-025-Parte-3 — Soporte Codex/OAuth para el Asistente de Entrada (mapeo de intake).
+  Prioridad Baja. Surgió al implementar Parte 1: el mapeo (`mapBusinessCase.ts`) es una llamada
+  HTTP directa y exclusiva a la API de Anthropic, sin pasar por `ClaudeCodeExecutor`/`CodexExecutor`
+  — si el rol "intake" se configura con Codex o con `cli_session`, hoy corta con un error explícito
+  en vez de intentar algo que no existe. Sin urgencia: el mapeo funciona con Claude + API key
+  propia, la configuración por defecto. Diseño preliminar en
+  `docs/features/FEATURE-025-Parte-3-Soporte-Codex-y-OAuth-para-el-Asistente-de-Entrada.md`.
 - FEATURE-027 — Continuidad durable del loop Developer ↔ QA. Prioridad P0.
 - FEATURE-033 — Lifecycle canónico de `01-PROJECT-BRIEF-TEMPLATE`.
 - FEATURE-034 — Lifecycle canónico de `02-ARCHITECTURE-TEMPLATE`.
@@ -336,6 +351,7 @@ Esfuerzo.
 | FEATURE-028 — Release Plan asociado al Release activo (P1) | Medio | Alto | Alta |
 | FEATURE-025-Parte-1 — Asistente/modelo/credenciales API por agente (próxima a encarar) | Medio | Medio | Alta |
 | FEATURE-025-Parte-2 — OAuth personal por proveedor de IA (después de Parte 1, requiere spike) | Alto | Medio | Media |
+| FEATURE-025-Parte-3 — Soporte Codex/OAuth para el Asistente de Entrada (mapeo de intake) | Bajo | Bajo | Baja |
 | FEATURE-032 — Instalación determinística de dependencias (P2) | Medio | Medio | Alta |
 | FEATURE-037 — Entrega gobernada de reglas del Runbook a Planning/Developer/QA (nuevo) | Medio | Medio | Alta |
 | FEATURE-038 — Persistencia del estado final del Release Plan al cerrar un release (nuevo) | Medio | Medio | Alta |

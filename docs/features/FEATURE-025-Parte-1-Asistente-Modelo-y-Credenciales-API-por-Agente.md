@@ -1007,6 +1007,31 @@ Verificar usos y aplicar una transición explícita.
 
 ---
 
+# 9.1 Ampliación decidida durante la implementación (2026-08-02)
+
+El mapeo de intake (texto libre -> campos del caso de negocio, `src/intake/mapBusinessCase.ts`,
+FEATURE-017) usaba la misma clave global del host (`ANTHROPIC_API_KEY`) que esta Feature retira
+para los 5 roles reales del pipeline — un hueco no contemplado en el diseño original porque el
+mapeo nunca se identificó como "un agente" (no tiene Executor, no aparece en `PhaseInvocation`, no
+participa del timeline de un run).
+
+**Decisión del owner**: tratarlo con el mismo mecanismo, no con una regla de fallback aparte —
+`"intake"` ("Asistente de Entrada") se agrega como un sexto valor de `role` en `user_agent_config`
+(migración `0022_agent_config_intake_role.sql`, tipo `ConfigurableAgentRole` separado de `AgentRole`
+para no ensuciar el tipo que gobierna las fases reales del pipeline). Resuelve con
+`resolveAgentConfig`/`resolveExecutorAuthentication`, idéntico a los 5 roles.
+
+**Límite real, documentado explícitamente**: `mapBusinessCase.ts` sigue siendo una llamada HTTP
+directa y exclusiva a la API de Anthropic — no sabe hablar con Codex ni con una sesión OAuth. Si
+`"intake"` resuelve a `executorProvider: "codex"` o a `authMode: "cli_session"`,
+`mapIntakeText` (`src/cli/intakeService.ts`) corta explícitamente con
+`IntakeMappingProviderUnsupportedError`/`IntakeMappingAuthModeUnsupportedError` (HTTP 409, mensaje
+claro) en vez de intentar algo que no existe. Cerrar ese límite es alcance de
+`docs/features/FEATURE-025-Parte-3-Soporte-Codex-y-OAuth-para-el-Asistente-de-Entrada.md`
+(prioridad Baja, sin urgencia).
+
+---
+
 # 10. Approval Gate
 
 La implementación está prohibida hasta aprobación humana explícita.

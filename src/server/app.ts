@@ -25,17 +25,18 @@ import {
   setGlobalAgentConfig,
   setRoleAgentConfigOverride,
   deleteRoleAgentConfigOverride,
+  isConfigurableAgentRole,
   type AuthMode,
   type EffectiveAgentConfig,
   type ExecutorProviderName,
 } from "../db/repository.js";
 import {
+  AgentCredentialMissingError,
   listAiCredentialStatuses,
   removeAiCredential,
   setAiCredential,
 } from "../auth/aiCredentialService.js";
 import { AGENT_MODEL_CATALOG, isModelSupportedByProvider } from "../executor/agentModelCatalog.js";
-import { isAgentRole } from "../cli/escalation.js";
 import {
   completeGitHubOAuth,
   disconnectGitHub,
@@ -56,6 +57,8 @@ import {
   cancelRun,
   confirmIntake,
   confirmIntakeForProject,
+  IntakeMappingAuthModeUnsupportedError,
+  IntakeMappingProviderUnsupportedError,
   IntakeProjectNotFoundError,
   listMyCases,
   mapIntakeText,
@@ -249,7 +252,7 @@ export function createApp(config: ServerConfig): express.Express {
   // FEATURE-025-Parte-1: configuración de asistente/modelo/authMode por agente (global y por rol)
   // y credenciales de IA propias por usuario -- self-service, reemplaza CLI/DB directa (secciones
   // 7.13/7.14 del diseño). Ninguna respuesta de credenciales devuelve el secreto (Regla 5.6.5/5.6.6).
-  const ALL_AGENT_ROLES = ["architect", "functional", "planning", "developer", "qa"] as const;
+  const ALL_AGENT_ROLES = ["architect", "functional", "planning", "developer", "qa", "intake"] as const;
 
   app.get("/agent-config", requireSession, async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -285,7 +288,7 @@ export function createApp(config: ServerConfig): express.Express {
     try {
       if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
       const role = stringParam(req.params.role);
-      if (!role || !isAgentRole(role)) {
+      if (!role || !isConfigurableAgentRole(role)) {
         res.status(400).json({ error: "invalid_role" });
         return;
       }
@@ -305,7 +308,7 @@ export function createApp(config: ServerConfig): express.Express {
     try {
       if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
       const role = stringParam(req.params.role);
-      if (!role || !isAgentRole(role)) {
+      if (!role || !isConfigurableAgentRole(role)) {
         res.status(400).json({ error: "invalid_role" });
         return;
       }
@@ -451,9 +454,21 @@ export function createApp(config: ServerConfig): express.Express {
         return;
       }
 
-      const result = await mapIntakeText(body);
+      const result = await mapIntakeText({ userId: req.user!.id, ...body });
       res.json(result);
     } catch (err) {
+      if (err instanceof AgentCredentialMissingError) {
+        res.status(409).json({ error: "intake_credential_missing", message: err.message });
+        return;
+      }
+      if (err instanceof IntakeMappingProviderUnsupportedError) {
+        res.status(409).json({ error: "intake_provider_unsupported", message: err.message });
+        return;
+      }
+      if (err instanceof IntakeMappingAuthModeUnsupportedError) {
+        res.status(409).json({ error: "intake_auth_mode_unsupported", message: err.message });
+        return;
+      }
       next(err);
     }
   });

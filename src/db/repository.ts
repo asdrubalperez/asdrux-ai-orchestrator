@@ -131,10 +131,32 @@ export interface EffectiveAgentConfig extends AgentConfig {
   model: string | null;
 }
 
+/**
+ * FEATURE-025-Parte-1 (ampliación, 2026-08-02): `"intake"` es el mapeo de texto libre a campos del
+ * caso de negocio (`src/intake/mapBusinessCase.ts`) -- no es una fase del pipeline (nunca aparece
+ * en `PhaseInvocation`, no tiene Executor propio, no participa del timeline de un run), pero recibe
+ * exactamente el mismo tratamiento de configuración que los 5 roles reales: override propio o
+ * herencia de la config global, misma resolución, misma credencial propia por usuario. Se modela
+ * como un tipo separado de `AgentRole` (que sí gobierna el pipeline real) para no ensuciar ese tipo
+ * con un valor que no es una fase invocable.
+ */
+export type ConfigurableAgentRole = AgentRole | "intake";
+
+export function isConfigurableAgentRole(value: unknown): value is ConfigurableAgentRole {
+  return (
+    value === "architect" ||
+    value === "functional" ||
+    value === "planning" ||
+    value === "developer" ||
+    value === "qa" ||
+    value === "intake"
+  );
+}
+
 export interface UserAgentConfigRow {
   id: string;
   user_id: string;
-  role: AgentRole | null;
+  role: ConfigurableAgentRole | null;
   executor_provider: ExecutorProviderName;
   auth_mode: AuthMode;
   model: string | null;
@@ -607,7 +629,10 @@ export async function getGlobalAgentConfig(userId: string): Promise<EffectiveAge
   return result.rows[0] ? toEffectiveAgentConfig(result.rows[0]) : null;
 }
 
-export async function getRoleAgentConfigOverride(userId: string, role: AgentRole): Promise<EffectiveAgentConfig | null> {
+export async function getRoleAgentConfigOverride(
+  userId: string,
+  role: ConfigurableAgentRole
+): Promise<EffectiveAgentConfig | null> {
   const result = await pool.query<UserAgentConfigRow>(
     `select ${AGENT_CONFIG_COLUMNS}
      from user_agent_config
@@ -621,7 +646,7 @@ export async function getRoleAgentConfigOverride(userId: string, role: AgentRole
  * Regla 2 de FEATURE-016 (sin el flag de CLI, resuelto antes de llamar a esta función):
  * override de rol -> global -> default (claude + api_key, sin modelo).
  */
-export async function resolveAgentConfig(userId: string, role: AgentRole): Promise<EffectiveAgentConfig> {
+export async function resolveAgentConfig(userId: string, role: ConfigurableAgentRole): Promise<EffectiveAgentConfig> {
   const override = await getRoleAgentConfigOverride(userId, role);
   if (override) return override;
   const global = await getGlobalAgentConfig(userId);
@@ -646,7 +671,7 @@ export async function setGlobalAgentConfig(userId: string, config: EffectiveAgen
 
 export async function setRoleAgentConfigOverride(
   userId: string,
-  role: AgentRole,
+  role: ConfigurableAgentRole,
   config: EffectiveAgentConfig
 ): Promise<EffectiveAgentConfig> {
   const result = await pool.query<UserAgentConfigRow>(
@@ -663,7 +688,7 @@ export async function setRoleAgentConfigOverride(
   return toEffectiveAgentConfig(result.rows[0]);
 }
 
-export async function deleteRoleAgentConfigOverride(userId: string, role: AgentRole): Promise<void> {
+export async function deleteRoleAgentConfigOverride(userId: string, role: ConfigurableAgentRole): Promise<void> {
   await pool.query("delete from user_agent_config where user_id = $1 and role = $2", [userId, role]);
 }
 

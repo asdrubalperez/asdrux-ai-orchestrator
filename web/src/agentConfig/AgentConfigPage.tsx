@@ -23,9 +23,14 @@ const ROLE_LABELS: Record<AgentRole, string> = {
   planning: "Planning",
   developer: "Developer",
   qa: "QA",
+  intake: "Asistente de Entrada (mapeo del caso de negocio)",
 };
 
-const ALL_ROLES: AgentRole[] = ["architect", "functional", "planning", "developer", "qa"];
+// FEATURE-025-Parte-1 (ampliación): "intake" no es una fase del pipeline (no aparece en el
+// timeline de un run), pero se configura con exactamente el mismo mecanismo -- override propio o
+// herencia de la config global. Hoy solo funciona con Claude + API key propia (Codex/OAuth quedan
+// para FEATURE-025-Parte-3).
+const ALL_ROLES: AgentRole[] = ["architect", "functional", "planning", "developer", "qa", "intake"];
 
 const PROVIDER_LABELS: Record<ExecutorProviderName, string> = {
   claude: "Claude Code",
@@ -159,7 +164,12 @@ function RoleOverride(props: {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-zinc-800">{ROLE_LABELS[props.role]}</p>
+        <div>
+          <p className="text-sm font-medium text-zinc-800">{ROLE_LABELS[props.role]}</p>
+          {props.role === "intake" ? (
+            <p className="text-xs text-amber-600">Hoy solo soporta Claude Code + API key propia.</p>
+          ) : null}
+        </div>
         {props.override ? (
           <Button
             variant="outline"

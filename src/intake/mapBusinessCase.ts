@@ -2,14 +2,17 @@ import type { IntakeFieldDefinitionRow } from "../db/repository.js";
 
 // FEATURE-017, Regla 5 y sección 7.3: llamada directa y simple al proveedor, sin
 // runRoleIsolated/holder/worker/Docker — no hay tools que dar, así que no existe el problema que
-// ese aislamiento resuelve (canal de respuesta con tools + credencial real). Usa la misma
-// ANTHROPIC_API_KEY que ya vive en el backend del Orquestador, vía fetch nativo a la Messages API
-// (no hay SDK de Anthropic como dependencia en este repo — ver executor/claudeCodeExecutor.ts).
+// ese aislamiento resuelve (canal de respuesta con tools + credencial real). Vía fetch nativo a la
+// Messages API (no hay SDK de Anthropic como dependencia en este repo — ver
+// executor/claudeCodeExecutor.ts). FEATURE-025-Parte-1 (ampliación): la credencial y el modelo ya
+// no son fijos del sistema -- se resuelven por usuario contra el rol configurable "intake"
+// (mapIntakeText, src/cli/intakeService.ts), mismo mecanismo que los 5 roles reales. Esta llamada
+// sigue siendo exclusivamente a la API de Anthropic -- si "intake" resuelve a Codex, el caller corta
+// antes de llegar acá (sin soporte todavía, ver FEATURE-025-Parte-3).
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 
-// FEATURE-017, Scope/Excluido #5: sin elección de proveedor/modelo expuesta al usuario — default
-// fijo del sistema, mismo criterio que las fases reales sin override. Modelo económico: esta
+// Default cuando el rol "intake" no tiene un modelo propio configurado -- económico, porque esta
 // llamada es extracción estructurada de texto, no razonamiento complejo.
 const DEFAULT_MAPPING_MODEL = "claude-haiku-4-5-20251001";
 
@@ -125,23 +128,26 @@ export async function mapBusinessCase(params: {
   inputText: string;
   fields: IntakeFieldDefinitionRow[];
   previousValues?: BusinessCaseValues;
+  /**
+   * FEATURE-025-Parte-1 (ampliación): resuelta por el caller (`mapIntakeText`, contra la
+   * credencial propia del usuario para el rol "intake") -- sin fallback a una variable de entorno
+   * global, mismo criterio que los Executors de los 5 roles reales.
+   */
+  apiKey: string;
+  /** Modelo resuelto por el caller; si no hay uno configurado, usa el default económico de siempre. */
+  model?: string;
 }): Promise<BusinessCaseValues> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY no está definida en el entorno del proceso.");
-  }
-
   const { system, user } = buildMappingPrompt(params.inputText, params.fields, params.previousValues);
 
   const response = await fetch(ANTHROPIC_MESSAGES_URL, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-api-key": apiKey,
+      "x-api-key": params.apiKey,
       "anthropic-version": ANTHROPIC_VERSION,
     },
     body: JSON.stringify({
-      model: DEFAULT_MAPPING_MODEL,
+      model: params.model ?? DEFAULT_MAPPING_MODEL,
       max_tokens: 4096,
       system,
       messages: [{ role: "user", content: user }],

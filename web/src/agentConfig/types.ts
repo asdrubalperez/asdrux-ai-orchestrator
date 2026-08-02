@@ -1,6 +1,9 @@
 export type ExecutorProviderName = "claude" | "codex";
 export type AuthMode = "api_key" | "cli_session";
-export type AgentRole = "architect" | "functional" | "planning" | "developer" | "qa";
+export type PipelineAgentRole = "architect" | "functional" | "planning" | "developer" | "qa";
+// FEATURE-025-Parte-1 (ampliación): "intake" es el mapeo de texto libre a campos del caso de
+// negocio -- no es una fase del pipeline, pero se configura con el mismo mecanismo.
+export type AgentRole = PipelineAgentRole | "intake";
 
 export interface EffectiveAgentConfig {
   executorProvider: ExecutorProviderName;
