@@ -225,6 +225,13 @@ export async function runStart(args: string[]): Promise<void> {
     `[run:start] pipeline=${pipelineSpec.name}@${pipelineSpec.version} (${pipelineSpec.definition.phases.length} fase/s lineales${pipelineSpec.definition.loop ? " + loop Developer↔QA" : ""})`
   );
 
+  // FEATURE-042: repo_path pasó a ser nullable (proyectos del flujo web no la usan). Este comando
+  // CLI (cleanupStrategy "shared-worktree") sigue dependiendo de una ruta real de filesystem.
+  if (!project.repo_path) {
+    throw new Error(
+      `El proyecto "${project.name}" no tiene repo_path configurada -- requerida para run:start --case.`
+    );
+  }
   const projectRepoRoot = path.resolve(project.repo_path);
   const worktree = await createRunWorktree(projectRepoRoot, runId);
   console.log(`[run:start] worktree creado: ${worktree.worktreePath} (rama ${worktree.branchName})`);

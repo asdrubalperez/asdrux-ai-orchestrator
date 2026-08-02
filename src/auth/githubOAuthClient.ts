@@ -145,6 +145,95 @@ export async function listAccessibleRepositories(
   });
 }
 
+// FEATURE-042, sección D: permisos vigentes de UN repositorio puntual (no la lista completa) --
+// usado por el gate Git preventivo/autoritativo para decidir si una rama puede publicarse.
+export interface GitHubRepositoryPermissions {
+  read: boolean;
+  push: boolean;
+  admin: boolean;
+}
+
+export async function fetchRepositoryDetail(
+  accessToken: string,
+  fullName: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<{ permissions: GitHubRepositoryPermissions; defaultBranch: string } | null> {
+  const response = await fetchImpl(`${GITHUB_API_BASE}/repos/${fullName}`, {
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      accept: "application/vnd.github+json",
+      "x-github-api-version": GITHUB_API_VERSION,
+    },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new GitHubOAuthError(`No se pudo consultar el repositorio "${fullName}" (status ${response.status}).`);
+  }
+  const payload = (await response.json()) as Record<string, unknown>;
+  const permissions = (payload.permissions as Record<string, unknown> | undefined) ?? {};
+  return {
+    permissions: {
+      read: Boolean(permissions.pull),
+      push: Boolean(permissions.push),
+      admin: Boolean(permissions.admin),
+    },
+    defaultBranch: typeof payload.default_branch === "string" ? payload.default_branch : "main",
+  };
+}
+
+// FEATURE-042, sección D.4/D.6/D.7: existencia (y SHA de referencia) de una rama puntual -- vía
+// API, no `git ls-remote`, porque ya tenemos el token resuelto acá y la API da una respuesta
+// limpia (200/404 + SHA) sin parsear stderr de un subproceso git. El SHA es lo que D.7 necesita
+// para crear la rama nueva directamente desde `main` sin haber clonado nada todavía.
+export async function fetchBranchSha(
+  accessToken: string,
+  fullName: string,
+  branch: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<string | null> {
+  const response = await fetchImpl(`${GITHUB_API_BASE}/repos/${fullName}/branches/${encodeURIComponent(branch)}`, {
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      accept: "application/vnd.github+json",
+      "x-github-api-version": GITHUB_API_VERSION,
+    },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new GitHubOAuthError(`No se pudo verificar la rama "${branch}" en "${fullName}" (status ${response.status}).`);
+  }
+  const payload = (await response.json()) as { commit?: { sha?: unknown } };
+  return typeof payload.commit?.sha === "string" ? payload.commit.sha : null;
+}
+
+/**
+ * Sección D.7: crea la rama directamente vía Git Data API (`POST /repos/{full}/git/refs`), sin
+ * necesidad de un clon local previo -- se invoca antes de `cloneRunRepository`, que todavía no
+ * existe en ese punto del flujo. Si la rama ya existe (creada por otra corrida concurrente, D.8),
+ * GitHub devuelve 422 -- se traduce a `already_exists`, nunca se sobrescribe.
+ */
+export async function createBranchFromSha(
+  accessToken: string,
+  fullName: string,
+  branch: string,
+  fromSha: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<"created" | "already_exists"> {
+  const response = await fetchImpl(`${GITHUB_API_BASE}/repos/${fullName}/git/refs`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      accept: "application/vnd.github+json",
+      "content-type": "application/json",
+      "x-github-api-version": GITHUB_API_VERSION,
+    },
+    body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: fromSha }),
+  });
+  if (response.status === 201) return "created";
+  if (response.status === 422) return "already_exists";
+  throw new GitHubOAuthError(`No se pudo crear la rama "${branch}" en "${fullName}" (status ${response.status}).`);
+}
+
 /**
  * Sección 7.6/Regla 22: `check`/`revoke` de un token OAuth se autentican con Basic Auth
  * usando client_id:client_secret de la OAuth App -- no con el token del usuario. Confirmado

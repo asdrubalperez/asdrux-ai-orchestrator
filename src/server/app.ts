@@ -35,11 +35,21 @@ import {
 import {
   cancelRun,
   confirmIntake,
+  confirmIntakeForProject,
   IntakeProjectNotFoundError,
   listMyCases,
   mapIntakeText,
   startPendingRun,
 } from "../cli/intakeService.js";
+import {
+  createProjectForUser,
+  getProjectSummary,
+  listProjectCases,
+  listProjects,
+  selectProject,
+  setProjectRepositoryForUser,
+  updateProjectNameForUser,
+} from "../cli/projectService.js";
 import type { BusinessCaseValues } from "../intake/mapBusinessCase.js";
 import { buildRunViewModel, toReleaseRoadmapView } from "./runView.js";
 import { openRunEventsStream } from "./sse.js";
@@ -303,6 +313,182 @@ export function createApp(config: ServerConfig): express.Express {
     }
   });
 
+  // FEATURE-042, sección B: creación/selección/configuración de proyectos. Todas requieren
+  // sesión; toda operación sobre un projectId puntual valida ownership dentro del service layer
+  // (getProjectByIdForUser), nunca solo por confiar en el id de la ruta.
+
+  app.get("/projects", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const result = await listProjects(req.user?.id ?? "");
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/projects", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const body = createProjectBody(req.body);
+      if (!body) {
+        res.status(400).json({ error: "invalid_create_project_body" });
+        return;
+      }
+      const result = await createProjectForUser({
+        ownerId: req.user?.id ?? "",
+        name: body.name,
+        repositoryExternalId: body.repositoryExternalId,
+      });
+      if (result.kind === "created") {
+        res.status(201).json({ project: result.project });
+        return;
+      }
+      respondProjectError(res, result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/projects/:projectId", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const projectId = stringParam(req.params.projectId);
+      if (!projectId) {
+        res.status(400).json({ error: "invalid_project_id" });
+        return;
+      }
+      const project = await getProjectSummary(projectId, req.user?.id ?? "");
+      if (!project) {
+        res.status(404).json({ error: "project_not_found" });
+        return;
+      }
+      res.json({ project });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.patch("/projects/:projectId", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const projectId = stringParam(req.params.projectId);
+      const name = typeof req.body?.name === "string" ? req.body.name : null;
+      if (!projectId || !name) {
+        res.status(400).json({ error: "invalid_update_project_body" });
+        return;
+      }
+      const result = await updateProjectNameForUser({ projectId, ownerId: req.user?.id ?? "", name });
+      if (result.kind === "updated") {
+        res.json({ project: result.project });
+        return;
+      }
+      if (result.kind === "not_found") {
+        res.status(404).json({ error: "project_not_found" });
+        return;
+      }
+      respondProjectError(res, result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.put("/projects/:projectId/repository", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const projectId = stringParam(req.params.projectId);
+      const repositoryExternalId = typeof req.body?.repositoryExternalId === "string" ? req.body.repositoryExternalId : null;
+      if (!projectId || !repositoryExternalId) {
+        res.status(400).json({ error: "invalid_set_repository_body" });
+        return;
+      }
+      const result = await setProjectRepositoryForUser({ projectId, ownerId: req.user?.id ?? "", repositoryExternalId });
+      if (result.kind === "updated") {
+        res.json({ project: result.project });
+        return;
+      }
+      if (result.kind === "not_found") {
+        res.status(404).json({ error: "project_not_found" });
+        return;
+      }
+      respondProjectError(res, result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/projects/:projectId/select", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const projectId = stringParam(req.params.projectId);
+      if (!projectId) {
+        res.status(400).json({ error: "invalid_project_id" });
+        return;
+      }
+      const selected = await selectProject({ userId: req.user?.id ?? "", projectId });
+      if (!selected) {
+        res.status(404).json({ error: "project_not_found" });
+        return;
+      }
+      res.json({ selectedProjectId: projectId });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Sección B.7: filtra por proyecto y owner simultáneamente -- nunca listRunsForUser(userId) sin
+  // el filtro de proyecto.
+  app.get("/projects/:projectId/cases", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const projectId = stringParam(req.params.projectId);
+      if (!projectId) {
+        res.status(400).json({ error: "invalid_project_id" });
+        return;
+      }
+      const result = await listProjectCases({ projectId, userId: req.user?.id ?? "" });
+      if (!result.found) {
+        res.status(404).json({ error: "project_not_found" });
+        return;
+      }
+      res.json({ runs: result.runs });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Sección B.8/B.9/D.4: entrada de creación de casos del flujo de proyecto -- no acepta
+  // business_case.repositorio, exige projectId de la ruta, corre el gate Git preventivo.
+  app.post("/projects/:projectId/cases", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const projectId = stringParam(req.params.projectId);
+      const body = confirmIntakeBody(req.body);
+      if (!projectId || !body) {
+        res.status(400).json({ error: "invalid_confirm_body" });
+        return;
+      }
+      const result = await confirmIntakeForProject({
+        userId: req.user?.id ?? "",
+        projectId,
+        businessCase: body.businessCase,
+      });
+      if (result.kind === "confirmed") {
+        res.status(201).json({ run: result.run, branchWarning: result.branchWarning });
+        return;
+      }
+      if (result.kind === "not_found") {
+        res.status(404).json({ error: "project_not_found" });
+        return;
+      }
+      if (result.kind === "project_not_configured") {
+        res.status(409).json({ error: "project_not_configured" });
+        return;
+      }
+      // branch_validation_failed
+      res.status(422).json({ error: "branch_validation_failed", status: result.status, message: result.message });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // FEATURE-017, Regla 6: confirmar el mapeo persiste el run en `sin_iniciar` — sin worktree, sin
   // branch, sin invocación al Architect todavía.
   app.post("/runs", requireSession, async (req: AuthenticatedRequest, res, next) => {
@@ -371,9 +557,16 @@ export function createApp(config: ServerConfig): express.Express {
         res.status(409).json({ error: "git_connection_required", message: result.message });
         return;
       }
+      if (result.kind === "branch_validation_failed") {
+        // FEATURE-042, sección D.6: gate Git autoritativo -- corte técnico distinguible por
+        // `status` (branch_invalid, main_missing, repository_not_accessible,
+        // repository_read_only, temporary_failure, git_connection_required/invalid).
+        res.status(422).json({ error: "branch_validation_failed", status: result.status, message: result.message });
+        return;
+      }
 
       res.status(202).json({ run: result.run });
-      void result.execute().catch((err) => {
+      void result.execute().catch((err: unknown) => {
         console.error(`[server] background pipeline execution failed for run ${runId}`, err);
       });
     } catch (err) {
@@ -514,6 +707,45 @@ function confirmIntakeBody(body: unknown): { businessCase: BusinessCaseValues } 
   const record = body as Record<string, unknown>;
   if (!isBusinessCaseValues(record.businessCase)) return null;
   return { businessCase: record.businessCase };
+}
+
+function createProjectBody(body: unknown): { name: string; repositoryExternalId?: string } | null {
+  if (body === null || typeof body !== "object") return null;
+  const record = body as Record<string, unknown>;
+  if (typeof record.name !== "string" || record.name.trim().length === 0) return null;
+  const repositoryExternalId = typeof record.repositoryExternalId === "string" ? record.repositoryExternalId : undefined;
+  return { name: record.name, repositoryExternalId };
+}
+
+// FEATURE-042, sección B: traduce los `kind` de error compartidos entre create/update/set-repository
+// de proyectos a status HTTP -- mismos códigos que ya usa FEATURE-026 para los mismos motivos
+// (409 git_connection_required, igual que GET /auth/github/repositories).
+function respondProjectError(
+  res: express.Response,
+  result: { kind: string; message?: string }
+): void {
+  switch (result.kind) {
+    case "invalid_project_name":
+      res.status(400).json({ error: "invalid_project_name" });
+      return;
+    case "duplicate_project":
+      res.status(409).json({ error: "duplicate_project" });
+      return;
+    case "git_connection_required":
+      res.status(409).json({ error: "git_connection_required", message: result.message });
+      return;
+    case "git_connection_invalid":
+      res.status(409).json({ error: "git_connection_invalid", message: result.message });
+      return;
+    case "repository_not_accessible":
+      res.status(409).json({ error: "repository_not_accessible", message: result.message });
+      return;
+    case "repository_read_only":
+      res.status(409).json({ error: "repository_read_only", message: result.message });
+      return;
+    default:
+      res.status(500).json({ error: "unexpected_project_error" });
+  }
 }
 
 function isBusinessCaseValues(value: unknown): value is BusinessCaseValues {

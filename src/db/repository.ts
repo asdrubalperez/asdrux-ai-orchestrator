@@ -60,12 +60,26 @@ export interface UserRow {
   created_at: string;
 }
 
+// FEATURE-042: repository_* son los campos canónicos del repositorio GitHub del proyecto (sección
+// A.1/A.2 del diseño aprobado) -- nullable porque un proyecto puede crearse sin repositorio.
+// `repo_path` se conserva nullable por compatibilidad con el comando CLI legacy
+// (`run:start --case`, cleanupStrategy "shared-worktree") -- el flujo web no la usa.
+export type GitHubRepositoryVisibility = "public" | "private" | "internal";
+
 export interface ProjectRow {
   id: string;
   name: string;
-  repo_path: string;
+  repo_path: string | null;
   owner_id: string;
+  repository_provider: "github" | null;
+  repository_external_id: string | null;
+  repository_owner: string | null;
+  repository_name: string | null;
+  repository_full_name: string | null;
+  repository_clone_url: string | null;
+  repository_visibility: GitHubRepositoryVisibility | null;
   created_at: string;
+  updated_at: string;
 }
 
 export interface ProjectConfigVersionRow {
@@ -629,6 +643,150 @@ export async function getProjectForUser(userId: string, projectId?: string): Pro
         [userId]
       );
   return result.rows[0] ?? null;
+}
+
+// FEATURE-042: CRUD de proyectos (sección B del diseño aprobado). `getProjectForUser` de arriba
+// se deja intacta -- la sigue usando el comando CLI legacy (`run:start --case`, ver
+// migrations/0016) con su fallback al proyecto más antiguo. Las funciones nuevas de acá abajo NO
+// tienen fallback: `projectId` siempre explícito, ausencia = error de contrato del cliente.
+
+export class DuplicateProjectError extends Error {}
+
+function isUniqueConstraintViolation(err: unknown): boolean {
+  return typeof err === "object" && err !== null && "code" in err && (err as { code?: string }).code === "23505";
+}
+
+export async function listProjectsForUser(userId: string): Promise<ProjectRow[]> {
+  const result = await pool.query<ProjectRow>(
+    "select * from projects where owner_id = $1 order by updated_at desc, name asc",
+    [userId]
+  );
+  return result.rows;
+}
+
+export async function getProjectByIdForUser(projectId: string, userId: string): Promise<ProjectRow | null> {
+  const result = await pool.query<ProjectRow>("select * from projects where id = $1 and owner_id = $2", [
+    projectId,
+    userId,
+  ]);
+  return result.rows[0] ?? null;
+}
+
+export async function createProject(params: { ownerId: string; name: string }): Promise<ProjectRow> {
+  try {
+    const result = await pool.query<ProjectRow>(
+      "insert into projects (name, owner_id) values ($1, $2) returning *",
+      [params.name, params.ownerId]
+    );
+    return result.rows[0];
+  } catch (err) {
+    if (isUniqueConstraintViolation(err)) {
+      throw new DuplicateProjectError("Ya existe un proyecto con ese nombre.");
+    }
+    throw err;
+  }
+}
+
+export async function updateProjectName(params: {
+  projectId: string;
+  ownerId: string;
+  name: string;
+}): Promise<ProjectRow | null> {
+  try {
+    const result = await pool.query<ProjectRow>(
+      "update projects set name = $3, updated_at = now() where id = $1 and owner_id = $2 returning *",
+      [params.projectId, params.ownerId, params.name]
+    );
+    return result.rows[0] ?? null;
+  } catch (err) {
+    if (isUniqueConstraintViolation(err)) {
+      throw new DuplicateProjectError("Ya existe un proyecto con ese nombre.");
+    }
+    throw err;
+  }
+}
+
+export interface CanonicalGitHubRepository {
+  externalId: string;
+  owner: string;
+  name: string;
+  fullName: string;
+  cloneUrl: string;
+  visibility: GitHubRepositoryVisibility;
+}
+
+export async function setProjectRepository(params: {
+  projectId: string;
+  ownerId: string;
+  repository: CanonicalGitHubRepository;
+}): Promise<ProjectRow | null> {
+  try {
+    const result = await pool.query<ProjectRow>(
+      `update projects
+       set repository_provider = 'github',
+           repository_external_id = $3,
+           repository_owner = $4,
+           repository_name = $5,
+           repository_full_name = $6,
+           repository_clone_url = $7,
+           repository_visibility = $8,
+           updated_at = now()
+       where id = $1 and owner_id = $2
+       returning *`,
+      [
+        params.projectId,
+        params.ownerId,
+        params.repository.externalId,
+        params.repository.owner,
+        params.repository.name,
+        params.repository.fullName,
+        params.repository.cloneUrl,
+        params.repository.visibility,
+      ]
+    );
+    return result.rows[0] ?? null;
+  } catch (err) {
+    if (isUniqueConstraintViolation(err)) {
+      throw new DuplicateProjectError("Ya existe un proyecto tuyo con ese nombre sobre ese repositorio.");
+    }
+    throw err;
+  }
+}
+
+// Regla C.6/B.6: preferencia de navegación -- nunca sustituye al projectId explícito de cada
+// operación de casos. Valida ownership antes de persistir (nunca selecciona un proyecto ajeno).
+export async function selectProjectForUser(params: { userId: string; projectId: string }): Promise<boolean> {
+  const result = await pool.query(
+    `update users
+     set last_selected_project_id = $2
+     where id = $1
+       and exists (select 1 from projects where id = $2 and owner_id = $1)`,
+    [params.userId, params.projectId]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+// Sección C.3: gate posterior al login. Devuelve null si no hay preferencia o si dejó de ser
+// válida (proyecto ajeno/eliminado) -- el ON DELETE SET NULL de la FK ya cubre el caso de
+// eliminación; este chequeo de ownership cubre a mayores cualquier inconsistencia.
+export async function getLastSelectedProjectForUser(userId: string): Promise<ProjectRow | null> {
+  const result = await pool.query<ProjectRow>(
+    `select p.* from projects p
+     join users u on u.last_selected_project_id = p.id
+     where u.id = $1 and p.owner_id = $1`,
+    [userId]
+  );
+  return result.rows[0] ?? null;
+}
+
+// Sección B.7: filtra simultáneamente por proyecto y owner -- nunca se usa listRunsForUser(userId)
+// como fuente de esta pantalla.
+export async function listRunsForProjectAndUser(projectId: string, userId: string): Promise<RunRow[]> {
+  const result = await pool.query<RunRow>(
+    "select * from runs where project_id = $1 and owner_id = $2 order by created_at desc",
+    [projectId, userId]
+  );
+  return result.rows;
 }
 
 export async function updateRunCurrentPhase(runId: string, phase: string): Promise<void> {

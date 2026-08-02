@@ -16,12 +16,16 @@ import { decryptGitToken, encryptGitToken } from "./gitCredentialEncryption.js";
 import type { GitProcessAuth as WorktreeGitProcessAuth } from "../isolation/worktree.js";
 import {
   buildGitHubAuthorizeUrl,
+  createBranchFromSha,
   exchangeCodeForToken,
+  fetchBranchSha,
   fetchGitHubIdentity,
+  fetchRepositoryDetail,
   gitHubOAuthConfigFromEnv,
   listAccessibleRepositories as fetchAccessibleRepositories,
   revokeGitHubToken,
   type GitHubRepository,
+  type GitHubRepositoryPermissions,
 } from "./githubOAuthClient.js";
 
 // Regla 11: expiración corta del state OAuth.
@@ -151,6 +155,40 @@ async function resolveActiveConnection(userId: string): Promise<UserGitConnectio
 export async function listUserAccessibleRepositories(userId: string): Promise<GitHubRepository[]> {
   const row = await resolveActiveConnection(userId);
   return fetchAccessibleRepositories(decryptGitToken(row.access_token_ciphertext));
+}
+
+export class RepositoryNotAccessibleError extends Error {}
+
+// FEATURE-042, sección D: permisos vigentes de un repo puntual (identificado por owner/name, ej.
+// "asdrubalperez/pruebas-ia") -- usado por el gate Git preventivo/autoritativo. No expone el
+// token: la resolución de credencial queda encapsulada acá, igual que en el resto del módulo.
+export async function fetchProjectRepositoryPermissions(
+  userId: string,
+  repositoryFullName: string
+): Promise<{ permissions: GitHubRepositoryPermissions; defaultBranch: string }> {
+  const row = await resolveActiveConnection(userId);
+  const detail = await fetchRepositoryDetail(decryptGitToken(row.access_token_ciphertext), repositoryFullName);
+  if (!detail) {
+    throw new RepositoryNotAccessibleError(`El repositorio "${repositoryFullName}" ya no es accesible.`);
+  }
+  return detail;
+}
+
+export async function projectBranchSha(userId: string, repositoryFullName: string, branch: string): Promise<string | null> {
+  const row = await resolveActiveConnection(userId);
+  return fetchBranchSha(decryptGitToken(row.access_token_ciphertext), repositoryFullName, branch);
+}
+
+// Sección D.7: crea la rama desde el SHA de `main` directamente vía la API de GitHub, sin clon
+// local previo. `fromSha` debe venir de una llamada reciente a `projectBranchSha(..., "main")`.
+export async function createProjectBranch(
+  userId: string,
+  repositoryFullName: string,
+  branch: string,
+  fromSha: string
+): Promise<"created" | "already_exists"> {
+  const row = await resolveActiveConnection(userId);
+  return createBranchFromSha(decryptGitToken(row.access_token_ciphertext), repositoryFullName, branch, fromSha);
 }
 
 // --- Regla 12/16 y sección 7.9: contexto de credenciales efímero para operaciones Git ---
