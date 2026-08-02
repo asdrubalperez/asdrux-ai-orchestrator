@@ -6,6 +6,7 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import {
+  disconnectGitHub,
   getGitHubConnectionStatus,
   getProject,
   githubConnectUrl,
@@ -21,6 +22,7 @@ export function RepositorySettingsPage() {
   const navigate = useNavigate();
   const [search, setSearch] = React.useState("");
   const [saving, setSaving] = React.useState(false);
+  const [disconnecting, setDisconnecting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const project = useQuery({ queryKey: ["projects", projectId], queryFn: () => getProject(projectId) });
@@ -51,6 +53,22 @@ export function RepositorySettingsPage() {
   };
 
   const returnPath = `/projects/${projectId}/settings/repository`;
+
+  // Sección E.9 / Regla 24 de FEATURE-026: desconectar no borra la configuración del proyecto,
+  // solo invalida la conexión -- las operaciones de Git quedan bloqueadas hasta reconectar.
+  const desconectar = async () => {
+    setDisconnecting(true);
+    setError(null);
+    try {
+      await disconnectGitHub();
+      void queryClient.invalidateQueries({ queryKey: ["github", "status"] });
+      void queryClient.invalidateQueries({ queryKey: ["github", "repositories"] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo desconectar GitHub.");
+    } finally {
+      setDisconnecting(false);
+    }
+  };
 
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
@@ -95,7 +113,13 @@ export function RepositorySettingsPage() {
         ) : (
           <div className="space-y-2 rounded-lg border border-zinc-200 bg-white p-4">
             {connection.data ? (
-              <p className="text-xs text-zinc-500">Conectado como {connection.data.connection.externalLogin}</p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-zinc-500">Conectado como {connection.data.connection.externalLogin}</p>
+                <Button type="button" size="sm" variant="outline" disabled={disconnecting} onClick={() => void desconectar()}>
+                  {disconnecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  Desconectar
+                </Button>
+              </div>
             ) : null}
             <div className="relative">
               <Search className="pointer-events-none absolute top-2.5 left-2.5 h-4 w-4 text-zinc-400" />
