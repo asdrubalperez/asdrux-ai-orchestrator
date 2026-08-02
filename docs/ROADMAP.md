@@ -262,12 +262,17 @@
   de registro real — el único mecanismo es `seed:user` (comando CLI de administración manual, sin
   UI). La tabla `users` no tiene columnas de perfil (correo, nombre, apellido), solo `id`, `handle`,
   `password_hash`, `created_at`. Prioridad por definir.
-- FEATURE-043 — Separar el caso de negocio del repositorio/rama en el formulario de intake. Hoy los
-  12 campos de `intake_field_definitions` (10 descriptivos del caso de negocio + `repositorio` +
-  `rama_base_trabajo`) viven en la misma tabla plana, mismo `field_order` secuencial, renderizados
-  juntos en el mismo modal (`ReviewModal.tsx`), sin ninguna separación estructural — son
-  conceptualmente dos cosas distintas: la descripción del caso de negocio y la configuración técnica
-  del repositorio destino. Prioridad por definir.
+- FEATURE-043 — Separar la configuración de ejecución (repositorio, rama) del caso de negocio en el
+  intake. Prioridad Baja. Motivada por un hallazgo concreto post-FEATURE-042: `repositorio` sigue
+  definido en `intake_field_definitions`, se sigue pidiendo en el prompt de mapeo por IA y el
+  modelo lo sigue extrayendo del texto libre, pero desde F042 no tiene ningún efecto — el frontend
+  lo oculta y el backend lo descarta antes de persistir (el repo real siempre sale de
+  `project.repository_clone_url`). `rama_base_trabajo`, en cambio, sí tiene uso real (se extrae, se
+  muestra, se valida contra `branchValidationService`) pero sigue mezclado con los 10 campos
+  descriptivos del caso de negocio en la misma tabla plana y el mismo modal. Diseño completo
+  (Functional Rules, Scope, 10 escenarios de validación, Approval Gate) en
+  `docs/features/FEATURE-043-Separar-configuración-de-ejecución-del-caso-de-negocio.md` — **estado:
+  diseño propuesto, pendiente de aprobación del owner**.
 
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
@@ -319,7 +324,7 @@ Esfuerzo.
 | FEATURE-035 — Lifecycle 09-RELEASE-PLAN-TEMPLATE | Alto | Bajo | Media |
 | FEATURE-036 — Release activo nominal tras cierre (P1) | Bajo | Medio | Baja |
 | FEATURE-029 — Contrato build output / COMANDO_TEST (P1) | Bajo | Bajo | Baja |
-| FEATURE-043 — Separar caso de negocio de repositorio/rama en el intake (nuevo) | Bajo | Bajo | Baja |
+| FEATURE-043 — Separar configuración de ejecución (repo/rama) del caso de negocio (diseño propuesto) | Bajo | Bajo | Baja |
 
 ---
 
