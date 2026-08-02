@@ -139,10 +139,15 @@ export function createApp(config: ServerConfig): express.Express {
   app.get("/auth/github/start", requireSession, async (req: AuthenticatedRequest, res, next) => {
     try {
       const returnPath = typeof req.query.returnPath === "string" ? req.query.returnPath : null;
+      // FEATURE-042: en una navegación top-level (window.location.href, no fetch) el browser no
+      // manda header Origin -- se resuelve del Referer. Sin uno válido (ej. Referrer-Policy
+      // restrictiva), cae a la producción -- nunca a un origen sin validar.
+      const frontendOrigin = allowedOriginFromReferer(req, config.allowedOrigin);
       const { authorizeUrl } = await startGitHubOAuth({
         userId: req.user!.id,
         sessionId: req.sessionId!,
         returnPath,
+        frontendOrigin,
       });
       res.redirect(authorizeUrl);
     } catch (err) {
@@ -153,29 +158,34 @@ export function createApp(config: ServerConfig): express.Express {
   // Regla 11: el callback no confía en ningún userId recibido por query -- `req.user`/
   // `req.sessionId` vienen de `requireSession` (la cookie de sesión propia del Orquestador, no de
   // GitHub), y se validan contra lo persistido junto al `state` en `completeGitHubOAuth`.
+  //
+  // FEATURE-042: a diferencia de la versión anterior (devolvía el JSON crudo -- hallazgo real de
+  // prueba manual en Vercel preview, el browser quedaba mostrando la respuesta de la API en vez
+  // de volver a la app), esto es una navegación top-level disparada por GitHub -- tiene que
+  // terminar en un `res.redirect`, nunca en JSON, o el usuario queda varado viendo la API.
   app.get("/auth/github/callback", requireSession, async (req: AuthenticatedRequest, res, next) => {
     try {
       const code = typeof req.query.code === "string" ? req.query.code : null;
       const state = typeof req.query.state === "string" ? req.query.state : null;
       if (!code || !state) {
-        res.status(400).json({ error: "invalid_oauth_callback" });
+        res.redirect(`${config.allowedOrigin}/projects?github=error&reason=invalid_oauth_callback`);
         return;
       }
 
-      const connection = await completeGitHubOAuth({
+      const result = await completeGitHubOAuth({
         userId: req.user!.id,
         sessionId: req.sessionId!,
         code,
         state,
       });
-      res.status(200).json({ connection });
+      res.redirect(`${result.frontendOrigin}${result.returnPath ?? "/projects"}?github=connected`);
     } catch (err) {
       if (err instanceof OAuthStateInvalidError) {
-        res.status(409).json({ error: "oauth_state_invalid" });
+        res.redirect(`${config.allowedOrigin}/projects?github=error&reason=oauth_state_invalid`);
         return;
       }
       if (err instanceof GitHubIdentityAlreadyLinkedError) {
-        res.status(409).json({ error: "github_identity_already_linked" });
+        res.redirect(`${config.allowedOrigin}/projects?github=error&reason=github_identity_already_linked`);
         return;
       }
       next(err);
@@ -774,6 +784,21 @@ function publicUser(user: AuthenticatedRequest["user"]) {
 
 function stringParam(value: string | string[] | undefined): string | null {
   return typeof value === "string" ? value : null;
+}
+
+// FEATURE-042: resuelve a qué frontend volver tras el flujo OAuth (sección C.6) -- en una
+// navegación top-level no hay header Origin, solo Referer. Sin uno válido y permitido
+// (isAllowedWebOrigin), cae a la producción -- nunca se persiste ni se redirige a un origen sin
+// validar.
+function allowedOriginFromReferer(req: express.Request, allowedOrigin: string): string {
+  const referer = req.header("Referer");
+  if (!referer) return allowedOrigin;
+  try {
+    const origin = new URL(referer).origin;
+    return isAllowedWebOrigin(origin, allowedOrigin) ? origin : allowedOrigin;
+  } catch {
+    return allowedOrigin;
+  }
 }
 
 function parseLastEventId(value: string | undefined): number {

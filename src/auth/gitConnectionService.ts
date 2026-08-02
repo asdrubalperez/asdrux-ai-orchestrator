@@ -66,11 +66,14 @@ export function sanitizeReturnPath(returnPath: string | null | undefined): strin
 }
 
 // Regla 11: state aleatorio, de un solo uso, asociado a user_id + session_id, expiración corta.
-// Se persiste el hash (sección 7.2: "almacenar hash, no el state original").
+// Se persiste el hash (sección 7.2: "almacenar hash, no el state original"). `frontendOrigin` ya
+// viene validado por el caller (isAllowedWebOrigin) -- se persiste para que el callback sepa a
+// qué origen redirigir de vuelta (producción o un preview de Vercel).
 export async function startGitHubOAuth(params: {
   userId: string;
   sessionId: string;
   returnPath?: string | null;
+  frontendOrigin: string;
 }): Promise<{ authorizeUrl: string }> {
   const config = gitHubOAuthConfigFromEnv();
   const state = randomBytes(32).toString("hex");
@@ -81,6 +84,7 @@ export async function startGitHubOAuth(params: {
     provider: "github",
     stateHash,
     returnPath: sanitizeReturnPath(params.returnPath),
+    frontendOrigin: params.frontendOrigin,
     expiresAt: new Date(Date.now() + OAUTH_STATE_TTL_MS),
   });
   return { authorizeUrl: buildGitHubAuthorizeUrl(config, state) };
@@ -96,12 +100,18 @@ function hashState(state: string): string {
  * middleware de sesión del propio Orquestador, no por query params), y se validan contra lo que
  * quedó persistido junto al `state` al momento de iniciar el flujo.
  */
+export interface CompletedGitHubOAuth {
+  connection: GitConnectionSummary;
+  frontendOrigin: string;
+  returnPath: string | null;
+}
+
 export async function completeGitHubOAuth(params: {
   userId: string;
   sessionId: string;
   code: string;
   state: string;
-}): Promise<GitConnectionSummary> {
+}): Promise<CompletedGitHubOAuth> {
   const stateRow = await consumeOAuthState(hashState(params.state));
   if (!stateRow || stateRow.user_id !== params.userId || stateRow.session_id !== params.sessionId) {
     throw new OAuthStateInvalidError("state OAuth inválido, vencido, ya utilizado o de otra sesión.");
@@ -125,7 +135,7 @@ export async function completeGitHubOAuth(params: {
     accessTokenCiphertext: encryptGitToken(accessToken),
     grantedScopes: scopes,
   });
-  return toSummary(row);
+  return { connection: toSummary(row), frontendOrigin: stateRow.frontend_origin, returnPath: stateRow.return_path };
 }
 
 // Regla 24: se intenta revocar remotamente, pero el resultado remoto nunca bloquea el borrado

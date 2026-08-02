@@ -1020,6 +1020,9 @@ export interface OAuthStateRow {
   provider: GitConnectionProvider;
   state_hash: string;
   return_path: string | null;
+  // FEATURE-042 (migrations/0017): origen del frontend que inició el flujo -- producción o un
+  // preview de Vercel -- necesario para que el callback sepa a dónde redirigir de vuelta.
+  frontend_origin: string;
   expires_at: string;
   consumed_at: string | null;
   created_at: string;
@@ -1031,13 +1034,22 @@ export async function createOAuthState(params: {
   provider: GitConnectionProvider;
   stateHash: string;
   returnPath: string | null;
+  frontendOrigin: string;
   expiresAt: Date;
 }): Promise<OAuthStateRow> {
   const result = await pool.query<OAuthStateRow>(
-    `insert into oauth_states (user_id, session_id, provider, state_hash, return_path, expires_at)
-     values ($1, $2, $3, $4, $5, $6)
+    `insert into oauth_states (user_id, session_id, provider, state_hash, return_path, frontend_origin, expires_at)
+     values ($1, $2, $3, $4, $5, $6, $7)
      returning *`,
-    [params.userId, params.sessionId, params.provider, params.stateHash, params.returnPath, params.expiresAt]
+    [
+      params.userId,
+      params.sessionId,
+      params.provider,
+      params.stateHash,
+      params.returnPath,
+      params.frontendOrigin,
+      params.expiresAt,
+    ]
   );
   return result.rows[0];
 }
