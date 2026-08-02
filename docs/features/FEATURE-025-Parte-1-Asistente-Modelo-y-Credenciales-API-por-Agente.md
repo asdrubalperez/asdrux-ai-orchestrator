@@ -3,52 +3,99 @@
 # 1. Feature Identity
 
 * **Name:** Asistente IA, modelo y credenciales API por agente
-* **Type:** Configuración de ejecución / self-service de credenciales
+* **Type:** Configuración de ejecución / aislamiento de credenciales
 * **Owner:** Asdrubal Pérez
-* **Status:** Diseño preliminar — punto de partida para ARIA, no cerrado
-* **Priority:** Alta (ver handoff de priorización)
+* **Status:** Aprobado — en implementación (2026-08-02)
+* **Priority:** Alta
+* **Approval Gate:** Abierto — aprobado por el owner tras revisión técnica
 
 ---
 
 # 2. Problem Statement
 
-Hoy, para los cinco roles del pipeline (`architect`, `functional`, `planning`, `developer`, `qa`):
+El Orquestador ya permite resolver por usuario y por rol qué asistente de IA y qué modo de autenticación utilizar mediante `user_agent_config` y `resolveAgentConfig`.
 
-* el **asistente de IA** (Claude Code / Codex) por rol ya se resuelve de forma real y por usuario
-  (`user_agent_config`, `resolveAgentConfig` — override por rol -> global -> default, FEATURE-016),
-  pero no tiene ninguna UI: se configura hoy vía flags de CLI (`--executor`, `--auth-mode`) o
-  directamente en la tabla;
-* el **modelo** dentro de ese asistente no existe como concepto persistido en absoluto — es un
-  string suelto (`--model` de CLI) que se aplica igual a todos los roles de un run, sin
-  validación de que el modelo pertenezca al asistente elegido, y sin relación con `user_agent_config`;
-* el **modo de autenticación** (`api_key` / `cli_session`) también ya se resuelve por usuario y por
-  rol desde FEATURE-016, pero el secreto real detrás de `api_key` es hoy una única variable de
-  entorno del proceso (`ANTHROPIC_API_KEY`, `CODEX_API_KEY`) — **compartida por todos los usuarios
-  del Orquestador**, sin importar cuál esté logueado ni qué diga `user_agent_config`.
+Sin embargo, el comportamiento actual presenta limitaciones estructurales.
 
-El owner confirmó (2026-08-02) que la personalización debe ser libre por agente — un usuario puede
-tener, por ejemplo, `architect` en Claude/Opus/API-key propia y `developer` en Codex/otro
-modelo/otra credencial, sin que el sistema fuerce "mismo asistente para todos". El schema actual
-(`user_agent_config`, una fila por rol o una global) ya lo permite tal cual está — no hace falta
-ningún cambio para soportar esa libertad.
+## 2.1 Configuración sin interfaz
+
+La selección de asistente y modo de autenticación existe en backend, pero no dispone de una interfaz self-service.
+
+Actualmente puede modificarse mediante:
+
+* opciones de CLI;
+* acceso directo a base de datos;
+* configuración técnica fuera del flujo normal del usuario.
+
+## 2.2 Modelo no persistido por agente
+
+El modelo no forma parte de `user_agent_config`.
+
+Actualmente se recibe como un string global mediante `--model`, lo que implica que:
+
+* no se persiste por usuario;
+* no se persiste por rol;
+* se aplica al run completo;
+* no se valida contra el asistente elegido;
+* puede contener un valor arbitrario;
+* no participa de la precedencia por rol, global y default.
+
+## 2.3 API keys compartidas por el host
+
+Los ejecutores utilizan variables globales del proceso, como:
+
+* `ANTHROPIC_API_KEY`;
+* `CODEX_API_KEY`.
+
+Estas credenciales no pertenecen al usuario dueño del run.
+
+FEATURE-025 Parte 1 debe eliminar este mecanismo para las invocaciones que usen `auth_mode = api_key`.
+
+Después de implementar la Feature:
+
+* no debe existir fallback operativo a claves globales;
+* cada usuario debe registrar sus propias API keys;
+* cada invocación debe usar exclusivamente la credencial del owner del run.
+
+Actualmente existe un único usuario operativo, por lo que la retirada del fallback global no requiere compatibilidad temporal. El usuario deberá registrar sus credenciales después de autenticarse.
+
+## 2.4 Reintentos con configuración congelada
+
+El mecanismo de reintento de escalaciones conserva hoy la selección original de:
+
+* proveedor;
+* modo de autenticación;
+* modelo.
+
+Esta selección se recupera del evento `run_started` y no se vuelve a resolver contra `user_agent_config`, porque la configuración del usuario podría haber cambiado desde la ejecución original.
+
+Las credenciales no pueden tratarse del mismo modo:
+
+* una API key no puede persistirse en eventos;
+* una clave rotada o eliminada no debe seguir utilizándose;
+* conservar versiones anteriores de secretos aumentaría el riesgo y la complejidad.
+
+La Feature debe definir explícitamente qué se conserva y qué se vuelve a resolver durante un reintento.
 
 ---
 
 # 3. Functional Goal
 
-Después de implementar esta parte:
+Después de implementar esta Feature:
 
-* cada usuario puede elegir, por rol (o una config global), qué asistente de IA usar, entre los
-  soportados hoy (Claude Code, Codex);
-* cada usuario puede elegir, por rol, qué modelo usar dentro del asistente elegido, de un catálogo
-  cerrado y validado contra ese asistente — nunca un string libre sin validar;
-* cada usuario puede cargar su propia API key (Anthropic y/o OpenAI/Codex, según qué asistentes
-  use), cifrada en reposo, reemplazando en su caso las variables de entorno compartidas del host;
-* un run de un usuario que cargó su propia credencial la usa; un usuario que no cargó ninguna sigue
-  funcionando contra la credencial compartida existente (comportamiento legacy intacto, sin
-  romper nada para quien no adopta la Feature);
-* el modo de autenticación `cli_session` (OAuth) sigue existiendo tal cual está hoy (mecanismo
-  compartido del host) — esta parte NO lo toca. Ver FEATURE-025-Parte-2.
+* cada usuario podrá configurar globalmente o por rol el asistente de IA;
+* cada usuario podrá elegir un modelo compatible con ese asistente;
+* cada usuario podrá elegir `api_key` o `cli_session`;
+* cada usuario podrá registrar sus propias API keys por proveedor;
+* las API keys se almacenarán cifradas y aisladas por usuario;
+* cada invocación resolverá la configuración efectiva para el usuario y rol correspondientes;
+* ningún executor utilizará una API key global del host;
+* un rol configurado con `api_key` no podrá ejecutarse sin una credencial propia;
+* los reintentos conservarán proveedor, modelo y modo originales;
+* los reintentos resolverán la credencial activa actual del usuario;
+* el modo `cli_session` mantendrá temporalmente el mecanismo actual hasta FEATURE-025 Parte 2;
+* la configuración podrá ser diferente para cada rol;
+* la ausencia o invalidez de una credencial producirá un corte técnico antes de invocar al agente.
 
 ---
 
@@ -56,160 +103,928 @@ Después de implementar esta parte:
 
 ## Included
 
-* UI de configuración de agente (probablemente una pantalla nueva de "Configuración" o una
-  extensión de la de proyecto/perfil) con: selector de asistente por rol, selector de modelo
-  (filtrado por asistente), campo de API key por asistente.
-* Catálogo cerrado de modelos por asistente (ej. Claude: Opus/Sonnet/Haiku vigentes; Codex: los
-  modelos que exponga su CLI) — server-side, no inventado por el cliente.
-* Persistencia del modelo elegido, ligada a `user_agent_config` (columna nueva o tabla
-  complementaria — a decidir por ARIA, ver sección 7).
-* Almacenamiento cifrado de API keys por usuario y por asistente (Anthropic, OpenAI/Codex),
-  reutilizando el mecanismo AES-256-GCM ya construido en FEATURE-026
-  (`src/auth/gitCredentialEncryption.ts`) — mismo patrón, nueva tabla, sin inventar cifrado nuevo.
-* Resolución en runtime: `resolveAgentConfig` (o su sucesor) devuelve asistente + modelo +
-  credencial efectiva a usar para cada invocación de rol, con precedencia por-rol -> global ->
-  default, igual que hoy.
-* Fallback a la credencial compartida del host (`.env.local`) cuando el usuario no cargó la propia
-  — no se puede romper el funcionamiento actual para quien no usa la Feature.
-* Actualización de `claudeCodeExecutor.ts`/`codexExecutor.ts` para aceptar una API key resuelta por
-  el caller en vez de leer siempre `process.env.*` directamente.
+* Interfaz de configuración global y por rol.
+* Selector de asistente.
+* Selector de modelo filtrado por asistente.
+* Selector de modo de autenticación.
+* Catálogo cerrado de proveedores y modelos.
+* Persistencia de `model` en `user_agent_config`.
+* Nueva tabla de credenciales de IA por usuario y proveedor.
+* Cifrado AES-256-GCM de API keys.
+* Clave de cifrado específica para credenciales de IA.
+* Alta, sustitución y eliminación de credenciales.
+* Consulta del estado de una credencial sin exponer el secreto.
+* Eliminación del fallback a API keys globales.
+* Resolución efectiva por usuario y rol.
+* Resolución separada y efímera de credenciales.
+* Inyección de credenciales en el entorno individual del proceso hijo.
+* Corte técnico por credencial ausente o configuración inválida.
+* Tratamiento explícito de reintentos.
+* Persistencia de provider, model y auth mode usados en el run.
+* Resolución de la credencial vigente en cada reintento.
+* Actualización de los reingresos automáticos.
+* Revisión de la capa de aislamiento de tools.
+* Cobertura nueva para `resolveAgentConfig`, `AgentConfig` y `user_agent_config`.
+* Migración `0021`.
 
 ## Excluded
 
-* OAuth personal por proveedor de IA (conexión real a una cuenta Claude.ai/ChatGPT propia,
-  reemplazando `CLAUDE_OAUTH_CACHE_DIR`/`CODEX_OAUTH_CACHE_DIR`) — alcance completo de
-  FEATURE-025-Parte-2.
-* Cualquier cambio al mecanismo `cli_session` existente.
-* Forzar un único asistente/modelo/credencial para todos los roles — explícitamente rechazado por
-  el owner, cada rol se configura de forma independiente.
-* Selección de proveedor/modelo para el paso de mapeo del intake (`mapBusinessCase.ts`) — ese paso
-  no usa Executor/holder-worker hoy (no necesita tools), queda pendiente de diseño técnico aparte,
-  ya anotado en el Roadmap como parte de esta Feature pero de resolución posterior.
-* Límites de uso, cuotas o facturación por usuario sobre su propia credencial.
+* OAuth personal para Claude o Codex.
+* Cambios internos al mecanismo actual de `cli_session`.
+* Fallback a claves globales.
+* Conservación de versiones antiguas de API keys.
+* Persistencia de secretos o ciphertext IDs dentro de eventos de run.
+* Configuración compartida entre usuarios.
+* Un único asistente obligatorio para todos los roles.
+* Selección de proveedor o modelo en `mapBusinessCase.ts`.
+* Eliminación de la lectura global de `ANTHROPIC_API_KEY` en `mapBusinessCase.ts`.
+* Límites de consumo.
+* Cuotas.
+* Facturación.
+* Catálogo dinámico consultado en vivo.
+* Rotación automática.
+* Validación de saldo o plan del proveedor.
+* Cambios de cuentas self-service de FEATURE-041.
+* Refactor general del módulo de cifrado de GitHub.
+
+## Future ideas
+
+* Resolver `mapBusinessCase.ts` mediante configuración por usuario.
+* Incorporar OAuth personal en FEATURE-025 Parte 2.
+* Auditar y retirar definitivamente toda variable global de credenciales después de ambas partes.
+* Versionar snapshots completos de configuración si una Feature futura requiere reproducibilidad estricta.
 
 ---
 
-# 5. Functional Rules (borrador, a validar con ARIA)
+# 5. Functional Rules
 
-1. La configuración es siempre por (usuario, rol) o (usuario, global) — nunca compartida entre
-   usuarios, nunca forzada a ser igual entre roles.
-2. El modelo elegido debe pertenecer al catálogo del asistente elegido para ese mismo (usuario,
-   rol) — un cambio de asistente sin modelo compatible debe invalidar o resetear el modelo, nunca
-   dejar una combinación inconsistente persistida.
-3. La API key de un usuario nunca se expone en texto plano fuera del momento de creación (mismo
-   criterio que FEATURE-026, Regla de "nunca se decodifica salvo para uso efímero en el proceso
-   hijo").
-4. Un usuario sin credencial propia cargada para un asistente sigue funcionando contra la
-   credencial compartida del host — no hay corte técnico ni error nuevo introducido por esta
-   Feature para quien no la adopta.
-5. El modo de autenticación sigue siendo `api_key` o `cli_session` como hoy; esta parte solo agrega
-   una fuente real detrás de `api_key` (la del usuario) además de la compartida — no toca
-   `cli_session`.
+## 5.1 Propiedad y precedencia
+
+1. Toda configuración pertenece a un usuario.
+2. Puede existir:
+
+   * una configuración global;
+   * una configuración específica por rol.
+3. La configuración específica del rol tiene precedencia sobre la global.
+4. La configuración global tiene precedencia sobre los defaults.
+5. Ninguna configuración es compartida entre usuarios.
+6. Cada rol puede tener una combinación diferente.
+
+## 5.2 Proveedores soportados
+
+Inicialmente:
+
+* Claude Code;
+* Codex.
+
+El catálogo es cerrado y server-side.
+
+La UI no puede enviar proveedores arbitrarios.
+
+## 5.3 Modelos
+
+1. Cada modelo pertenece a un proveedor soportado.
+2. El backend es la fuente de verdad.
+3. El modelo no puede ser un string libre sin validación.
+4. El modelo debe persistirse en `user_agent_config`.
+5. Si cambia el proveedor y el modelo deja de ser compatible:
+
+   * se limpia el modelo;
+   * o se rechaza el guardado.
+6. Nunca debe persistirse una combinación incompatible.
+7. La actualización del catálogo será manual y controlada.
+
+## 5.4 Modo `api_key`
+
+1. Requiere una credencial propia del usuario.
+2. La credencial debe pertenecer al proveedor efectivo.
+3. No existe fallback a variables globales.
+4. La ausencia de credencial detiene el flujo antes de invocar al agente.
+5. El error debe ser distinguible.
+6. El error debe indicar qué proveedor requiere configuración.
+7. El problema no debe escalarse a un agente.
+8. El runtime no debe intentar ejecutar parcialmente configurado.
+
+## 5.5 Modo `cli_session`
+
+1. Continúa disponible.
+2. No requiere una API key.
+3. Mantiene temporalmente el mecanismo actual.
+4. Su aislamiento personal corresponde a Parte 2.
+5. Parte 1 no depende de Parte 2.
+6. Parte 2 sí reutilizará el modelo y la UI de Parte 1.
+
+## 5.6 Credenciales
+
+1. Se almacenan por:
+
+   * usuario;
+   * proveedor.
+2. Una credencial puede utilizarse en varios roles del mismo usuario.
+3. No se duplica dentro de `user_agent_config`.
+4. Se almacena cifrada.
+5. Nunca se devuelve después de guardarse.
+6. La API solo expone metadatos no sensibles.
+7. Sustituir una credencial invalida el secreto anterior.
+8. Eliminar una credencial impide futuras ejecuciones `api_key`.
+9. No se conservan versiones antiguas para reintentos.
+10. El plaintext solo existe durante la resolución e invocación.
+11. No debe aparecer en:
+
+    * logs;
+    * eventos;
+    * errores;
+    * artefactos;
+    * respuestas HTTP;
+    * argumentos visibles;
+    * registros del run.
+
+## 5.7 Resolución de configuración
+
+Para un usuario y rol:
+
+1. Configuración específica.
+2. Configuración global.
+3. Defaults permitidos.
+
+La configuración efectiva contiene:
+
+* provider;
+* model;
+* auth mode.
+
+La credencial se resuelve después y de forma separada.
+
+## 5.8 Resolución por invocación
+
+1. La configuración se resuelve en cada invocación.
+2. No se resuelve una sola vez para todo el run.
+3. Cada rol puede producir una selección diferente.
+4. Se utiliza el owner del run.
+5. La credencial no se persiste.
+6. Una nueva invocación normal utiliza la configuración vigente.
+7. Un reintento de escalación utiliza la selección funcional original.
+
+## 5.9 Reintentos
+
+En un reintento de escalación:
+
+1. Se reutilizan del run original:
+
+   * provider;
+   * model;
+   * auth mode.
+2. Estos valores se recuperan del evento `run_started`.
+3. No se vuelve a consultar `user_agent_config` para esos campos.
+4. La API key original no se persiste.
+5. Si `auth_mode = api_key`, se resuelve la credencial activa actual del mismo usuario y proveedor.
+6. Si la credencial fue rotada, se usa la nueva.
+7. Si fue eliminada, el reintento se bloquea.
+8. No se reutilizan API keys antiguas.
+9. No se versionan secretos exclusivamente para reproducir un reintento.
+10. La diferencia respecto de la ejecución original es deliberada y de seguridad:
+
+    * la configuración funcional queda congelada;
+    * el material secreto debe estar vigente.
+
+## 5.10 Corte técnico
+
+Antes de construir el executor:
+
+* validar provider;
+* validar model;
+* validar auth mode;
+* resolver credencial cuando corresponda;
+* confirmar que la credencial existe.
+
+Ante fallo:
+
+* no se invoca al agente;
+* no se crea un proceso hijo;
+* se registra un error no sensible;
+* se devuelve un estado distinguible.
+
+## 5.11 Concurrencia
+
+1. No debe modificarse `process.env` global.
+2. Debe preservarse el patrón actual de entorno por proceso hijo.
+3. Cada invocación recibe un objeto `env` independiente.
+4. Ningún executor conserva secretos en estado global.
+5. Dos usuarios pueden ejecutar simultáneamente sin contaminación.
+
+## 5.12 Reingresos automáticos
+
+La resolución debe aplicarse también a:
+
+* `createPlanningToQaChildRun`;
+* `createArchitectReentryChildRun`;
+* cualquier otro child run o circuito automático.
+
+Estos flujos no pueden omitir la resolución de modelo o credencial.
 
 ---
 
 # 6. Estrategia Algorítmica
 
-No aplica como estrategia de optimización. Es resolución de configuración por precedencia
-(idéntico patrón a `resolveAgentConfig` de FEATURE-016) más un catálogo de validación
-asistente-modelo, ambos determinísticos.
+No existe optimización, pero sí una resolución determinística.
+
+## 6.1 Entradas
+
+* `userId`;
+* rol;
+* configuración específica;
+* configuración global;
+* defaults;
+* catálogo de proveedores;
+* catálogo de modelos;
+* auth mode;
+* estado actual de las credenciales;
+* snapshot funcional original, en caso de reintento.
+
+## 6.2 Salida de configuración
+
+```ts
+interface EffectiveAgentConfig {
+  executorProvider: ExecutorProvider;
+  model: string;
+  authMode: "api_key" | "cli_session";
+}
+```
+
+## 6.3 Salida de autenticación
+
+```ts
+interface ResolvedExecutorAuthentication {
+  mode: "api_key" | "cli_session";
+  apiKey?: string;
+}
+```
+
+La autenticación no debe formar parte de objetos persistibles.
+
+## 6.4 Flujo normal
+
+1. Resolver configuración de rol.
+2. Completar desde global.
+3. Completar desde defaults.
+4. Validar provider.
+5. Validar model.
+6. Validar auth mode.
+7. Si es `api_key`, resolver credencial actual.
+8. Si no existe, cortar.
+9. Construir executor.
+
+## 6.5 Flujo de reintento
+
+1. Leer provider, model y auth mode del evento original.
+2. No consultar configuración actual para esos campos.
+3. Validar que continúan siendo soportados.
+4. Si es `api_key`, resolver credencial activa actual.
+5. Si no existe, cortar.
+6. Construir executor con:
+
+   * configuración original;
+   * credencial vigente.
+
+## 6.6 Determinismo
+
+Para una invocación normal, la misma configuración persistida produce el mismo resultado.
+
+Para un reintento:
+
+* la selección funcional es estable;
+* la credencial puede cambiar por rotación o eliminación;
+* ese cambio es intencional y seguro.
 
 ---
 
-# 7. Technical Considerations (abiertas para ARIA)
+# 7. Technical Considerations
 
-## 7.1 Modelo de datos — abierto
+## 7.1 Migración
 
-Dos caminos posibles, a decidir por ARIA:
+Próxima migración:
 
-* (a) extender `user_agent_config` con una columna `model` (nullable) — más simple, pero mezcla
-  configuración de ejecución con credenciales si después se le agrega la API key ahí mismo;
-* (b) `user_agent_config` se queda con asistente + modo de auth (como hoy), y se agrega una tabla
-  nueva `user_provider_credentials` (user_id, provider, api_key_ciphertext, created_at,
-  updated_at) para las credenciales, con el modelo viviendo en `user_agent_config` o en una tercera
-  tabla si conviene versionarlo aparte.
+```text
+0021
+```
 
-Recomendación inicial (no cerrada): separar credenciales de configuración de ejecución, mismo
-criterio que FEATURE-026 separó `user_git_connections` de cualquier tabla de configuración de
-proyecto — las credenciales tienen su propio ciclo de vida (conectar/desconectar/rotar), distinto
-del de "qué asistente uso en este rol".
+Debe incluir:
 
-## 7.2 Catálogo de modelos
+* columna `model` en `user_agent_config`;
+* nueva tabla de credenciales de IA.
 
-¿Hardcodeado en código (lista fija por asistente, actualizada a mano cuando salen modelos nuevos,
-mismo criterio que `TIPO_SOLUCION_OPTIONS` en el frontend) o consultado en vivo contra la API de
-cada proveedor? Recomendación inicial: hardcodeado — los otros catálogos cerrados del sistema
-(motivos de escalamiento, tipos de campo de intake) siguen ese patrón, y evita depender de un
-endpoint de terceros para una pantalla de configuración.
+## 7.2 Modelo de datos
 
-## 7.3 Resolución en runtime
+### `user_agent_config`
 
-`resolveAgentConfig(userId, role)` (o un sucesor con más campos) necesita devolver no solo
-asistente + modo de auth, sino también modelo + la credencial efectiva ya resuelta (desencriptada
-en el momento, nunca antes) para pasarla a `buildExecutor`. Esto cambia la firma de `AgentConfig`
-(hoy `{executorProvider, authMode}`) y todos sus call sites en `runStart.ts` — hay que mapear el
-alcance real de ese cambio (`buildExecutor`, `ClaudeCodeExecutor`, `CodexExecutor`, sus
-constructores y tests).
+Extender con:
 
-## 7.4 Ejecutores
+```text
+model
+```
 
-`claudeCodeExecutor.ts`/`codexExecutor.ts` hoy leen `process.env.ANTHROPIC_API_KEY`/
-`process.env.CODEX_API_KEY` directamente en varios puntos (confirmado por grep sobre el código
-real). Necesitan aceptar una API key resuelta por el caller como parámetro opcional, con fallback a
-la variable de entorno cuando no se provee — mismo patrón retrocompatible que `gitAuth` opcional en
-FEATURE-026 (`cloneRunRepository`/`pushRunBranch`).
+Cambio aditivo compatible con los índices parciales existentes.
 
-## 7.5 Arquitectura afectada (lista preliminar, a confirmar)
+### `user_ai_provider_credentials`
 
-* Migración nueva para credenciales/modelo (tabla(s) a decidir, 7.1).
-* `src/db/repository.ts` — CRUD de la tabla nueva, extensión de `resolveAgentConfig`.
-* `src/auth/gitCredentialEncryption.ts` — posible generalización a un módulo de cifrado no
-  específico de Git (renombrar o extraer lo genérico), dado que se reutiliza para credenciales de
-  IA.
-* `src/executor/claudeCodeExecutor.ts`, `src/executor/codexExecutor.ts`.
-* `src/cli/commands/runStart.ts` — todos los call sites de `buildExecutor`.
-* Endpoints nuevos en `src/server/app.ts` (equivalentes a `/auth/github/*` pero para credenciales
-  de IA: alta, listado sin exponer el secreto, borrado).
-* UI nueva en `web/src/` — pantalla de configuración de agente.
+Estructura conceptual:
 
-## 7.6 Dependencias
+```text
+id
+user_id
+provider
+credential_ciphertext
+credential_iv
+credential_auth_tag
+created_at
+updated_at
+```
 
-* FEATURE-016 (asistente/modo de auth por rol) — base directa.
-* FEATURE-026 (patrón de cifrado AES-256-GCM) — se reutiliza, no se reinventa.
-* Ninguna dependencia de FEATURE-041 (cuentas self-service) — funciona igual sobre cualquier fila
-  de `users` existente, sin importar cómo se creó.
+Restricción única:
+
+```text
+(user_id, provider)
+```
+
+El ID identifica el registro actual, pero no se utiliza para preservar versiones anteriores.
+
+Una rotación actualiza o reemplaza la credencial vigente.
+
+## 7.3 Clave de cifrado
+
+Debe utilizarse una clave nueva:
+
+```text
+AI_CREDENTIAL_ENCRYPTION_KEY
+```
+
+Debe ser distinta de:
+
+```text
+GIT_CREDENTIAL_ENCRYPTION_KEY
+```
+
+Motivos:
+
+* separación de dominios;
+* reducción del blast radius;
+* rotación independiente;
+* preparación para OAuth de IA;
+* coste de implementación mínimo.
+
+No se requiere renombrar ni generalizar ampliamente `gitCredentialEncryption.ts`.
+
+Las funciones existentes ya aceptan una clave como parámetro.
+
+La implementación debe:
+
+* resolver `AI_CREDENTIAL_ENCRYPTION_KEY`;
+* pasarla explícitamente a las primitivas existentes;
+* mantener intacta la interfaz pública usada por GitHub.
+
+## 7.4 Catálogo de modelos
+
+Catálogo estático server-side.
+
+Estructura conceptual:
+
+```ts
+const AI_MODEL_CATALOG = {
+  claude_code: [],
+  codex: [],
+};
+```
+
+Los modelos concretos deben confirmarse durante implementación contra las versiones soportadas por los CLI.
+
+No se consulta dinámicamente a terceros.
+
+## 7.5 Configuración y autenticación separadas
+
+Se recomienda separar:
+
+```ts
+resolveEffectiveAgentConfig(userId, role)
+```
+
+de:
+
+```ts
+resolveExecutorAuthentication(userId, config)
+```
+
+Así se reduce el riesgo de serializar secretos.
+
+## 7.6 Reintentos y evento `run_started`
+
+El evento debe conservar:
+
+* provider;
+* model;
+* auth mode.
+
+No debe conservar:
+
+* API key;
+* ciphertext;
+* IV;
+* auth tag;
+* copia de la credencial;
+* referencia a una versión histórica de secreto.
+
+El reintento usa esos valores funcionales y resuelve la credencial vigente.
+
+## 7.7 Ejecutores
+
+`ClaudeCodeExecutor` y `CodexExecutor` deben recibir una API key desde el caller.
+
+Las variables globales no deben ser fuente de ejecución.
+
+Debe preservarse el patrón actual:
+
+```ts
+spawn(command, args, { env: childEnv })
+```
+
+No se debe introducir una mutación de `process.env`.
+
+## 7.8 Capa de aislamiento de tools
+
+Deben revisarse:
+
+* `qaWorkerServer.ts`;
+* `roleWorkerServer.ts`;
+* `searchProxyServer.ts`;
+* `worker.ts`.
+
+Actualmente tratan `ANTHROPIC_API_KEY` y `CODEX_API_KEY` como secretos prohibidos.
+
+La implementación debe confirmar que:
+
+* los nombres utilizados para inyectar la credencial siguen bloqueados;
+* el secreto no llega a workers que no lo necesitan;
+* la nueva fuente de credenciales no debilita el aislamiento existente.
+
+## 7.9 Runtime afectado
+
+Como mínimo:
+
+* migración `0021`;
+* `user_agent_config`;
+* tipos `AgentConfig`;
+* `resolveAgentConfig`;
+* nuevo CRUD de credenciales;
+* cifrado con `AI_CREDENTIAL_ENCRYPTION_KEY`;
+* `buildExecutor`;
+* `ClaudeCodeExecutor`;
+* `CodexExecutor`;
+* `runStart.ts`;
+* loop de fases;
+* `createPlanningToQaChildRun`;
+* `createArchitectReentryChildRun`;
+* `respondService.ts`;
+* mecanismo de retry;
+* evento `run_started`;
+* endpoints backend;
+* UI de configuración;
+* capa de aislamiento de tools;
+* logs y eventos;
+* tests nuevos de configuración;
+* tests de reintentos;
+* tests de concurrencia.
+
+## 7.10 `mapBusinessCase.ts`
+
+Queda explícitamente fuera de alcance.
+
+Actualmente utiliza `ANTHROPIC_API_KEY` mediante un camino independiente y directo.
+
+Por tanto, después de Parte 1 puede seguir existiendo un lector de una clave global en el repositorio.
+
+Esto no contradice el alcance, porque Parte 1 elimina el mecanismo global del pipeline de Executors, no del mapper.
+
+Debe documentarse para que una auditoría no interprete erróneamente que ya no existe ninguna lectura global.
+
+## 7.11 Cobertura de tests
+
+Actualmente no existe cobertura directa para:
+
+* `resolveAgentConfig`;
+* `AgentConfig`;
+* `user_agent_config`.
+
+La Feature debe crear esta cobertura desde cero.
+
+Como mínimo:
+
+* precedencia rol/global/default;
+* validación de modelos;
+* credencial presente;
+* credencial ausente;
+* aislamiento entre usuarios;
+* retry con credencial rotada;
+* retry con credencial eliminada;
+* child runs automáticos;
+* ausencia de fallback global.
+
+## 7.12 `--model`
+
+No hay consumidores conocidos en CI o automatizaciones.
+
+Recomendación:
+
+* retirar `--model` del flujo normal;
+* usar la configuración persistida como fuente principal;
+* mantenerlo temporalmente solo si existe un caso administrativo real;
+* no permitir que sobrescriba silenciosamente configuración persistida.
+
+La decisión definitiva puede cerrarse durante implementación, siempre que no contradiga estas reglas.
+
+## 7.13 API backend
+
+Endpoints para:
+
+* consultar configuración;
+* guardar configuración;
+* obtener catálogo;
+* consultar estado de credenciales;
+* guardar o sustituir API key;
+* eliminar API key.
+
+Ninguna respuesta devuelve secretos.
+
+## 7.14 UI
+
+Debe permitir:
+
+* configuración global;
+* overrides por rol;
+* selección de provider;
+* selección de modelo;
+* selección de auth mode;
+* alta de credenciales;
+* rotación;
+* eliminación;
+* visualización de estado;
+* identificación anticipada de configuraciones incompletas.
+
+## 7.15 Dependencias
+
+* FEATURE-016.
+* FEATURE-026.
+* FEATURE-025 Parte 2 depende de esta Parte 1.
+* FEATURE-041 no es dependencia.
+
+El spike de Parte 2 puede ejecutarse en paralelo.
 
 ---
 
-# 8. Validation Criteria (borrador)
+# 8. Validation Criteria
 
-* Un usuario configura `developer` en Codex/modelo X/API key propia y `qa` en Claude/modelo Y sin
-  credencial propia — el run usa la key propia para `developer` y la compartida del host para `qa`.
-* Cambiar el asistente de un rol sin modelo compatible no deja una combinación inconsistente
-  persistida.
-* Un usuario sin ninguna configuración propia corre exactamente como corre hoy (comportamiento
-  legacy, sin cambios).
-* La API key nunca aparece en logs, eventos persistidos, ni respuestas de API — mismo criterio de
-  auditoría que FEATURE-026.
+## Scenario 1 — Credencial propia de Claude
+
+**Input**
+
+Usuario configura un rol con Claude, modelo válido y `api_key`.
+
+**Expected output**
+
+* Usa la credencial propia.
+* No consulta la clave global.
+* No expone el secreto.
+
+## Scenario 2 — Credencial propia de Codex
+
+**Input**
+
+Usuario configura Codex con modelo válido.
+
+**Expected output**
+
+* Usa la credencial de OpenAI/Codex del usuario.
+* Inyecta la key solo al proceso hijo.
+
+## Scenario 3 — Credencial ausente
+
+**Input**
+
+Rol configurado con `api_key`, sin credencial.
+
+**Expected output**
+
+* Corte antes de invocar.
+* Error distinguible.
+* Ningún fallback global.
+
+## Scenario 4 — Configuración por rol
+
+**Input**
+
+Roles con combinaciones diferentes.
+
+**Expected output**
+
+Cada rol usa su configuración.
+
+## Scenario 5 — Precedencia
+
+**Input**
+
+Global más override específico.
+
+**Expected output**
+
+El override prevalece.
+
+## Scenario 6 — Modelo incompatible
+
+**Input**
+
+Modelo de Claude con Codex.
+
+**Expected output**
+
+Rechazo antes de persistir o ejecutar.
+
+## Scenario 7 — Cambio de provider
+
+**Input**
+
+Cambio con modelo incompatible.
+
+**Expected output**
+
+Modelo limpiado o guardado rechazado.
+
+## Scenario 8 — Rotación
+
+**Input**
+
+Usuario sustituye la API key.
+
+**Expected output**
+
+Nuevas invocaciones usan la nueva.
+
+## Scenario 9 — Eliminación
+
+**Input**
+
+Usuario elimina la key.
+
+**Expected output**
+
+Próximas ejecuciones se bloquean.
+
+## Scenario 10 — Aislamiento
+
+**Input**
+
+Dos usuarios ejecutan simultáneamente.
+
+**Expected output**
+
+Cada proceso recibe su propia credencial.
+
+## Scenario 11 — Variables globales presentes
+
+**Input**
+
+Host con claves globales; usuario sin clave propia.
+
+**Expected output**
+
+El run falla y no usa las globales.
+
+## Scenario 12 — Variables globales ausentes
+
+**Input**
+
+Host sin claves globales; usuario configurado.
+
+**Expected output**
+
+El run funciona.
+
+## Scenario 13 — Retry sin cambios
+
+**Input**
+
+Run original con provider/model/auth mode y credencial activa.
+
+**Expected output**
+
+El retry conserva selección y usa credencial vigente.
+
+## Scenario 14 — Retry tras rotación
+
+**Input**
+
+La key se rota después del run original.
+
+**Expected output**
+
+El retry usa la nueva key.
+
+## Scenario 15 — Retry tras eliminación
+
+**Input**
+
+La key se elimina.
+
+**Expected output**
+
+El retry se bloquea antes de invocar.
+
+## Scenario 16 — Configuración modificada antes del retry
+
+**Input**
+
+El usuario cambia provider o modelo en su configuración.
+
+**Expected output**
+
+El retry conserva provider, modelo y auth mode originales.
+
+## Scenario 17 — Child run Planning → QA
+
+**Input**
+
+Reingreso automático.
+
+**Expected output**
+
+Resuelve configuración y credencial del rol QA.
+
+## Scenario 18 — Reingreso Architect
+
+**Input**
+
+Circuito automático.
+
+**Expected output**
+
+Resuelve correctamente la configuración del Architect.
+
+## Scenario 19 — Capa de tools
+
+**Input**
+
+Invocación con API key propia.
+
+**Expected output**
+
+Los workers aislados no reciben secretos prohibidos.
+
+## Scenario 20 — `mapBusinessCase.ts`
+
+**Input**
+
+Ejecución del mapper.
+
+**Expected output**
+
+Mantiene su comportamiento actual y queda documentado como fuera de alcance.
+
+## Scenario 21 — Sin exposición
+
+**Input**
+
+Alta, ejecución, error, retry, eliminación.
+
+**Expected output**
+
+La key no aparece en logs, eventos ni respuestas.
+
+## Validation Evidence
+
+Debe aportarse:
+
+* configuración visible por rol;
+* catálogo de modelos;
+* estado de credencial sin secreto;
+* datos cifrados en base;
+* ejecución exitosa con credencial propia;
+* fallo sin credencial;
+* prueba con globales presentes;
+* concurrencia entre usuarios;
+* retry tras rotación;
+* retry tras eliminación;
+* child runs;
+* revisión de workers;
+* suite nueva de configuración;
+* ausencia de secretos en logs y eventos.
 
 ---
 
-# 9. Risks (borrador)
+# 9. Risks
 
-* **Cambiar la firma de `AgentConfig`** toca muchos call sites en `runStart.ts` — alcance real a
-  medir antes de comprometerse a un tamaño de Feature.
-* **Generalizar el módulo de cifrado** (hoy nombrado explícitamente para Git) puede tentar a un
-  refactor más grande del necesario — mitigación: extraer solo lo genérico (cifrar/descifrar un
-  string), sin tocar la API pública de `gitCredentialEncryption.ts` que ya usa FEATURE-026.
-* **Catálogo de modelos desactualizado** si se hardcodea — mitigación: mismo criterio que otros
-  catálogos cerrados del sistema, se actualiza a mano cuando el owner lo pide, no es responsabilidad
-  de esta Feature mantenerlo sincronizado automáticamente con los proveedores.
+## Riesgo 1 — Filtración de secretos
+
+**Impacto:** crítico.
+
+**Mitigación**
+
+* cifrado;
+* inyección efímera;
+* sanitización;
+* separación de configuración y autenticación;
+* tests específicos.
+
+## Riesgo 2 — Contaminación entre ejecuciones
+
+El aislamiento ya existe mediante entornos separados por proceso.
+
+**Tratamiento**
+
+Preservar el patrón existente y cambiar únicamente el origen del valor inyectado.
+
+## Riesgo 3 — Reintentos con credenciales obsoletas
+
+Persistir o conservar la key original permitiría reutilizar un secreto rotado o comprometido.
+
+**Mitigación**
+
+Resolver siempre la credencial activa actual.
+
+## Riesgo 4 — Retry bloqueado tras eliminación
+
+Un retry puede dejar de ser ejecutable.
+
+**Evaluación**
+
+Es comportamiento deliberado: una credencial eliminada no debe seguir utilizándose.
+
+## Riesgo 5 — Configuraciones inválidas
+
+**Mitigación**
+
+Catálogo server-side y validación doble.
+
+## Riesgo 6 — Call sites incompletos
+
+Los child runs y reintentos pueden omitir la nueva resolución.
+
+**Mitigación**
+
+Mapeo explícito y pruebas de Circuitos 2/3.
+
+## Riesgo 7 — Capa de tools debilitada
+
+**Mitigación**
+
+Revisar variables prohibidas y entornos de worker.
+
+## Riesgo 8 — Cobertura inexistente
+
+**Mitigación**
+
+Crear tests desde cero para configuración y precedencia.
+
+## Riesgo 9 — Clave de cifrado compartida
+
+**Mitigación**
+
+Usar `AI_CREDENTIAL_ENCRYPTION_KEY`.
+
+## Riesgo 10 — Refactor innecesario
+
+**Mitigación**
+
+Reutilizar primitivas existentes sin renombrar ni mover módulos salvo necesidad real.
+
+## Riesgo 11 — Confusión sobre `mapBusinessCase.ts`
+
+**Mitigación**
+
+Documentarlo expresamente como fuera de alcance y lector global remanente.
+
+## Riesgo 12 — Retirada de `--model`
+
+**Mitigación**
+
+Verificar usos y aplicar una transición explícita.
 
 ---
 
 # 10. Approval Gate
 
-La implementación permanece prohibida hasta que ARIA cierre el diseño completo y el owner lo
-apruebe explícitamente. Este documento es el punto de partida, no un diseño cerrado.
+La implementación está prohibida hasta aprobación humana explícita.
 
-**Estado del gate:** abierto — diseño preliminar, pendiente de ARIA.
+Antes de aprobar deben confirmarse:
+
+1. Nombre definitivo de la tabla.
+2. Estructura de migración `0021`.
+3. Catálogo inicial de modelos.
+4. Contrato de errores.
+5. Contrato de retry.
+6. Resolución de credencial vigente en reintentos.
+7. Uso de `AI_CREDENTIAL_ENCRYPTION_KEY`.
+8. Todos los call sites de child runs.
+9. Revisión de la capa de tools.
+10. Tratamiento de `--model`.
+11. Cobertura nueva de configuración.
+12. Ausencia total de fallback global en Executors.
+13. Documentación explícita de `mapBusinessCase.ts` fuera de alcance.
+
+**Estado del gate:** cerrado — diseño corregido pendiente de revisión técnica final y aprobación explícita.
