@@ -16,6 +16,7 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { apiUrl } from "../lib/api";
 import { queryClient } from "../lib/queryClient";
+import { getProject } from "../projects/api";
 import { statusLabel, statusVariant } from "./statusDisplay";
 import type { RunCaseSummary } from "./types";
 
@@ -25,6 +26,15 @@ export function CasesList() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId ?? "";
   const navigate = useNavigate();
+
+  // Sección E.8: "Nuevo caso" bloqueado si el proyecto no tiene repositorio configurado -- mismo
+  // criterio que el botón de navegación de ProjectShell (misma queryKey, sin refetch adicional).
+  const project = useQuery({
+    queryKey: ["projects", projectId],
+    enabled: projectId.length > 0,
+    queryFn: () => getProject(projectId),
+  });
+  const isConfigured = project.data?.project.isConfigured ?? false;
 
   const query = useQuery({
     queryKey: ["projects", projectId, "cases"],
@@ -103,7 +113,13 @@ export function CasesList() {
     <section className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6 lg:px-8">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Casos</h2>
-        <Button onClick={() => navigate(`/projects/${projectId}/cases/new`)}>Nuevo caso</Button>
+        <Button
+          disabled={!isConfigured}
+          title={isConfigured ? undefined : "Configurá un repositorio de GitHub para crear casos en este proyecto"}
+          onClick={() => navigate(`/projects/${projectId}/cases/new`)}
+        >
+          Nuevo caso
+        </Button>
       </div>
 
       {error ? <p className="text-sm text-rose-700">{error}</p> : null}

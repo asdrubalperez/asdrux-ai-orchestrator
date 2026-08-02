@@ -1,9 +1,11 @@
 import React from "react";
 import { AlertTriangle, Loader2, Upload } from "lucide-react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "../components/ui/button";
 import { apiUrl } from "../lib/api";
 import { queryClient } from "../lib/queryClient";
+import { getProject } from "../projects/api";
 import { ReviewModal } from "./ReviewModal";
 import type { BusinessCaseValues, IntakeFieldDefinition } from "./types";
 
@@ -14,6 +16,15 @@ export function DisparoScreen() {
   const projectId = params.projectId ?? "";
   const navigate = useNavigate();
 
+  // Sección E.8: guard real de la ruta, no solo el botón que lleva acá -- un deep link directo a
+  // /cases/new sin repositorio configurado no debe poder crear un caso (hallazgo real de prueba
+  // manual: el botón "Nuevo caso" de CasesList no tenía este chequeo, solo el del header).
+  const project = useQuery({
+    queryKey: ["projects", projectId],
+    enabled: projectId.length > 0,
+    queryFn: () => getProject(projectId),
+  });
+
   const [inputText, setInputText] = React.useState("");
   const [mapping, setMapping] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -21,6 +32,12 @@ export function DisparoScreen() {
   const [fields, setFields] = React.useState<IntakeFieldDefinition[]>([]);
   const [values, setValues] = React.useState<BusinessCaseValues>({});
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Todos los hooks ya se declararon arriba, en el mismo orden en cada render -- este return
+  // condicional recién ahora es seguro (Reglas de Hooks de React).
+  if (project.data && !project.data.project.isConfigured) {
+    return <Navigate to={`/projects/${projectId}/settings/repository`} replace />;
+  }
 
   const onFileSelected = async (file: File) => {
     const text = await file.text();
