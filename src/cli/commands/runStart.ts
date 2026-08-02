@@ -29,6 +29,7 @@ import {
   getCurrentProjectConfig,
   getProjectForUser,
   getReleasePlanAssociationCandidate,
+  getRootRunExecutionContext,
   getRunStatus,
   recordArtifact,
   recordRunConfigVersions,
@@ -424,11 +425,24 @@ export async function executePipelineRun(params: {
 
       if (invocation.agentRole === "planning") {
         const { featureJustCompleted, inputReleasePlan } = planningInputFieldsFromContext(context);
+        // FEATURE-043, sección 5.7/7.7: precedencia de resolución de la rama base del run raíz:
+        // 1) ubicación persistente nueva (`runs.base_branch_name`, casos nuevos del flujo web);
+        // 2) `business_case` del run raíz ya persistido en DB (runs legacy del flujo web, creados
+        //    antes de esta Feature, cuando `rama_base_trabajo` todavía viajaba dentro del JSON);
+        // 3) `initialContext` en memoria (camino `run:start --case` del CLI: ese comando nunca
+        //    persiste `business_case` en la DB -- `createRun`, a diferencia de
+        //    `createRunPendingStart`, no tiene esa columna entre sus parámetros -- así que para
+        //    ese camino la única fuente posible sigue siendo el contexto en memoria, igual que
+        //    antes de esta Feature).
+        const rootExecution = await getRootRunExecutionContext(runId);
         await persistReleasePlanIfDeclared({
           projectId,
           runId,
           result,
-          fallbackRamaBaseTrabajo: ramaBaseTrabajoFromBusinessCase(initialContext),
+          fallbackRamaBaseTrabajo:
+            rootExecution.baseBranchName ??
+            ramaBaseTrabajoFromBusinessCase(rootExecution.businessCase) ??
+            ramaBaseTrabajoFromBusinessCase(initialContext),
           phaseFinishedEventId,
           featureJustCompleted,
           inputReleasePlan,
@@ -893,6 +907,14 @@ async function withRoleContext(projectId: string, runId: string, incomingContext
  * disponible..."`, aunque el business_case real sí tuviera `rama_base_trabajo`). Recursión acotada
  * a 1 nivel (`businessCase` nunca anida otro `ReentryContext` — es siempre el caso de negocio
  * crudo o `null`).
+ *
+ * FEATURE-043, sección 5.7/7.7: desde esta Feature, los runs nuevos del flujo web ya NO persisten
+ * `rama_base_trabajo` dentro de `business_case` — viven en `runs.base_branch_name`
+ * (`getRootRunExecutionContext`). Esta función queda exclusivamente como parser de compatibilidad
+ * legacy: JSON histórico ya persistido (runs creados antes de esta Feature) y el camino
+ * `run:start --case` del CLI (que nunca persiste `business_case` en la DB, solo lo pasa en memoria
+ * como `initialContext` — ver el call site de `persistReleasePlanIfDeclared`). No es la fuente
+ * primaria para ningún run nuevo del flujo web.
  */
 export function ramaBaseTrabajoFromBusinessCase(value: unknown): string | undefined {
   if (value === null || typeof value !== "object") return undefined;

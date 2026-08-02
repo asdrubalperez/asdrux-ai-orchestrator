@@ -14,9 +14,11 @@ import { apiUrl } from "../lib/api";
 import type { BusinessCaseValues, IntakeFieldDefinition, RunCaseSummary } from "./types";
 
 // FEATURE-042, sección B.9: el repositorio deja de pedirse en el intake -- se obtiene siempre
-// desde el proyecto activo. `rama_base_trabajo` sigue siendo del caso (Regla D.9/E.7).
+// desde el proyecto activo. FEATURE-043: `repositorio` se retiró de `intake_field_definitions`
+// (migración 0019), ya no llega en `props.fields` -- no hace falta filtrarlo acá. `rama_base_trabajo`
+// sigue siendo un campo extraíble por IA (Regla 5.3 del diseño de FEATURE-043), pero pasa a
+// mostrarse en su propia sección "Ejecución", separada del caso de negocio descriptivo.
 const RAMA_BASE_KEY = "rama_base_trabajo";
-const REPOSITORIO_KEY = "repositorio";
 const TIPO_SOLUCION_KEY = "tipo_solucion";
 const TIPO_SOLUCION_OPTIONS = [
   { value: "nueva", label: "Nueva" },
@@ -44,10 +46,8 @@ function suggestBranchName(seed: string): string {
 // vacío, cae al valor no vacío más largo entre los demás campos -- evita sugerencias pobres como
 // "feature/nueva" que salían de tomar el primer campo por field_order (típicamente tipo_solucion,
 // un código corto, no una descripción).
-function pickBranchSeed(values: BusinessCaseValues, fields: IntakeFieldDefinition[]): string {
-  const candidates = fields.filter(
-    (f) => f.field_key !== RAMA_BASE_KEY && f.field_key !== REPOSITORIO_KEY && f.field_key !== TIPO_SOLUCION_KEY
-  );
+export function pickBranchSeed(values: BusinessCaseValues, descriptiveFields: IntakeFieldDefinition[]): string {
+  const candidates = descriptiveFields.filter((f) => f.field_key !== TIPO_SOLUCION_KEY);
   const visionValue = values["vision"];
   if (typeof visionValue === "string" && visionValue.trim().length > 0) return visionValue;
 
@@ -59,31 +59,38 @@ function pickBranchSeed(values: BusinessCaseValues, fields: IntakeFieldDefinitio
   return best;
 }
 
-function withDefaults(values: BusinessCaseValues, fields: IntakeFieldDefinition[]): BusinessCaseValues {
+export function withDefaults(values: BusinessCaseValues, descriptiveFields: IntakeFieldDefinition[]): BusinessCaseValues {
   if (values[RAMA_BASE_KEY]) return values;
-  return { ...values, [RAMA_BASE_KEY]: suggestBranchName(pickBranchSeed(values, fields)) };
+  return { ...values, [RAMA_BASE_KEY]: suggestBranchName(pickBranchSeed(values, descriptiveFields)) };
 }
 
-function completenessPercent(values: BusinessCaseValues, fields: IntakeFieldDefinition[]): number {
-  if (fields.length === 0) return 0;
-  const complete = fields.filter((field) => {
+// FEATURE-043, sección 5.9: el porcentaje de "Caso de negocio" se calcula solo sobre campos
+// descriptivos -- la rama (ahora en su propia sección "Ejecución") ya no cuenta para este número,
+// tiene su propia validación (ver `canContinue`).
+export function completenessPercent(values: BusinessCaseValues, descriptiveFields: IntakeFieldDefinition[]): number {
+  if (descriptiveFields.length === 0) return 0;
+  const complete = descriptiveFields.filter((field) => {
     const value = values[field.field_key];
     return typeof value === "string" && value.trim().length > 0;
   }).length;
-  return Math.round((complete / fields.length) * 100);
+  return Math.round((complete / descriptiveFields.length) * 100);
 }
 
 export function ReviewModal(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectId: string;
+  /** FEATURE-043, sección 7.9: repositorio del proyecto, mostrado solo lectura en "Ejecución". */
+  repositoryFullName: string | null;
   fields: IntakeFieldDefinition[];
   initialValues: BusinessCaseValues;
   onConfirmed: (run: RunCaseSummary, branchWarning: string | null) => void;
 }) {
-  // Sección B.9: el repositorio no se pide más en el intake nuevo.
-  const visibleFields = props.fields.filter((f) => f.field_key !== REPOSITORIO_KEY);
-  const [values, setValues] = React.useState<BusinessCaseValues>(() => withDefaults(props.initialValues, visibleFields));
+  // FEATURE-043, sección 5.9/7.9: separación entre campos descriptivos del caso de negocio y la
+  // configuración de ejecución (rama base) -- ya no se mezclan en el mismo cálculo de completitud
+  // ni en la misma sección visual.
+  const descriptiveFields = props.fields.filter((f) => f.field_key !== RAMA_BASE_KEY);
+  const [values, setValues] = React.useState<BusinessCaseValues>(() => withDefaults(props.initialValues, descriptiveFields));
   const [confirming, setConfirming] = React.useState(false);
   const [validating, setValidating] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -96,15 +103,19 @@ export function ReviewModal(props: {
 
   React.useEffect(() => {
     if (props.open) {
-      setValues(withDefaults(props.initialValues, visibleFields));
+      setValues(withDefaults(props.initialValues, descriptiveFields));
       setError(null);
       setBranchConfirmation(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.open, props.initialValues]);
 
-  const percent = completenessPercent(values, visibleFields);
-  const canContinue = percent === 100 && !confirming && !validating;
+  const percent = completenessPercent(values, descriptiveFields);
+  const branchValue = values[RAMA_BASE_KEY];
+  const branchIsValid = typeof branchValue === "string" && branchValue.trim().length > 0;
+  // FEATURE-043, sección 5.9.4: requiere caso descriptivo completo Y configuración de ejecución
+  // válida -- la rama no desaparece del gate solo por vivir fuera de `visibleFields`.
+  const canContinue = percent === 100 && branchIsValid && !confirming && !validating;
 
   const setFieldValue = (fieldKey: string, value: string) => {
     setValues((prev) => ({ ...prev, [fieldKey]: value.length > 0 ? value : null }));
@@ -230,21 +241,40 @@ export function ReviewModal(props: {
     );
   }
 
+  const branchField = props.fields.find((f) => f.field_key === RAMA_BASE_KEY) ?? null;
+
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle>Revisión del caso de negocio</DialogTitle>
           <DialogDescription>
-            {percent}% completo ({visibleFields.length} campos). Lo que el mapeo no pudo completar queda vacío — nunca
-            se inventa contenido.
+            {percent}% completo ({descriptiveFields.length} campos). Lo que el mapeo no pudo completar queda vacío —
+            nunca se inventa contenido.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="max-h-[55vh] space-y-4 overflow-y-auto pr-1 text-sm">
-          {visibleFields.map((field) => (
-            <FieldEditor key={field.field_key} field={field} value={values[field.field_key] ?? null} onChange={setFieldValue} />
-          ))}
+        <div className="max-h-[55vh] space-y-5 overflow-y-auto pr-1 text-sm">
+          <div className="space-y-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Caso de negocio</h3>
+            {descriptiveFields.map((field) => (
+              <FieldEditor key={field.field_key} field={field} value={values[field.field_key] ?? null} onChange={setFieldValue} />
+            ))}
+          </div>
+
+          <div className="space-y-4 rounded-md border border-zinc-200 bg-zinc-50 p-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Ejecución</h3>
+            <div className="space-y-1">
+              <label className="font-medium text-zinc-800">Repositorio</label>
+              <p className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-600">
+                {props.repositoryFullName ?? "Sin configurar"}
+              </p>
+            </div>
+            {branchField ? (
+              <FieldEditor field={branchField} value={values[RAMA_BASE_KEY] ?? null} onChange={setFieldValue} />
+            ) : null}
+          </div>
+
           {error ? <p className="text-sm text-rose-700">{error}</p> : null}
         </div>
 

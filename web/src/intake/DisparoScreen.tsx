@@ -116,6 +116,7 @@ export function DisparoScreen() {
         open={reviewOpen}
         onOpenChange={setReviewOpen}
         projectId={projectId}
+        repositoryFullName={project.data?.project.repository?.fullName ?? null}
         fields={fields}
         initialValues={values}
         onConfirmed={() => {

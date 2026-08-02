@@ -171,10 +171,12 @@ export async function confirmIntakeForProject(params: {
   const pipelineDefinition = await ensurePipelineDefinition(pipelineSpec);
   const runId = randomUUID();
 
-  // Sección B.9: repositorio nunca se persiste para casos nuevos, se descarta explícitamente aunque
-  // el cliente lo mande.
-  const { repositorio: _ignoredRepositorio, ...businessCaseWithoutRepo } = params.businessCase;
-  const businessCase: BusinessCaseValues = { ...businessCaseWithoutRepo, rama_base_trabajo: ramaBase };
+  // FEATURE-043, sección 5.1/5.5: `repositorio` y `rama_base_trabajo` son configuración de
+  // ejecución, no descripción del caso de negocio -- nunca se persisten dentro de `business_case`.
+  // `repositorio` ya no llega en la práctica (retirado de intake_field_definitions, migración
+  // 0019), pero se sigue descartando defensivamente por si un cliente viejo lo manda igual.
+  const { repositorio: _ignoredRepositorio, rama_base_trabajo: _ignoredRamaBase, ...businessCase } =
+    params.businessCase;
 
   const run = await createRunPendingStart({
     id: runId,
@@ -182,9 +184,14 @@ export async function confirmIntakeForProject(params: {
     ownerId: params.userId,
     projectId: project.id,
     businessCase,
+    baseBranchName: ramaBase,
   });
 
-  await recordRunEvent(run.id, "intake_confirmed", { businessCase, projectId: project.id });
+  await recordRunEvent(run.id, "intake_confirmed", {
+    businessCase,
+    baseBranchName: ramaBase,
+    projectId: project.id,
+  });
   return {
     kind: "confirmed",
     run,
@@ -288,8 +295,11 @@ export async function startPendingRun(params: { runId: string; userId: string })
   const firstPhase = pipelineSpec.definition.phases[0].agentRole;
 
   const businessCase = isBusinessCaseValues(run.business_case) ? run.business_case : {};
-  // FEATURE-017, Regla 4: Rama Base de Trabajo tiene default "main" si el usuario no indica nada.
-  const ramaBase = businessCase.rama_base_trabajo?.trim() || "main";
+  // FEATURE-043, sección 5.4/5.6: resolver central de rama -- prioriza la ubicación persistente
+  // (`run.base_branch_name`, casos nuevos desde esta Feature) sobre el valor legacy dentro de
+  // `business_case` (runs creados antes de esta Feature), con default "main" si ninguno la tiene
+  // (FEATURE-017, Regla 4).
+  const ramaBase = run.base_branch_name?.trim() || businessCase.rama_base_trabajo?.trim() || "main";
 
   if (!run.project_id) {
     throw new Error(`El run ${run.id} no tiene project_id persistido.`);

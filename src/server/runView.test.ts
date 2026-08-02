@@ -16,6 +16,7 @@ const baseRun: RunRow = {
   root_run_id: "11111111-1111-1111-1111-111111111111",
   active_feature_id: null,
   business_case: null,
+  base_branch_name: null,
   created_at: "2026-07-20T10:00:00.000Z",
   updated_at: "2026-07-20T10:00:00.000Z",
 };

@@ -27,6 +27,13 @@ export interface RunRow {
   root_run_id: string | null;
   active_feature_id: string | null;
   business_case: unknown;
+  /**
+   * FEATURE-043, sección 5.8: rama base de trabajo solicitada/confirmada para el caso -- distinta
+   * de `branch_name` (rama efectiva del worktree/checkout). NULL para runs históricos (sin
+   * backfill) o para runs creados fuera del flujo de proyecto (`run:start --case`, que sigue
+   * resolviendo la rama desde el JSON crudo del caso).
+   */
+  base_branch_name: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -218,15 +225,27 @@ export async function createRunPendingStart(params: {
   ownerId: string;
   projectId: string;
   businessCase: unknown;
+  /** FEATURE-043, sección 7.4: rama base confirmada, persistida fuera de `business_case`. */
+  baseBranchName?: string | null;
   client?: PoolClient;
 }): Promise<RunRow> {
   const db = params.client ?? pool;
   // FEATURE-020, Regla 1: siempre raíz (createRunPendingStart no tiene originated_from_run_id).
   const result = await db.query<RunRow>(
-    `insert into runs (id, pipeline_definition_id, owner_id, project_id, status, business_case, root_run_id)
-     values ($1, $2, $3, $4, 'sin_iniciar', $5, $1)
+    `insert into runs (
+       id, pipeline_definition_id, owner_id, project_id, status, business_case, root_run_id,
+       base_branch_name
+     )
+     values ($1, $2, $3, $4, 'sin_iniciar', $5, $1, $6)
      returning *`,
-    [params.id, params.pipelineDefinitionId, params.ownerId, params.projectId, params.businessCase]
+    [
+      params.id,
+      params.pipelineDefinitionId,
+      params.ownerId,
+      params.projectId,
+      params.businessCase,
+      params.baseBranchName ?? null,
+    ]
   );
   return result.rows[0];
 }
@@ -254,20 +273,37 @@ export async function promoteRunToRunning(params: {
   return result.rows[0] ?? null;
 }
 
+export interface RootRunExecutionContext {
+  businessCase: unknown;
+  /** FEATURE-043, sección 7.6: rama base persistida del run raíz -- null si no tiene o es legacy. */
+  baseBranchName: string | null;
+}
+
 /**
- * FEATURE-020, sección 6.1: resuelve el `business_case` original de cualquier run de la cadena vía
- * su `root_run_id` (una sola consulta indexada, sin recursión ni CTE). Devuelve `null` para runs
- * preexistentes sin `root_run_id` (degradación aceptada, Regla 13) o si el root no tiene
- * `business_case` persistido.
+ * FEATURE-020, sección 6.1 / FEATURE-043, sección 7.6: resuelve el `business_case` y la
+ * `base_branch_name` del run raíz de cualquier run de la cadena vía su `root_run_id` (una sola
+ * consulta indexada, sin recursión ni CTE). Reemplaza la consulta que antes hacía
+ * `getBusinessCaseForRun` en solitario -- evita mantener dos lecturas independientes sobre el mismo
+ * run raíz (Riesgo 9 del diseño de FEATURE-043). Devuelve valores `null` para runs preexistentes
+ * sin `root_run_id` (degradación aceptada, Regla 13) o si el root no tiene los datos persistidos.
  */
-export async function getBusinessCaseForRun(runId: string): Promise<unknown> {
-  const result = await pool.query<{ business_case: unknown }>(
-    `select r.business_case
+export async function getRootRunExecutionContext(runId: string, client?: PoolClient): Promise<RootRunExecutionContext> {
+  const db = client ?? pool;
+  const result = await db.query<{ business_case: unknown; base_branch_name: string | null }>(
+    `select r.business_case, r.base_branch_name
      from runs r
      where r.id = (select root_run_id from runs where id = $1)`,
     [runId]
   );
-  return result.rows[0]?.business_case ?? null;
+  return {
+    businessCase: result.rows[0]?.business_case ?? null,
+    baseBranchName: result.rows[0]?.base_branch_name ?? null,
+  };
+}
+
+/** Compatibilidad: mismo contrato que antes de FEATURE-043, ahora delegando en la consulta única. */
+export async function getBusinessCaseForRun(runId: string): Promise<unknown> {
+  return (await getRootRunExecutionContext(runId)).businessCase;
 }
 
 /** FEATURE-017: chequeo pre-fase de cancelación externa — ver runStart.ts, executePipelineRun. */
