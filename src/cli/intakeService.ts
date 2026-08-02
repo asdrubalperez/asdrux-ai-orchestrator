@@ -95,6 +95,38 @@ export async function listMyCases(userId: string): Promise<RunRow[]> {
   return listRunsForUser(userId);
 }
 
+export type ValidateProjectCaseBranchResult =
+  | { kind: "not_found" }
+  | { kind: "project_not_configured" }
+  | { kind: "validated"; result: Awaited<ReturnType<typeof validateForCaseConfirmation>> };
+
+/**
+ * FEATURE-042, sección D.4/D.5: validación preventiva como paso propio, separado de la creación
+ * -- el usuario tiene que poder ver "esta rama no existe, se va a crear desde main" y decidir
+ * (confirmar o volver a editar) ANTES de que el caso quede persistido, no enterarse después de un
+ * hecho consumado. Hallazgo real de prueba manual: la versión anterior combinaba validar y crear
+ * en la misma llamada, así que no había nada que "cancelar" -- el caso ya existía.
+ */
+export async function validateProjectCaseBranch(params: {
+  userId: string;
+  projectId: string;
+  branchName: string;
+}): Promise<ValidateProjectCaseBranchResult> {
+  const project = await getProjectByIdForUser(params.projectId, params.userId);
+  if (!project) return { kind: "not_found" };
+  if (!project.repository_full_name || !project.repository_clone_url) {
+    return { kind: "project_not_configured" };
+  }
+
+  const result = await validateForCaseConfirmation({
+    userId: params.userId,
+    repositoryFullName: project.repository_full_name,
+    repositoryCloneUrl: project.repository_clone_url,
+    branchName: params.branchName,
+  });
+  return { kind: "validated", result };
+}
+
 export type ConfirmIntakeForProjectResult =
   | { kind: "confirmed"; run: RunRow; branchWarning: string | null }
   | { kind: "not_found" }

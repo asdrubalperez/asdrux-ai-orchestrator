@@ -40,11 +40,28 @@ function suggestBranchName(seed: string): string {
   return `feature/${slug || "caso"}`;
 }
 
+// Prefiere "vision" (texto descriptivo) como semilla del nombre de rama; si no está presente o
+// vacío, cae al valor no vacío más largo entre los demás campos -- evita sugerencias pobres como
+// "feature/nueva" que salían de tomar el primer campo por field_order (típicamente tipo_solucion,
+// un código corto, no una descripción).
+function pickBranchSeed(values: BusinessCaseValues, fields: IntakeFieldDefinition[]): string {
+  const candidates = fields.filter(
+    (f) => f.field_key !== RAMA_BASE_KEY && f.field_key !== REPOSITORIO_KEY && f.field_key !== TIPO_SOLUCION_KEY
+  );
+  const visionValue = values["vision"];
+  if (typeof visionValue === "string" && visionValue.trim().length > 0) return visionValue;
+
+  let best = "";
+  for (const field of candidates) {
+    const value = values[field.field_key];
+    if (typeof value === "string" && value.trim().length > best.length) best = value;
+  }
+  return best;
+}
+
 function withDefaults(values: BusinessCaseValues, fields: IntakeFieldDefinition[]): BusinessCaseValues {
   if (values[RAMA_BASE_KEY]) return values;
-  const seedField = fields.find((f) => f.field_key !== RAMA_BASE_KEY && f.field_key !== REPOSITORIO_KEY);
-  const seed = seedField ? (values[seedField.field_key] ?? "") : "";
-  return { ...values, [RAMA_BASE_KEY]: suggestBranchName(seed) };
+  return { ...values, [RAMA_BASE_KEY]: suggestBranchName(pickBranchSeed(values, fields)) };
 }
 
 function completenessPercent(values: BusinessCaseValues, fields: IntakeFieldDefinition[]): number {
@@ -68,24 +85,32 @@ export function ReviewModal(props: {
   const visibleFields = props.fields.filter((f) => f.field_key !== REPOSITORIO_KEY);
   const [values, setValues] = React.useState<BusinessCaseValues>(() => withDefaults(props.initialValues, visibleFields));
   const [confirming, setConfirming] = React.useState(false);
+  const [validating, setValidating] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // Sección D.4/E.7 (UX): la creación de rama vía "creatable" es un warning irreversible una vez
+  // aceptado -- se separa la validación (sin efectos) de la confirmación (crea el caso) para que
+  // el usuario pueda volver a editar en vez de quedar forzado a "aceptar".
+  const [branchConfirmation, setBranchConfirmation] = React.useState<{ branchName: string; warning: string } | null>(
+    null
+  );
 
   React.useEffect(() => {
     if (props.open) {
       setValues(withDefaults(props.initialValues, visibleFields));
       setError(null);
+      setBranchConfirmation(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.open, props.initialValues]);
 
   const percent = completenessPercent(values, visibleFields);
-  const canContinue = percent === 100 && !confirming;
+  const canContinue = percent === 100 && !confirming && !validating;
 
   const setFieldValue = (fieldKey: string, value: string) => {
     setValues((prev) => ({ ...prev, [fieldKey]: value.length > 0 ? value : null }));
   };
 
-  const confirmar = async () => {
+  const crearCaso = async () => {
     setConfirming(true);
     setError(null);
     try {
@@ -98,6 +123,7 @@ export function ReviewModal(props: {
       if (response.status === 422) {
         const body = (await response.json()) as { message?: string };
         setError(body.message ?? "La rama indicada no se puede usar en este repositorio.");
+        setBranchConfirmation(null);
         return;
       }
       if (response.status === 409) {
@@ -107,6 +133,7 @@ export function ReviewModal(props: {
             ? "Este proyecto todavía no tiene repositorio configurado."
             : (body.message ?? "No se pudo confirmar el caso.")
         );
+        setBranchConfirmation(null);
         return;
       }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -119,6 +146,89 @@ export function ReviewModal(props: {
       setConfirming(false);
     }
   };
+
+  const continuar = async () => {
+    setValidating(true);
+    setError(null);
+    try {
+      const branchName = values[RAMA_BASE_KEY] ?? "";
+      const response = await fetch(
+        apiUrl(`/projects/${encodeURIComponent(props.projectId)}/cases/validate-branch`),
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ branchName }),
+        }
+      );
+      if (response.status === 404) {
+        setError("El proyecto ya no existe.");
+        return;
+      }
+      if (response.status === 409) {
+        const body = (await response.json()) as { error?: string };
+        setError(
+          body.error === "project_not_configured"
+            ? "Este proyecto todavía no tiene repositorio configurado."
+            : "No se pudo validar la rama."
+        );
+        return;
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const body = (await response.json()) as {
+        validation:
+          | { status: "existing"; branchName: string }
+          | { status: "creatable"; branchName: string; sourceBranch: "main"; warning: string }
+          | {
+              status:
+                | "git_connection_required"
+                | "git_connection_invalid"
+                | "repository_not_accessible"
+                | "repository_read_only"
+                | "main_missing"
+                | "branch_invalid"
+                | "temporary_failure";
+              message: string;
+            };
+      };
+      if (body.validation.status === "existing") {
+        await crearCaso();
+        return;
+      }
+      if (body.validation.status === "creatable") {
+        setBranchConfirmation({ branchName: body.validation.branchName, warning: body.validation.warning });
+        return;
+      }
+      setError(body.validation.message ?? "No se pudo validar la rama.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo validar la rama.");
+    } finally {
+      setValidating(false);
+    }
+  };
+
+  if (branchConfirmation) {
+    return (
+      <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Confirmar creación de rama</DialogTitle>
+            <DialogDescription>{branchConfirmation.warning}</DialogDescription>
+          </DialogHeader>
+          {error ? <p className="text-sm text-rose-700">{error}</p> : null}
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="outline" disabled={confirming} onClick={() => setBranchConfirmation(null)}>
+              Volver a editar
+            </Button>
+            <Button disabled={confirming} onClick={() => void crearCaso()}>
+              {confirming ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Confirmar y crear caso
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
@@ -139,8 +249,8 @@ export function ReviewModal(props: {
         </div>
 
         <DialogFooter>
-          <Button disabled={!canContinue} onClick={() => void confirmar()}>
-            {confirming ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          <Button disabled={!canContinue} onClick={() => void continuar()}>
+            {validating ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Continuar
           </Button>
         </DialogFooter>

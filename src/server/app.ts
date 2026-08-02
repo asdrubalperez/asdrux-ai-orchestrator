@@ -41,6 +41,7 @@ import {
   listMyCases,
   mapIntakeText,
   startPendingRun,
+  validateProjectCaseBranch,
 } from "../cli/intakeService.js";
 import {
   createProjectForUser,
@@ -460,6 +461,33 @@ export function createApp(config: ServerConfig): express.Express {
         return;
       }
       res.json({ runs: result.runs });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Sección D.4/D.5: validación preventiva como paso propio, sin crear nada -- el frontend la usa
+  // antes de confirmar, para poder mostrar "esta rama no existe, se creará desde main" con opción
+  // real de volver a editar, no solo enterarse después de que el caso ya se creó.
+  app.post("/projects/:projectId/cases/validate-branch", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const projectId = stringParam(req.params.projectId);
+      const branchName = typeof req.body?.branchName === "string" ? req.body.branchName : null;
+      if (!projectId || !branchName) {
+        res.status(400).json({ error: "invalid_validate_branch_body" });
+        return;
+      }
+      const outcome = await validateProjectCaseBranch({ userId: req.user?.id ?? "", projectId, branchName });
+      if (outcome.kind === "not_found") {
+        res.status(404).json({ error: "project_not_found" });
+        return;
+      }
+      if (outcome.kind === "project_not_configured") {
+        res.status(409).json({ error: "project_not_configured" });
+        return;
+      }
+      res.json({ validation: outcome.result });
     } catch (err) {
       next(err);
     }
