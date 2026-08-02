@@ -147,6 +147,7 @@ function RoleOverride(props: {
 }) {
   const [editing, setEditing] = React.useState(false);
   const [clearing, setClearing] = React.useState(false);
+  const [clearError, setClearError] = React.useState<string | null>(null);
 
   if (!editing && !props.override) {
     return (
@@ -178,8 +179,11 @@ function RoleOverride(props: {
             disabled={clearing}
             onClick={async () => {
               setClearing(true);
+              setClearError(null);
               try {
                 await props.onClear();
+              } catch (err) {
+                setClearError(err instanceof Error ? err.message : "No se pudo quitar el override.");
               } finally {
                 setClearing(false);
               }
@@ -194,6 +198,7 @@ function RoleOverride(props: {
           </Button>
         )}
       </div>
+      {clearError ? <p className="text-sm text-rose-700">{clearError}</p> : null}
       <AgentConfigForm value={props.override ?? props.effectiveFallback} catalog={props.catalog} onSave={props.onSave} />
     </div>
   );

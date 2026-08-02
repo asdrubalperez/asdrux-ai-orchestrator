@@ -869,8 +869,11 @@ function corsMiddleware(allowedOrigin: string): express.RequestHandler {
       // FEATURE-042 agregó PATCH (renombrar proyecto) y PUT (configurar repositorio) -- sin
       // esto en la lista, el preflight del browser bloquea el pedido antes de mandarlo
       // ("Failed to fetch", nunca llega a loguearse en el servidor). Hallazgo real de prueba
-      // manual: PUT /projects/:id/repository.
-      res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,OPTIONS");
+      // manual: PUT /projects/:id/repository. FEATURE-025-Parte-1 agregó DELETE
+      // (/agent-config/:role, /agent-credentials/:provider) -- mismo hallazgo real: "Quitar
+      // override"/"Eliminar credencial" no hacían nada, sin ningún error visible (el preflight
+      // bloqueaba el DELETE antes de que llegara al servidor).
+      res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", "Content-Type,Last-Event-ID");
       res.status(204).end();
       return;
