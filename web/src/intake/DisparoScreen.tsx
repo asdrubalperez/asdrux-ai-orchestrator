@@ -118,14 +118,14 @@ export function DisparoScreen() {
         projectId={projectId}
         fields={fields}
         initialValues={values}
-        onConfirmed={(_run, branchWarning) => {
+        onConfirmed={() => {
+          // El warning de creación de rama ya se mostró y confirmó dentro del propio
+          // ReviewModal (ver branchConfirmation) -- repetirlo acá con un alert() nativo
+          // era redundante y quedaba encima de un flujo que ya terminó.
           setInputText("");
           setFields([]);
           setValues({});
           void queryClient.invalidateQueries({ queryKey: ["projects", projectId, "cases"] });
-          if (branchWarning) {
-            window.alert(branchWarning);
-          }
           navigate(`/projects/${projectId}/cases`);
         }}
       />
