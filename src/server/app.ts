@@ -690,7 +690,11 @@ function corsMiddleware(allowedOrigin: string): express.RequestHandler {
         res.status(403).end();
         return;
       }
-      res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+      // FEATURE-042 agregó PATCH (renombrar proyecto) y PUT (configurar repositorio) -- sin
+      // esto en la lista, el preflight del browser bloquea el pedido antes de mandarlo
+      // ("Failed to fetch", nunca llega a loguearse en el servidor). Hallazgo real de prueba
+      // manual: PUT /projects/:id/repository.
+      res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", "Content-Type,Last-Event-ID");
       res.status(204).end();
       return;
