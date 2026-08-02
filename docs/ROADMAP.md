@@ -204,10 +204,10 @@
   gana un parámetro `gitAuth` opcional en `cloneRunRepository`/`pushRunBranch` para autenticar con
   la conexión del owner en vez de la clave SSH compartida del host, y pasa a un entorno de proceso
   por allowlist (reutiliza el patrón de `runtimeEnvironment()` de `isolated-tools`) en vez de
-  heredar `process.env` completo. Incremento deliberadamente parcial: no incluye UI de conexión,
+  heredar `process.env` completo. Incremento deliberadamente parcial: no incluía UI de conexión,
   listado/selección de repositorio en el intake, validación o creación de ramas, ni cambio de
-  cuenta con análisis de impacto — eso queda para FEATURE-042, que también absorbe el cableado
-  real de `gitAuth` en el arranque/push de runs (parcialmente adelantado, ver FEATURE-042).
+  cuenta con análisis de impacto — completado por FEATURE-042 (✅ Ejecutado, ver esa entrada), que
+  también absorbió el cableado real de `gitAuth` en el arranque/push de runs.
   **Validación E2E real (2026-08-01/02, infraestructura productiva real:
   `aio.asdru.space`/`api.aio.asdru.space`, Caddy con HTTPS automático, `systemd`)**: flujo OAuth
   completo probado con la cuenta real del owner — `GET /auth/github/status` devolvió
@@ -217,6 +217,23 @@
   verificación contra documentación oficial de GitHub para el ciclo de vida del token) antes de
   aprobar. Diseño completo en
   `docs/features/FEATURE-026-Autenticación-Github-por-Usuario-para-Operaciones-Git.md`.
+- FEATURE-042 — Creación, selección y configuración de proyectos ("Mis proyectos"). Prioridad P1.
+  **Absorbe el alcance completo de FEATURE-030** (retirada como Feature independiente). Gate de
+  entrada real: el usuario selecciona o crea un proyecto antes de que el intake se habilite; el
+  repositorio es configuración canónica del proyecto (campos directos en `projects`, sin entidad
+  `Repository` separada) con gate de validación/creación de rama (Git Data API de GitHub, sin clon
+  local) antes de confirmar un caso de negocio. Backend + frontend completos (React Router, "Mis
+  proyectos", alta/edición de proyecto, configuración de repositorio, casos por proyecto).
+  **Validación E2E real (2026-08-01/02, Vercel + VPS productivos)**: el owner probó el flujo
+  completo con su cuenta real de GitHub — conexión OAuth, listado y selección de repositorio,
+  creación de caso con rama nueva (gate de confirmación "Volver a editar"/"Confirmar y crear caso")
+  y con rama existente, y creación de un segundo proyecto sobre el mismo repositorio. Cinco fallos
+  reales encontrados y corregidos durante la propia validación (CORS no reflejaba previews de
+  Vercel ni permitía `PATCH`/`PUT`, el botón "Nuevo caso" no respetaba el gate de repositorio
+  configurado, el callback de OAuth devolvía JSON crudo en vez de redirigir, la sugerencia de rama
+  usaba el primer campo del intake en vez de uno descriptivo, y un `alert()` nativo duplicaba el
+  aviso de creación de rama ya mostrado en el nuevo paso de confirmación). Diseño completo en
+  `docs/features/FEATURE-042-propuesta-de-alcance-revisado-absorbe-FEATURE-030.md`.
 
 **🟡 Confirmado**
 - FEATURE-025 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
@@ -245,21 +262,6 @@
   de registro real — el único mecanismo es `seed:user` (comando CLI de administración manual, sin
   UI). La tabla `users` no tiene columnas de perfil (correo, nombre, apellido), solo `id`, `handle`,
   `password_hash`, `created_at`. Prioridad por definir.
-- FEATURE-042 — Creación, selección y configuración de proyectos ("Mis proyectos"). Prioridad P1.
-  **Absorbe el alcance completo de FEATURE-030** (retirada como Feature independiente, ver nota en
-  su antigua entrada de detalle) — el gate de entrada explícito que exige seleccionar o crear un
-  proyecto antes de habilitar el intake elimina de raíz la necesidad de que el sistema "adivine" un
-  proyecto cuando no hay `projectId` explícito, que era el problema original de FEATURE-030. Hoy no
-  existe ningún flujo de creación de proyectos — el único `insert into projects` en todo el código
-  es un backfill de migración (`migrations/0003_users_projects_phase_b.sql`). El repositorio pasa a
-  ser configuración canónica del proyecto (campos directos en `projects`, sin entidad `Repository`
-  separada — FEATURE-026 ya expone la identidad real bajo demanda vía `GET
-  /auth/github/repositories`), no un campo del intake. El cableado real con FEATURE-026
-  (`createGitProcessAuth` en los tres call-sites de clonado/push de runs) ya está implementado
-  (rama `feature/042-cableado-github-auth-runs`, sin mergear) — el resto (modelo de datos
-  definitivo, endpoints de proyecto, decisión de routing en `web/`, validación/creación de ramas, UI)
-  sigue en diseño con ARIA. Propuesta de alcance completa en
-  `docs/features/FEATURE-042-propuesta-de-alcance-revisado-absorbe-FEATURE-030.md`.
 - FEATURE-043 — Separar el caso de negocio del repositorio/rama en el formulario de intake. Hoy los
   12 campos de `intake_field_definitions` (10 descriptivos del caso de negocio + `repositorio` +
   `rama_base_trabajo`) viven en la misma tabla plana, mismo `field_order` secuencial, renderizados
@@ -292,9 +294,10 @@
 
 ## Priorización — Matriz Esfuerzo × Impacto
 
-Ponderación de los ítems 🟡 Confirmado (más FEATURE-026/028/029/032/036/037/038, ya ✅ Ejecutado,
-dejados aquí como referencia histórica de la corrida de priorización). FEATURE-030 fue retirada de
-esta matriz — su alcance quedó absorbido por FEATURE-042 (ver detalle en la sección de abajo).
+Ponderación de los ítems 🟡 Confirmado (más FEATURE-026/028/029/032/036/037/038/042, ya ✅
+Ejecutado, dejados aquí como referencia histórica de la corrida de priorización). FEATURE-030 fue
+retirada de esta matriz — su alcance quedó absorbido por FEATURE-042 (ver detalle en la sección de
+abajo).
 Ordenada por Ponderación (Alta → Media → Baja) y, dentro de cada nivel, por Impacto y luego por
 Esfuerzo.
 
@@ -309,7 +312,7 @@ Esfuerzo.
 | FEATURE-040 — Gates de merge/cierre de release sin camino de rechazo con feedback correctivo (nuevo) | Medio | Medio | Alta |
 | FEATURE-027 — Continuidad durable Developer↔QA (P0) | Alto | Alto | Alta |
 | FEATURE-041 — Creación y gestión de cuentas de usuario (self-service) (nuevo) | Alto | Alto | Alta |
-| FEATURE-042 — Creación, selección y configuración de proyectos (P1, absorbe FEATURE-030) | Alto | Alto | Alta |
+| FEATURE-042 — Creación, selección y configuración de proyectos (✅ Ejecutado, absorbe FEATURE-030) | Alto | Alto | Alta |
 | FEATURE-026 — Autenticación GitHub por usuario (✅ Ejecutado) | Alto | Medio | Alta |
 | FEATURE-033 — Lifecycle 01-PROJECT-BRIEF-TEMPLATE | Alto | Bajo | Media |
 | FEATURE-034 — Lifecycle 02-ARCHITECTURE-TEMPLATE | Alto | Bajo | Media |
@@ -804,6 +807,64 @@ OAuth App real, se completó el flujo de conexión con la cuenta real del owner,
 "scopes":["repo"],"connectedAt":"2026-08-01T23:09:30.490Z"}` — confirmación directa de que el
 intercambio de código OAuth, el cifrado del token y su persistencia funcionan de punta a punta
 contra la API real de GitHub, no solo en el diseño.
+
+### ✅ FEATURE-042 — Creación, selección y configuración de proyectos ("Mis proyectos")
+
+**Estado:** Implementada y validada E2E en producción real (2026-08-02), mergeada a `main`.
+Prioridad P1. **Absorbe el alcance completo de FEATURE-030** (retirada como Feature independiente,
+ver su entrada de detalle arriba) — el gate de entrada explícito que exige seleccionar o crear un
+proyecto antes de habilitar el intake elimina de raíz la necesidad de que el sistema "adivine" un
+proyecto cuando no hay `projectId` explícito, que era el problema original de FEATURE-030. Diseño
+original de ARIA (AI Product Architect), con varias rondas de revisión técnica contra el código
+real antes de aprobar. Propuesta de alcance completa en
+`docs/features/FEATURE-042-propuesta-de-alcance-revisado-absorbe-FEATURE-030.md`.
+
+**Qué se implementó — backend**: el repositorio pasa a ser configuración canónica del proyecto
+(campos `repository_provider/external_id/owner/name/full_name/clone_url/visibility` directos en
+`projects`, sin entidad `Repository` separada — FEATURE-026 ya expone la identidad real bajo
+demanda vía `GET /auth/github/repositories`). `repo_path` se mantiene nullable en vez de eliminarse
+(desviación deliberada del diseño original: `run:start --case` del CLI todavía lo usa como ruta de
+filesystem real). Endpoints REST completos (`GET/POST /projects`, `GET/PATCH /projects/:id`,
+`PUT /projects/:id/repository`, `POST /projects/:id/select`, `GET/POST /projects/:id/cases`, más
+`POST /projects/:id/cases/validate-branch` agregado durante la validación manual). Gate Git
+preventivo/autoritativo (`src/auth/branchValidationService.ts`, sección D del diseño): valida y, si
+hace falta, crea la rama de trabajo directamente contra la Git Data API de GitHub — sin clon local
+previo —, reutilizando el mismo núcleo (`validateBranch`) tanto para la validación preventiva al
+confirmar el caso como para la autoritativa (repetida sin atajos) al iniciar el run.
+
+**Qué se implementó — frontend**: se introdujo React Router (`BrowserRouter`, rutas anidadas), gate
+de login y de selección de proyecto antes de habilitar cualquier pantalla de intake, "Mis
+proyectos" (listado, alta, apertura), configuración de repositorio (conexión GitHub, listado y
+selección de repo accesible, desconexión), y casos de negocio scoped por proyecto. El flujo de
+nuevo caso incluye un paso de confirmación real cuando la rama sugerida no existe todavía
+("Volver a editar" / "Confirmar y crear caso"), en vez de un `window.confirm` sin salida.
+
+**Validación E2E real (2026-08-01/02, infraestructura productiva real: `aio.asdru.space` en
+Vercel, `api.aio.asdru.space` en el VPS detrás de Caddy con HTTPS automático, `systemd`)**: el owner
+probó el flujo completo en el navegador con su cuenta real de GitHub — login, "Mis proyectos",
+conexión OAuth, listado y selección de repositorio real (`asdrubalperez/pruebas-ia`), creación de
+un caso de negocio con una rama que no existía (gate mostró el aviso de creación, el owner confirmó
+y el caso se creó), creación de un caso con una rama ya existente, y alta de un segundo proyecto
+apuntando al mismo repositorio. Cinco fallos reales encontrados por el owner durante la propia
+prueba y corregidos en el momento:
+1. CORS: `Access-Control-Allow-Origin` fijo a un solo dominio de producción, no reflejaba previews
+   de Vercel — "Failed to fetch" al hacer login desde un preview. Fix: `isAllowedWebOrigin()` con
+   regex acotado al patrón de previews de este proyecto específico, `corsMiddleware` reflejando el
+   origen real de la request.
+2. El botón "Nuevo caso" quedaba habilitado aunque el proyecto no tuviera repositorio configurado
+   (el gate solo estaba en la navegación del header, no en el botón propio de la lista ni a nivel
+   de ruta). Fix: gate agregado en ambos lugares.
+3. El callback de `/auth/github/callback` devolvía el JSON crudo en el navegador en vez de
+   redirigir de vuelta al frontend. Fix: migración `0017` (`oauth_states.frontend_origin`) +
+   `res.redirect()` de vuelta al origen que inició el flujo (producción o preview de Vercel).
+4. `Access-Control-Allow-Methods` no incluía `PATCH`/`PUT` — "Failed to fetch" al seleccionar
+   repositorio. Fix: métodos agregados, verificado con preflight `OPTIONS` real.
+5. La sugerencia automática de nombre de rama tomaba el primer campo del intake por `field_order`
+   (típicamente `tipo_solucion`, un código corto como "nueva"), dando nombres pobres
+   (`feature/nueva`). Fix: prioriza el campo "visión" (descriptivo); si falta, el valor no vacío
+   más largo entre los demás campos. Además, se encontró y quitó un `window.alert()` nativo
+   redundante que repetía el aviso de creación de rama después de que el nuevo paso de confirmación
+   ya lo había mostrado y confirmado.
 
 ### 🟡 FEATURE-027 — Continuidad durable del loop Developer ↔ QA
 
