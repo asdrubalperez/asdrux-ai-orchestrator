@@ -5,9 +5,56 @@
 * **Name:** Separar repositorio y rama del caso de negocio
 * **Type:** Refactor funcional / evolución del modelo de dominio
 * **Owner:** Asdrubal Pérez
-* **Status:** Diseño corregido — pendiente de validación técnica y aprobación
+* **Status:** Implementada y validada E2E en producción real (2026-08-02)
 * **Priority:** Baja
-* **Approval Gate:** Cerrado
+* **Approval Gate:** Cerrado — aprobado por el owner, implementación completa
+
+---
+
+## Resultado de la implementación (2026-08-02)
+
+Implementada en la rama `feature/043-separar-configuracion-ejecucion` (commits `c69a0bc`, `bf0634a`)
+sobre el diseño aprobado más arriba. Backend: `migrations/0018` (`runs.base_branch_name`, nullable,
+separada de `business_case` y de `branch_name`), `migrations/0019` (elimina la fila `repositorio` de
+`intake_field_definitions`), `getRootRunExecutionContext` (resuelve `business_case` + rama del run
+raíz en una sola consulta), resolver de precedencia en `confirmIntakeForProject`/`startPendingRun`
+(columna nueva -> legacy en `business_case` -> default), y en `persistReleasePlanIfDeclared` con un
+tercer nivel adicional no previsto en el diseño original (ver hallazgo abajo). Frontend:
+`ReviewModal.tsx` separado en secciones "Caso de negocio"/"Ejecución", repositorio del proyecto
+solo lectura, completitud recalculada solo sobre campos descriptivos.
+
+**Hallazgo real durante la implementación, no cubierto por el diseño**: el comando CLI
+`run:start --case` (`createRun`) nunca persiste `business_case` en la base de datos — solo lo pasa
+en memoria como `initialContext`. La sección 7.7 del diseño recomendaba resolver la rama del primer
+Release Plan consultando directamente la DB (`getRootRunExecutionContext`); reemplazar el fallback
+en memoria por esa consulta sin más hubiera roto ese camino del CLI en silencio. Se resolvió con una
+cadena de precedencia de tres niveles: columna nueva -> `business_case` del run raíz ya persistido
+en DB (runs legacy del flujo web) -> `initialContext` en memoria (camino exclusivo del CLI).
+
+**Segundo hallazgo, encontrado en la validación manual del owner, no anticipado por el diseño**: la
+columna `description` de `rama_base_trabajo` en `intake_field_definitions` (desde
+`migrations/0009`, sin tocar desde su creación) decía literalmente `'... default "main" si no se
+indica'` — ese texto se inyecta tal cual en el prompt de mapeo (`buildMappingPrompt`), así que el
+modelo cumplía al pie de la letra y devolvía `"main"` en vez de `null` cuando el texto no mencionaba
+ninguna rama. Como la sugerencia automática del frontend solo actúa sobre un campo vacío, esto la
+dejaba sin efecto siempre — la iniciativa central de esta Feature (que la rama nunca sea "main" por
+default silencioso, sino una sugerencia real basada en el contenido del caso) quedaba anulada por un
+texto de configuración que predataba esa sugerencia y nunca se había actualizado. Corregido en
+`migrations/0020` (retira la instrucción de default; la Regla 1 general del prompt — "nunca
+inventes, va en null" — ya cubre este campo como a cualquier otro).
+
+**Validación E2E real (2026-08-02, `aio.asdru.space`/`api.aio.asdru.space`)**: el owner probó el
+flujo completo con un caso real — el modal mostró "10 campos" (la rama ya no cuenta en el
+porcentaje del caso de negocio), la sección "Ejecución" separada con
+`asdrubalperez/pruebas-ia` en solo lectura, y la rama sugerida
+`feature/modulo-interno-de-calculo-de-propinas-para-un-sistema-de-fac` (derivada del contenido real
+del caso, no "main" ni un placeholder genérico). El owner creó el caso y ejecutó el run de punta a
+punta sin errores.
+
+Tests: `tsc --noEmit` limpio en backend y frontend; suite completa 255 pass / 0 fail, incluidos 5
+tests nuevos de las funciones puras del modal (`ReviewModal.test.tsx`) y un test de integración real
+contra Postgres (`repository.test.ts`, con skip si no hay DB local) que valida la persistencia
+separada y la resolución vía run raíz para un run hijo.
 
 ---
 

@@ -234,6 +234,24 @@
   usaba el primer campo del intake en vez de uno descriptivo, y un `alert()` nativo duplicaba el
   aviso de creación de rama ya mostrado en el nuevo paso de confirmación). Diseño completo en
   `docs/features/FEATURE-042-propuesta-de-alcance-revisado-absorbe-FEATURE-030.md`.
+- FEATURE-043 — Separar la configuración de ejecución (repositorio, rama) del caso de negocio en el
+  intake. Prioridad Baja. `repositorio` (campo fantasma desde F042: se seguía pidiendo al mapeo por
+  IA y descartando antes de persistir, sin efecto real) se retiró de `intake_field_definitions`. La
+  rama base pasa a persistirse en `runs.base_branch_name`, separada de `business_case` (JSON
+  descriptivo) y de `branch_name` (rama efectiva del worktree — dos conceptos distintos). El modal
+  de revisión quedó dividido en "Caso de negocio"/"Ejecución", con el repositorio del proyecto en
+  solo lectura. **Validación E2E real (2026-08-02)**: el owner creó un caso y ejecutó el run de
+  punta a punta; la rama sugerida se derivó del contenido real del caso
+  (`feature/modulo-interno-de-calculo-de-propinas-...`), no de un default fijo. Dos hallazgos reales
+  no cubiertos por el diseño original, encontrados y corregidos durante la implementación/validación:
+  (1) el CLI `run:start --case` nunca persiste `business_case` en la DB — requirió una cadena de
+  precedencia de tres niveles en vez de reemplazar directamente el fallback en memoria; (2) la
+  descripción del campo `rama_base_trabajo` en la DB (desde FEATURE-017, nunca actualizada) le
+  instruía literalmente a la IA "default main si no se indica" — el modelo cumplía al pie de la
+  letra, anulando en la práctica la sugerencia automática basada en contenido que es el propósito
+  central de esta Feature. Diseño completo (Functional Rules, Scope, 10 escenarios de validación,
+  Approval Gate) y resultado de implementación en
+  `docs/features/FEATURE-043-Separar-configuración-de-ejecución-del-caso-de-negocio.md`.
 
 **🟡 Confirmado**
 - FEATURE-025 — Selección de proveedor/modelo/credenciales por rol (promovida de ⚪ Tentativo)
@@ -262,18 +280,6 @@
   de registro real — el único mecanismo es `seed:user` (comando CLI de administración manual, sin
   UI). La tabla `users` no tiene columnas de perfil (correo, nombre, apellido), solo `id`, `handle`,
   `password_hash`, `created_at`. Prioridad por definir.
-- FEATURE-043 — Separar la configuración de ejecución (repositorio, rama) del caso de negocio en el
-  intake. Prioridad Baja. Motivada por un hallazgo concreto post-FEATURE-042: `repositorio` sigue
-  definido en `intake_field_definitions`, se sigue pidiendo en el prompt de mapeo por IA y el
-  modelo lo sigue extrayendo del texto libre, pero desde F042 no tiene ningún efecto — el frontend
-  lo oculta y el backend lo descarta antes de persistir (el repo real siempre sale de
-  `project.repository_clone_url`). `rama_base_trabajo`, en cambio, sí tiene uso real (se extrae, se
-  muestra, se valida contra `branchValidationService`) pero sigue mezclado con los 10 campos
-  descriptivos del caso de negocio en la misma tabla plana y el mismo modal. Diseño completo
-  (Functional Rules, Scope, 10 escenarios de validación, Approval Gate) en
-  `docs/features/FEATURE-043-Separar-configuración-de-ejecución-del-caso-de-negocio.md` — **estado:
-  diseño propuesto, pendiente de aprobación del owner**.
-
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
 - Planning valida la Feature de Functional antes de diseñar el Release Plan — hoy Stage 2 de
@@ -299,7 +305,7 @@
 
 ## Priorización — Matriz Esfuerzo × Impacto
 
-Ponderación de los ítems 🟡 Confirmado (más FEATURE-026/028/029/032/036/037/038/042, ya ✅
+Ponderación de los ítems 🟡 Confirmado (más FEATURE-026/028/029/032/036/037/038/042/043, ya ✅
 Ejecutado, dejados aquí como referencia histórica de la corrida de priorización). FEATURE-030 fue
 retirada de esta matriz — su alcance quedó absorbido por FEATURE-042 (ver detalle en la sección de
 abajo).
@@ -324,7 +330,7 @@ Esfuerzo.
 | FEATURE-035 — Lifecycle 09-RELEASE-PLAN-TEMPLATE | Alto | Bajo | Media |
 | FEATURE-036 — Release activo nominal tras cierre (P1) | Bajo | Medio | Baja |
 | FEATURE-029 — Contrato build output / COMANDO_TEST (P1) | Bajo | Bajo | Baja |
-| FEATURE-043 — Separar configuración de ejecución (repo/rama) del caso de negocio (diseño propuesto) | Bajo | Bajo | Baja |
+| FEATURE-043 — Separar configuración de ejecución (repo/rama) del caso de negocio (✅ Ejecutado) | Bajo | Bajo | Baja |
 
 ---
 
@@ -870,6 +876,59 @@ prueba y corregidos en el momento:
    más largo entre los demás campos. Además, se encontró y quitó un `window.alert()` nativo
    redundante que repetía el aviso de creación de rama después de que el nuevo paso de confirmación
    ya lo había mostrado y confirmado.
+
+### ✅ FEATURE-043 — Separar configuración de ejecución del caso de negocio
+
+**Estado:** Implementada y validada E2E en producción real (2026-08-02), mergeada a `main`.
+Prioridad Baja. Diseño de ARIA, con una ronda de corrección técnica del owner tras validación contra
+el código real (`persistReleasePlanIfDeclared`, fallback legacy de repositorio, distinción con
+`runs.branch_name`). Diseño completo y resultado de implementación en
+`docs/features/FEATURE-043-Separar-configuración-de-ejecución-del-caso-de-negocio.md`.
+
+Tras FEATURE-042, `repositorio` quedó como campo fantasma en `intake_field_definitions`: seguía
+pidiéndose en el prompt de mapeo por IA y extrayéndose del texto libre, pero desde F042 no tenía
+ningún efecto — el frontend lo ocultaba y el backend lo descartaba antes de persistir (el repo
+operativo siempre salía de `project.repository_clone_url`). `rama_base_trabajo`, en cambio, sí tenía
+uso real (extracción, edición, validación contra `branchValidationService`) pero seguía mezclado con
+los 10 campos descriptivos del caso de negocio en la misma tabla plana y el mismo modal de revisión.
+
+**Qué se implementó**: `migrations/0019` elimina la fila `repositorio` de
+`intake_field_definitions`. `migrations/0018` agrega `runs.base_branch_name` (nullable) como
+ubicación persistente propia de la rama base, separada tanto de `business_case` (JSON descriptivo)
+como de `branch_name` (rama efectiva del worktree/checkout — dos conceptos distintos, no se
+reutiliza la misma columna). Nueva `getRootRunExecutionContext(runId)` resuelve `business_case` y
+`base_branch_name` del run raíz de la cadena en una sola consulta indexada (reemplaza la lectura
+que antes hacía `getBusinessCaseForRun` en solitario, evitando mantener dos consultas
+independientes). `confirmIntakeForProject`/`startPendingRun` resuelven la rama con precedencia:
+ubicación persistente nueva -> valor legacy en `business_case` -> default. `ReviewModal.tsx` separa
+la UI en dos secciones ("Caso de negocio"/"Ejecución"), con el repositorio del proyecto mostrado
+solo lectura y la completitud del caso calculada solo sobre campos descriptivos.
+
+**Hallazgo real durante la implementación, no cubierto por el diseño**: el comando CLI
+`run:start --case` (`createRun`) nunca persiste `business_case` en la base de datos — solo lo pasa
+en memoria como `initialContext`. Reemplazar directamente el fallback en memoria de
+`persistReleasePlanIfDeclared` por una consulta a la nueva columna, como sugería literalmente la
+sección técnica del diseño, hubiera roto ese camino del CLI en silencio. Se resolvió con una cadena
+de precedencia de tres niveles: columna nueva -> `business_case` del run raíz ya persistido en DB
+(runs legacy del flujo web) -> `initialContext` en memoria (camino exclusivo del CLI).
+
+**Segundo hallazgo, encontrado en la validación manual del owner, tampoco anticipado por el
+diseño**: la columna `description` de `rama_base_trabajo` en `intake_field_definitions` (desde
+`migrations/0009`, sin tocar desde FEATURE-017) decía literalmente `'... default "main" si no se
+indica'` — ese texto se inyecta tal cual en el prompt de mapeo, así que el modelo cumplía al pie de
+la letra y devolvía `"main"` en vez de `null` cuando el texto no mencionaba ninguna rama. Como la
+sugerencia automática del frontend solo actúa sobre un campo vacío, esto anulaba en la práctica el
+propósito central de esta Feature (que la rama nunca sea "main" por default silencioso, sino una
+sugerencia real basada en el contenido del caso). Corregido en `migrations/0020` (retira la
+instrucción de default; la Regla 1 general del prompt de mapeo — "nunca inventes, va en null" — ya
+cubre este campo como a cualquier otro).
+
+**Validación E2E real (2026-08-02, `aio.asdru.space`/`api.aio.asdru.space`)**: el owner probó el
+flujo completo con un caso real — el modal mostró "10 campos" (la rama dejó de contar en el
+porcentaje del caso de negocio), la sección "Ejecución" separada con `asdrubalperez/pruebas-ia` en
+solo lectura, y la rama sugerida `feature/modulo-interno-de-calculo-de-propinas-para-un-sistema-de-fac`
+derivada del contenido real del caso. El owner creó el caso y ejecutó el run de punta a punta sin
+errores.
 
 ### 🟡 FEATURE-027 — Continuidad durable del loop Developer ↔ QA
 
