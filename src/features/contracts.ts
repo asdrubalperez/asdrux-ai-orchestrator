@@ -307,12 +307,23 @@ function parseJson(value: string, label: string): unknown {
     return JSON.parse(value);
   } catch (err) {
     // Hallazgo de validación en vivo (FEATURE-025-Parte-2): el error genérico sin contenido no
-    // alcanzaba para diagnosticar sin ir a buscar el texto crudo a mano en la base -- se incluye un
-    // fragmento del valor recibido (acotado, nunca el payload completo) y el motivo real de
-    // JSON.parse.
-    const snippet = value.length > 300 ? `${value.slice(0, 300)}…` : value;
+    // alcanzaba para diagnosticar sin ir a buscar el texto crudo a mano en la base. V8 reporta la
+    // posición exacta del carácter que rompió el parseo ("at position N") -- se muestra una ventana
+    // alrededor de esa posición (no el inicio del string, que en un JSON largo suele quedar lejos
+    // del problema real) junto con los códigos de carácter, para distinguir a simple vista un
+    // carácter invisible/no-ASCII de uno visible.
     const reason = err instanceof Error ? err.message : String(err);
-    throw new Error(`${label} no contiene JSON válido (${reason}). Recibido: ${JSON.stringify(snippet)}`);
+    const positionMatch = reason.match(/position (\d+)/);
+    const position = positionMatch ? Number(positionMatch[1]) : null;
+    const windowStart = position !== null ? Math.max(0, position - 80) : 0;
+    const windowEnd = position !== null ? Math.min(value.length, position + 80) : Math.min(value.length, 300);
+    const snippet = value.slice(windowStart, windowEnd);
+    const charAtPosition = position !== null && position < value.length ? value[position] : null;
+    const charInfo =
+      charAtPosition !== null ? ` Carácter en esa posición: ${JSON.stringify(charAtPosition)} (code ${charAtPosition.charCodeAt(0)}).` : "";
+    throw new Error(
+      `${label} no contiene JSON válido (${reason}).${charInfo} Contexto [${windowStart}:${windowEnd}] de ${value.length} chars: ${JSON.stringify(snippet)}`
+    );
   }
 }
 
