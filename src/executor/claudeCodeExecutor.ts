@@ -465,7 +465,14 @@ export class ClaudeCodeExecutor implements Executor {
     const extract = (label: string): string | null => {
       const re = new RegExp(`${label}:\\s*([\\s\\S]*?)(?=\\n[A-Z_]+:|$)`);
       const match = cleaned.match(re);
-      return match ? match[1].trim() : null;
+      if (!match) return null;
+      const value = match[1].trim();
+      // Defensa adicional: valores destinados a JSON.parse (ROADMAP/FEATURES/etc.) a veces vienen
+      // envueltos en un code fence de Markdown (```json ... ```) pese a la convención de texto
+      // plano -- se despoja solo si envuelve el valor completo, nunca en medio de un ARTEFACTO en
+      // prosa donde un fence podría ser contenido legítimo.
+      const fenced = value.match(/^```[a-zA-Z]*\n([\s\S]*?)\n?```$/);
+      return fenced ? fenced[1].trim() : value;
     };
 
     const estado = extract("ESTADO");

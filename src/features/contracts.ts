@@ -305,8 +305,14 @@ function parseJsonObject(value: unknown, label: string): Record<string, unknown>
 function parseJson(value: string, label: string): unknown {
   try {
     return JSON.parse(value);
-  } catch {
-    throw new Error(`${label} no contiene JSON válido.`);
+  } catch (err) {
+    // Hallazgo de validación en vivo (FEATURE-025-Parte-2): el error genérico sin contenido no
+    // alcanzaba para diagnosticar sin ir a buscar el texto crudo a mano en la base -- se incluye un
+    // fragmento del valor recibido (acotado, nunca el payload completo) y el motivo real de
+    // JSON.parse.
+    const snippet = value.length > 300 ? `${value.slice(0, 300)}…` : value;
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`${label} no contiene JSON válido (${reason}). Recibido: ${JSON.stringify(snippet)}`);
   }
 }
 
