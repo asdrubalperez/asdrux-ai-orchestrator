@@ -430,7 +430,12 @@ export async function startPendingRun(params: { runId: string; userId: string })
     worktreePath: worktree.worktreePath,
     provider: agentSelection.executorProvider,
     authMode: agentSelection.authMode,
-    model: null,
+    model: agentSelection.model,
+    // FEATURE-025-Parte-1/2: el flujo web nunca fija un único proveedor para todo el run -- cada
+    // fase siempre resuelve la suya propia vía resolveAgentConfig (ver comentario equivalente en
+    // runStart.ts). respondService.ts usa este flag para decidir si un reingreso humano debe
+    // reusar este snapshot o volver a resolver por rol.
+    cliOverrideForced: false,
     pipeline: `${pipelineSpec.name}@${pipelineSpec.version}`,
     projectId: run.project_id,
     repoPath: repositorio,

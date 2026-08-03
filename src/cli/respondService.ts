@@ -9,6 +9,7 @@ import {
   getRunDetailForUser,
   recordRunConfigVersions,
   recordRunEvent,
+  resolveAgentConfig,
   resolveEscalatedRunStatus,
   setProjectConfig,
 } from "../db/repository.js";
@@ -35,7 +36,7 @@ import {
 } from "./escalation.js";
 import { createPlanningToQaChildRun, executePipelineRun, parseAuthMode, parseExecutorProvider } from "./commands/runStart.js";
 import { FULL_PIPELINE, PLANNING_TO_QA } from "../pipelines/definitions.js";
-import type { AgentConfig } from "../db/repository.js";
+import type { AgentConfig, EffectiveAgentConfig } from "../db/repository.js";
 
 // FEATURE-020, Regla 8: mismo criterio de tope que `MAX_ESCALATION_ATTEMPTS` (runStart.ts), pero
 // contando recorridos completos del mecanismo de reingreso encadenado, no invocaciones sueltas.
@@ -103,14 +104,22 @@ export async function respondToEscalation(params: {
 
   const rawSolution = params.action.solution;
   const runStarted = runStartedPayload(parentDetail.events);
-  // FEATURE-016: un reintento de escalación reusa exactamente lo que se usó en el run original —
-  // no re-resuelve contra user_agent_config, que pudo haber cambiado desde entonces. Runs previos
-  // a esta Feature no tienen authMode persistido; default api_key (regresión cero).
-  const cliAgentOverride: AgentConfig = {
-    executorProvider: parseExecutorProvider(runStarted.provider),
-    authMode: parseAuthMode(runStarted.authMode ?? "api_key"),
-  };
-  const model = runStarted.model ?? undefined;
+  // FEATURE-016 fijaba SIEMPRE un único proveedor/authMode para todo el reingreso ("lo que se usó
+  // en el run original"), asumiendo una única selección por run -- supuesto que dejó de valer con
+  // FEATURE-025-Parte-1 (override por rol en user_agent_config). Si el run original fue lanzado con
+  // flags de CLI (Regla 2: nunca consulta la DB), ese comportamiento sigue siendo correcto y se
+  // preserva vía `cliOverrideForced`. Si no, cada fase del reingreso debe volver a resolver su
+  // propia configuración por rol (mismo criterio que ya usan createPlanningToQaChildRun y
+  // createArchitectReentryChildRun) -- de lo contrario, TODAS las fases del run hijo terminan
+  // corriendo con el asistente/modelo/authMode de la fase que escaló, ignorando sus propios
+  // overrides (hallazgo de validación en vivo de FEATURE-025-Parte-2).
+  const cliAgentOverride: AgentConfig | null = runStarted.cliOverrideForced
+    ? {
+        executorProvider: parseExecutorProvider(runStarted.provider),
+        authMode: parseAuthMode(runStarted.authMode ?? "api_key"),
+      }
+    : null;
+  const model = cliAgentOverride ? runStarted.model ?? undefined : undefined;
 
   if (!parentRun.branch_name || !parentRun.worktree_path) {
     throw new Error(`El run ${params.parentRunId} no tiene branch_name/worktree_path persistidos.`);
@@ -303,6 +312,12 @@ export async function respondToEscalation(params: {
 
     childWorktree = await createRunWorktree(repoRoot, childRunId, parentWorktree.branchName);
     const baseCommitSha = await headSha(childWorktree);
+    // Mismo criterio que createPlanningToQaChildRun/createArchitectReentryChildRun: sin override
+    // forzado, el snapshot de auditoría refleja la selección real de la primera fase (architect),
+    // no un valor inventado -- cada fase del child run resuelve la suya propia de todos modos.
+    const firstPhaseSelection: EffectiveAgentConfig = cliAgentOverride
+      ? { ...cliAgentOverride, model: model ?? null }
+      : await resolveAgentConfig(params.userId, FULL_PIPELINE.definition.phases[0].agentRole);
     const childRun = await createRun({
       id: childRunId,
       pipelineDefinitionId: pipelineDefinitionRow.id,
@@ -321,9 +336,10 @@ export async function respondToEscalation(params: {
       {
         branchName: childWorktree.branchName,
         worktreePath: childWorktree.worktreePath,
-        provider: cliAgentOverride.executorProvider,
-        authMode: cliAgentOverride.authMode,
-        model: model ?? null,
+        provider: firstPhaseSelection.executorProvider,
+        authMode: firstPhaseSelection.authMode,
+        model: firstPhaseSelection.model,
+        cliOverrideForced: cliAgentOverride !== null,
         pipeline: `${FULL_PIPELINE.name}@${FULL_PIPELINE.version}`,
         projectId: parentRun.project_id,
         repoPath: childWorktree.worktreePath,
@@ -395,7 +411,7 @@ export function previousAttemptFromEvents(events: unknown[]): number {
 
 function runStartedPayload(
   events: unknown[]
-): { provider: string; authMode: string | null; model: string | null; repoPath: string } {
+): { provider: string; authMode: string | null; model: string | null; repoPath: string; cliOverrideForced: boolean } {
   const event = events.find(
     (item): item is { event_type: string; payload: Record<string, unknown> } =>
       item !== null &&
@@ -419,6 +435,9 @@ function runStartedPayload(
     authMode: typeof payload.authMode === "string" ? payload.authMode : null,
     model: typeof payload.model === "string" ? payload.model : null,
     repoPath: payload.repoPath,
+    // Runs previos a este campo (FEATURE-025-Parte-2) no lo tienen persistido -- default false:
+    // resuelve por rol, el comportamiento correcto para el 100% de los runs reales (web/intake).
+    cliOverrideForced: payload.cliOverrideForced === true,
   };
 }
 
@@ -505,7 +524,7 @@ async function respondMergeApproval(params: {
   userId: string;
   projectId: string;
   repoRoot: string;
-  cliAgentOverride: AgentConfig;
+  cliAgentOverride: AgentConfig | null;
   model?: string;
   mergeApproval: MergeApprovalPayload;
   rawSolution: string;

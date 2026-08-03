@@ -1,5 +1,5 @@
 import React from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -108,7 +108,7 @@ export function RunDetailPage() {
           <RunOverview run={run} runId={runId} />
           <FeatureDocumentPanel document={run.featureDocument} />
           {run.escalation.isEscalated ? (
-            <EscalationActionBanner run={run} onRefresh={query.refresh} />
+            <EscalationActionBanner run={run} projectId={params.projectId ?? ""} onRefresh={query.refresh} />
           ) : null}
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
             <div className="space-y-4">
@@ -273,7 +273,15 @@ function CardLabel({ children }: { children: React.ReactNode }) {
   return <h2 className="text-sm font-semibold">{children}</h2>;
 }
 
-function EscalationActionBanner({ run, onRefresh }: { run: RunViewModel; onRefresh: () => void }) {
+function EscalationActionBanner({
+  run,
+  projectId,
+  onRefresh,
+}: {
+  run: RunViewModel;
+  projectId: string;
+  onRefresh: () => void;
+}) {
   const [open, setOpen] = React.useState(false);
 
   return (
@@ -293,22 +301,25 @@ function EscalationActionBanner({ run, onRefresh }: { run: RunViewModel; onRefre
           Validar Ahora
         </Button>
       </div>
-      <EscalationResponseDialog run={run} open={open} onOpenChange={setOpen} onRefresh={onRefresh} />
+      <EscalationResponseDialog run={run} projectId={projectId} open={open} onOpenChange={setOpen} onRefresh={onRefresh} />
     </section>
   );
 }
 
 function EscalationResponseDialog({
   run,
+  projectId,
   open,
   onOpenChange,
   onRefresh,
 }: {
   run: RunViewModel;
+  projectId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onRefresh: () => void;
 }) {
+  const navigate = useNavigate();
   const [mode, setMode] = React.useState<"choice" | "solution">("choice");
   const [solution, setSolution] = React.useState("");
   const [loading, setLoading] = React.useState(false);
@@ -337,7 +348,16 @@ function EscalationResponseDialog({
       if (response.status === 409) throw new Error("Este escalamiento ya fue respondido.");
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
+      const result = (await response.json().catch(() => null)) as { childRunId?: string } | null;
       onOpenChange(false);
+
+      // El humano respondió y el pipeline sigue en un run nuevo (encadenado) -- lo natural es
+      // seguir viéndolo ahí, no quedarse mirando el run padre ya resuelto/abortado.
+      if (result?.childRunId && projectId) {
+        navigate(`/projects/${encodeURIComponent(projectId)}/cases/${encodeURIComponent(result.childRunId)}`);
+        return;
+      }
+
       onRefresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo responder el escalamiento.");
@@ -433,7 +453,10 @@ function Timeline({ nodes }: { nodes: RunViewModel["timeline"] }) {
               <Badge variant={statusVariant(node.status)}>{statusLabel(node.status)}</Badge>
             </div>
             {node.executorMetadata ? (
-              <p className="mt-2 truncate text-center text-xs text-zinc-500" title={executorMetadataLabel(node.executorMetadata)}>
+              <p
+                className="mt-2 line-clamp-2 break-words text-center text-xs text-zinc-500"
+                title={executorMetadataLabel(node.executorMetadata)}
+              >
                 {executorMetadataLabel(node.executorMetadata)}
               </p>
             ) : null}

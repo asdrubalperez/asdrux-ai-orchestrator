@@ -271,6 +271,11 @@ export async function runStart(args: string[]): Promise<void> {
         provider: firstPhaseSelection.executorProvider,
         authMode: firstPhaseSelection.authMode,
         model: model ?? null,
+        // FEATURE-025-Parte-1/2: distingue "esta corrida entera está fijada por flags de CLI, nunca
+        // consulta la DB" (Regla 2 de FEATURE-016) de "esto es solo un snapshot de auditoría de la
+        // primera fase". respondService.ts lo usa para decidir si un reingreso humano debe reusar un
+        // único proveedor/modelo para todas las fases, o resolver cada una por su propio rol.
+        cliOverrideForced: cliAgentOverride !== null,
         pipeline: `${pipelineSpec.name}@${pipelineSpec.version}`,
         projectId: project.id,
         repoPath: projectRepoRoot,
