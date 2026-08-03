@@ -27,7 +27,10 @@ import type {
 // importar el rol. Solo se reenvían las variables de sistema estrictamente necesarias para que
 // Node y el propio CLI funcionen (resolución de rutas, directorios temporales, localización);
 // todo lo demás requiere pasarse explícitamente (ver buildChildEnv).
-const ALLOWED_ENV_PASSTHROUGH_KEYS = [
+// FEATURE-025-Parte-3: exportadas para que el adaptador OAuth de mapeo de intake
+// (claudeOAuthMappingAdapter.ts) reutilice el mismo allowlist/imagen en vez de duplicarlos --
+// evita que ambos se desalineen si uno cambia sin el otro.
+export const ALLOWED_ENV_PASSTHROUGH_KEYS = [
   "PATH",
   "HOME",
   "USERPROFILE",
@@ -44,7 +47,7 @@ const ALLOWED_ENV_PASSTHROUGH_KEYS = [
   "LC_ALL",
 ] as const;
 
-const DEFAULT_DEVELOPER_CONTAINER_IMAGE = "ai-orchestrator-developer:latest";
+export const DEFAULT_DEVELOPER_CONTAINER_IMAGE = "ai-orchestrator-developer:latest";
 
 // FEATURE-016: ruta donde se monta, de solo lectura, el caché OAuth dedicado del Orquestador
 // dentro del holder cuando authMode === "cli_session". Nunca el HOME personal del operador.
@@ -119,7 +122,7 @@ interface RawCliResult {
 // confiable "la versión más reciente que la cuenta permite" -- se traduce acá, solo para OAuth, sin
 // tocar el catálogo (que sigue con IDs exactos porque el rol "intake" llama directo a la API de
 // Anthropic -- mapBusinessCase.ts -- donde estos alias NO son válidos).
-function toCliSessionModelAlias(model: string): string {
+export function toCliSessionModelAlias(model: string): string {
   if (model.startsWith("claude-opus")) return "opus";
   if (model.startsWith("claude-sonnet")) return "sonnet";
   if (model.startsWith("claude-haiku")) return "haiku";

@@ -209,9 +209,6 @@ function RoleOverride(props: {
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-medium text-zinc-800">{ROLE_LABELS[props.role]}</p>
-          {props.role === "intake" ? (
-            <p className="text-xs text-amber-600">Hoy solo soporta Claude Code + API key propia.</p>
-          ) : null}
         </div>
         {props.override ? (
           <Button

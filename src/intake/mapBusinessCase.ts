@@ -1,21 +1,14 @@
 import type { IntakeFieldDefinitionRow } from "../db/repository.js";
+import type { ResolvedExecutorAuthentication } from "../auth/aiCredentialService.js";
+import type { ExecutorProviderName } from "../db/repository.js";
+import { selectIntakeMappingAdapter } from "./intakeMappingAdapters.js";
 
-// FEATURE-017, Regla 5 y sección 7.3: llamada directa y simple al proveedor, sin
-// runRoleIsolated/holder/worker/Docker — no hay tools que dar, así que no existe el problema que
-// ese aislamiento resuelve (canal de respuesta con tools + credencial real). Vía fetch nativo a la
-// Messages API (no hay SDK de Anthropic como dependencia en este repo — ver
-// executor/claudeCodeExecutor.ts). FEATURE-025-Parte-1 (ampliación): la credencial y el modelo ya
-// no son fijos del sistema -- se resuelven por usuario contra el rol configurable "intake"
-// (mapIntakeText, src/cli/intakeService.ts), mismo mecanismo que los 5 roles reales. Esta llamada
-// sigue siendo exclusivamente a la API de Anthropic -- si "intake" resuelve a Codex, el caller corta
-// antes de llegar acá (sin soporte todavía, ver FEATURE-025-Parte-3).
-const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
-const ANTHROPIC_VERSION = "2023-06-01";
-
-// Default cuando el rol "intake" no tiene un modelo propio configurado -- económico, porque esta
-// llamada es extracción estructurada de texto, no razonamiento complejo.
-const DEFAULT_MAPPING_MODEL = "claude-haiku-4-5-20251001";
-
+// FEATURE-017, Regla 5: sin runRoleIsolated/pipeline -- no hay run, no hay artifact, no hay
+// escalamiento. FEATURE-025-Parte-3, sección 3.1: API key sigue siendo HTTP directo sin Docker
+// (secreto sin estado materializado); OAuth reutiliza el holder Docker de los roles reales, sin
+// worker (sesión materializada real procesando texto no confiable). La selección entre los 4
+// caminos vive en intakeMappingAdapters.ts -- este módulo solo conoce el contrato común
+// (buildMappingPrompt/parseMappingResponse), nunca la forma específica de cada proveedor.
 export type BusinessCaseValues = Record<string, string | null>;
 
 // FEATURE-031: el mapping de tipo_solucion se equivocaba al interpretar palabras aisladas ("existe")
@@ -124,48 +117,42 @@ export function parseMappingResponse(raw: string, fields: IntakeFieldDefinitionR
   return result;
 }
 
+// FEATURE-025-Parte-3, sección 7.13: timeout propio del mapeo de intake, independiente de los
+// timeouts largos de fase del pipeline (ARCHITECT_TIMEOUT_MS y similares en runStart.ts) -- esto es
+// una única llamada corta, no una fase con tools/iteraciones.
+function parsePositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+export const INTAKE_MAPPING_TIMEOUT_MS = parsePositiveIntEnv("INTAKE_MAPPING_TIMEOUT_MS", 60_000);
+
 export async function mapBusinessCase(params: {
   inputText: string;
   fields: IntakeFieldDefinitionRow[];
   previousValues?: BusinessCaseValues;
+  provider: ExecutorProviderName;
+  /** Modelo resuelto por el caller; si no hay uno configurado, cada adaptador usa su default económico. */
+  model: string | null;
   /**
-   * FEATURE-025-Parte-1 (ampliación): resuelta por el caller (`mapIntakeText`, contra la
-   * credencial propia del usuario para el rol "intake") -- sin fallback a una variable de entorno
-   * global, mismo criterio que los Executors de los 5 roles reales.
+   * FEATURE-025-Parte-1/2/3: resuelta por el caller (`mapIntakeText`, contra la credencial propia
+   * del usuario para el rol "intake") -- sin fallback a una variable de entorno global, mismo
+   * criterio que los Executors de los 5 roles reales. Determina qué adaptador se usa (sección 3.1):
+   * api_key -> HTTP directo; cli_session -> holder Docker de los roles reales, sin worker.
    */
-  apiKey: string;
-  /** Modelo resuelto por el caller; si no hay uno configurado, usa el default económico de siempre. */
-  model?: string;
+  authentication: ResolvedExecutorAuthentication;
+  timeoutMs?: number;
 }): Promise<BusinessCaseValues> {
   const { system, user } = buildMappingPrompt(params.inputText, params.fields, params.previousValues);
-
-  const response = await fetch(ANTHROPIC_MESSAGES_URL, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": params.apiKey,
-      "anthropic-version": ANTHROPIC_VERSION,
-    },
-    body: JSON.stringify({
-      model: params.model ?? DEFAULT_MAPPING_MODEL,
-      max_tokens: 4096,
-      system,
-      messages: [{ role: "user", content: user }],
-    }),
+  const adapter = selectIntakeMappingAdapter(params.provider, params.authentication);
+  const rawText = await adapter.map({
+    systemPrompt: system,
+    userPrompt: user,
+    model: params.model,
+    timeoutMs: params.timeoutMs ?? INTAKE_MAPPING_TIMEOUT_MS,
   });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Anthropic Messages API respondió ${response.status}: ${body}`);
-  }
-
-  const payload = (await response.json()) as { content?: Array<{ type: string; text?: string }> };
-  const textBlock = payload.content?.find((block) => block.type === "text" && typeof block.text === "string");
-  if (!textBlock?.text) {
-    throw new Error("La respuesta del modelo no tiene contenido de texto.");
-  }
-
-  return parseMappingResponse(textBlock.text, params.fields);
+  return parseMappingResponse(rawText, params.fields);
 }
 
 /** FEATURE-017, Estrategia Algorítmica: campos_completos / 12 * 100, redondeado. */

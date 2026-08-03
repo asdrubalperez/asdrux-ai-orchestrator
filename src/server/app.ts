@@ -86,6 +86,7 @@ import {
   updateProjectNameForUser,
 } from "../cli/projectService.js";
 import type { BusinessCaseValues } from "../intake/mapBusinessCase.js";
+import { IntakeMappingError } from "../intake/intakeMappingErrors.js";
 import { buildRunViewModel, toReleaseRoadmapView } from "./runView.js";
 import { openRunEventsStream } from "./sse.js";
 import { getFeatureDocumentForRun } from "../features/lifecycle.js";
@@ -593,6 +594,10 @@ export function createApp(config: ServerConfig): express.Express {
       const result = await mapIntakeText({ userId: req.user!.id, ...body });
       res.json(result);
     } catch (err) {
+      // AgentOAuthNotConnectedError/AgentOAuthReauthRequiredError extienden
+      // AgentCredentialMissingError -- este chequeo ya cubre las tres formas (Escenario 5/6/7 del
+      // diseño de FEATURE-025-Parte-3): sin credencial, sin conexión OAuth, o reautenticación
+      // requerida. El mensaje ya distingue el caso exacto; la UI dirige a Configuración.
       if (err instanceof AgentCredentialMissingError) {
         res.status(409).json({ error: "intake_credential_missing", message: err.message });
         return;
@@ -603,6 +608,10 @@ export function createApp(config: ServerConfig): express.Express {
       }
       if (err instanceof IntakeMappingAuthModeUnsupportedError) {
         res.status(409).json({ error: "intake_auth_mode_unsupported", message: err.message });
+        return;
+      }
+      if (err instanceof IntakeMappingError) {
+        res.status(intakeMappingErrorStatus(err.code)).json({ error: err.code, message: err.message });
         return;
       }
       next(err);
@@ -1050,6 +1059,28 @@ function agentCredentialBody(body: unknown): { apiKey: string } | null {
   const record = body as Record<string, unknown>;
   if (typeof record.apiKey !== "string" || record.apiKey.trim().length === 0) return null;
   return { apiKey: record.apiKey };
+}
+
+// FEATURE-025-Parte-3, sección 5.15: mapea la taxonomía funcional de errores de mapeo a un status
+// HTTP distinguible -- el cuerpo de la respuesta ya viene sin secretos ni datos crudos del
+// proveedor (los adaptadores nunca incluyen eso en err.message, ver intakeMappingErrors.ts).
+function intakeMappingErrorStatus(code: string): number {
+  switch (code) {
+    case "intake_mapping_authentication_required":
+      return 502;
+    case "intake_mapping_model_unsupported":
+      return 400;
+    case "intake_mapping_rate_limited":
+      return 429;
+    case "intake_mapping_provider_unavailable":
+      return 502;
+    case "intake_mapping_timeout":
+      return 504;
+    case "intake_mapping_invalid_response":
+      return 502;
+    default:
+      return 500;
+  }
 }
 
 function intakeMapBody(body: unknown): { inputText: string; previousValues?: BusinessCaseValues } | null {

@@ -21,7 +21,9 @@ import type {
 // - autenticacion explicita via CODEX_API_KEY;
 // - sandbox nativo de Codex (`read-only`) o Docker + `danger-full-access` para escritura;
 // - salida estructurada con `--output-schema`.
-const ALLOWED_ENV_PASSTHROUGH_KEYS = [
+// FEATURE-025-Parte-3: exportada para que el adaptador OAuth de mapeo de intake
+// (codexOAuthMappingAdapter.ts) reutilice el mismo allowlist en vez de duplicarlo.
+export const ALLOWED_ENV_PASSTHROUGH_KEYS = [
   "PATH",
   "HOME",
   "USER",
@@ -61,7 +63,9 @@ const PHASE_RESULT_SCHEMA = {
 };
 
 const DEFAULT_CODEX_DEVELOPER_CONTAINER_IMAGE = "ai-orchestrator-codex-developer:latest";
-const DEFAULT_CODEX_QA_HOLDER_IMAGE = "feature015a-codex-pin-candidate:0.145.0";
+// FEATURE-025-Parte-3: exportada para que codexOAuthMappingAdapter.ts reutilice la misma imagen
+// pineada en vez de duplicar el string.
+export const DEFAULT_CODEX_QA_HOLDER_IMAGE = "feature015a-codex-pin-candidate:0.145.0";
 const CONTAINER_SCHEMA_PATH = "/schema/phase-result.schema.json";
 
 // FEATURE-016: ruta donde se monta, de solo lectura, el caché OAuth dedicado del Orquestador
