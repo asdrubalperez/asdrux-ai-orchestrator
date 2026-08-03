@@ -95,28 +95,42 @@ export async function startClaudeLogin(userId: string): Promise<LoginChallenge> 
 
   activeLogins.set(attempt.attemptId, { child, temporaryDirectory, exited });
 
-  const authorizeUrl = await new Promise<string>((resolve, reject) => {
-    let buffer = "";
-    const onData = (chunk: Buffer) => {
-      buffer += chunk.toString("utf8");
-      const match = buffer.match(URL_PATTERN);
-      if (match) {
-        child.stdout.off("data", onData);
-        resolve(match[0].trim());
-      }
-    };
-    child.stdout.on("data", onData);
-    child.once("exit", () => {
-      child.stdout.off("data", onData);
-      reject(new ClaudeLoginError("El proceso de login de Claude terminó antes de mostrar una URL."));
-    });
-    setTimeout(() => {
-      child.stdout.off("data", onData);
-      reject(new ClaudeLoginError("Timeout esperando la URL de autorización de Claude."));
-    }, LOGIN_TIMEOUT_MS);
-  });
+  // Un `error` de spawn (ej. binario inexistente) es un evento de Node no manejado por defecto --
+  // sin este listener tira abajo todo el proceso del orquestador, no solo este intento de login.
+  child.on("error", () => {});
 
-  return { attemptId: attempt.attemptId, authorizeUrl };
+  try {
+    const authorizeUrl = await new Promise<string>((resolve, reject) => {
+      let buffer = "";
+      const onData = (chunk: Buffer) => {
+        buffer += chunk.toString("utf8");
+        const match = buffer.match(URL_PATTERN);
+        if (match) {
+          child.stdout.off("data", onData);
+          resolve(match[0].trim());
+        }
+      };
+      child.stdout.on("data", onData);
+      child.once("error", (err) => {
+        child.stdout.off("data", onData);
+        reject(new ClaudeLoginError(`No se pudo iniciar el proceso de login de Claude: ${(err as Error).message}`));
+      });
+      child.once("exit", () => {
+        child.stdout.off("data", onData);
+        reject(new ClaudeLoginError("El proceso de login de Claude terminó antes de mostrar una URL."));
+      });
+      setTimeout(() => {
+        child.stdout.off("data", onData);
+        reject(new ClaudeLoginError("Timeout esperando la URL de autorización de Claude."));
+      }, LOGIN_TIMEOUT_MS);
+    });
+
+    return { attemptId: attempt.attemptId, authorizeUrl };
+  } catch (err) {
+    activeLogins.delete(attempt.attemptId);
+    await discardAttempt(attempt.attemptId);
+    throw err;
+  }
 }
 
 export async function submitClaudeLoginCode(attemptId: string, code: string): Promise<LoginCompletion> {

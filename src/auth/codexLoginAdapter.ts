@@ -90,6 +90,10 @@ export async function startCodexLogin(userId: string): Promise<LoginChallenge> {
     throw err;
   }
 
+  // Un `error` de spawn (ej. binario inexistente) es un evento de Node no manejado por defecto --
+  // sin este listener tira abajo todo el proceso del orquestador, no solo este intento de login.
+  child.on("error", () => {});
+
   let requestId = 1;
   const send = (method: string, params: unknown) => {
     const id = requestId++;
@@ -97,47 +101,64 @@ export async function startCodexLogin(userId: string): Promise<LoginChallenge> {
     return id;
   };
 
-  const challenge = await new Promise<{ verificationUri: string; userCode: string; expiresAt: string | null }>(
-    (resolve, reject) => {
-      let initializeId: number;
-      let loginStartId: number;
-      const timeout = setTimeout(() => {
-        lines.off("line", onLine);
-        reject(new CodexLoginError("Timeout esperando el challenge de device code de Codex."));
-      }, LOGIN_TIMEOUT_MS);
+  let challenge: { verificationUri: string; userCode: string; expiresAt: string | null };
+  try {
+    challenge = await new Promise<{ verificationUri: string; userCode: string; expiresAt: string | null }>(
+      (resolve, reject) => {
+        let initializeId: number;
+        let loginStartId: number;
+        const timeout = setTimeout(() => {
+          lines.off("line", onLine);
+          reject(new CodexLoginError("Timeout esperando el challenge de device code de Codex."));
+        }, LOGIN_TIMEOUT_MS);
 
-      const onLine = (line: string) => {
-        let message: any;
-        try {
-          message = JSON.parse(line);
-        } catch {
-          return;
-        }
-        if (!message.method && message.id === initializeId) {
-          child.stdin.write(JSON.stringify({ method: "initialized", params: {} }) + "\n");
-          loginStartId = send("account/login/start", { type: "chatgptDeviceCode" });
-          return;
-        }
-        // El challenge puede llegar como respuesta directa de account/login/start, o como una
-        // notificación push aparte -- se acepta cualquiera de las dos formas.
-        const isLoginStartResponse = !message.method && message.id === loginStartId;
-        const isPushNotification = typeof message.method === "string" && message.method.startsWith("account/login");
-        if (isLoginStartResponse || isPushNotification) {
-          const parsedChallenge = extractChallenge(message);
-          if (parsedChallenge) {
-            clearTimeout(timeout);
-            lines.off("line", onLine);
-            resolve(parsedChallenge);
+        const onLine = (line: string) => {
+          let message: any;
+          try {
+            message = JSON.parse(line);
+          } catch {
+            return;
           }
-        }
-      };
-      lines.on("line", onLine);
-      initializeId = send("initialize", {
-        clientInfo: { name: "asdrux-orchestrator-login", title: "Asdrux Orchestrator Login", version: "1.0.0" },
-        capabilities: { experimentalApi: true },
-      });
-    }
-  );
+          if (!message.method && message.id === initializeId) {
+            child.stdin.write(JSON.stringify({ method: "initialized", params: {} }) + "\n");
+            loginStartId = send("account/login/start", { type: "chatgptDeviceCode" });
+            return;
+          }
+          // El challenge puede llegar como respuesta directa de account/login/start, o como una
+          // notificación push aparte -- se acepta cualquiera de las dos formas.
+          const isLoginStartResponse = !message.method && message.id === loginStartId;
+          const isPushNotification = typeof message.method === "string" && message.method.startsWith("account/login");
+          if (isLoginStartResponse || isPushNotification) {
+            const parsedChallenge = extractChallenge(message);
+            if (parsedChallenge) {
+              clearTimeout(timeout);
+              lines.off("line", onLine);
+              resolve(parsedChallenge);
+            }
+          }
+        };
+        lines.on("line", onLine);
+        child.once("error", (err) => {
+          clearTimeout(timeout);
+          lines.off("line", onLine);
+          reject(new CodexLoginError(`No se pudo iniciar el proceso de login de Codex: ${(err as Error).message}`));
+        });
+        child.once("exit", (code) => {
+          clearTimeout(timeout);
+          lines.off("line", onLine);
+          reject(new CodexLoginError(`El proceso de Codex app-server terminó (código ${code}) antes de mostrar el device code.`));
+        });
+        initializeId = send("initialize", {
+          clientInfo: { name: "asdrux-orchestrator-login", title: "Asdrux Orchestrator Login", version: "1.0.0" },
+          capabilities: { experimentalApi: true },
+        });
+      }
+    );
+  } catch (err) {
+    activeLogins.delete(attempt.attemptId);
+    await discardAttempt(attempt.attemptId);
+    throw err;
+  }
 
   const completed = new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {

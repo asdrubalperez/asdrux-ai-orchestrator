@@ -113,7 +113,17 @@ interface RawCliResult {
 // y el prompt con contexto JSON los tienen) — los trunca/rompe. Se resuelve y se invoca el .exe
 // real directamente para evitar el shell por completo.
 export function resolveClaudeBinary(): string {
-  if (process.platform !== "win32") return "claude";
+  if (process.platform !== "win32") {
+    const home = process.env.HOME;
+    const candidates = [
+      process.env.CLAUDE_BINARY,
+      home ? path.join(home, ".npm-global", "bin", "claude") : undefined,
+      "claude",
+    ].filter((candidate): candidate is string => Boolean(candidate));
+
+    const absolute = candidates.find((candidate) => path.isAbsolute(candidate) && existsSync(candidate));
+    return absolute ?? "claude";
+  }
 
   const candidates = execFileSync("where", ["claude"], { encoding: "utf8" })
     .split(/\r?\n/)
