@@ -76,9 +76,26 @@ export interface BaseBranchSyncResult {
   localBaseSha: string;
 }
 
+/**
+ * Hallazgo de validación en vivo (FEATURE-025-Parte-2): el default anterior derivaba la base de
+ * `repoRoot` (`path.resolve(repoRoot, "..", "ai-orchestrator-worktrees")`), asumiendo un `repoRoot`
+ * estable de un único repo compartido -- el diseño original de FEATURE-019 (ver 6.2b del
+ * documento). En el flujo real "standalone-clone" del web/intake (FEATURE-017), cada run
+ * encadenado (reingreso tras escalamiento, continuación tras merge) pasa el `worktreePath` del run
+ * PADRE como `repoRoot` del hijo -- y como ese `worktreePath` YA vive dentro de
+ * ".../ai-orchestrator-worktrees/<uuid>", el default recalculaba otra vez "hermano de repoRoot",
+ * agregando un nivel más de "ai-orchestrator-worktrees" por cada hop de la cadena (confirmado en
+ * el VPS: un run con 3 reingresos previos llegó a anidar el nombre 4 veces). Mismo criterio
+ * estable que ya usa `cloneRunRepository` más abajo (`RUN_CLONES_BASE_DIR`/`HOME`): independiente
+ * de `repoRoot`, nunca compone.
+ */
+function defaultWorktreesBaseDir(): string {
+  return process.env.WORKTREES_BASE_DIR ?? path.resolve(os.homedir(), "ai-orchestrator-case-clones", "ai-orchestrator-worktrees");
+}
+
 export async function createRunWorktree(repoRoot: string, runId: string, baseRef = "HEAD"): Promise<RunWorktree> {
   const branchName = `run/${runId}`;
-  const worktreesBaseDir = process.env.WORKTREES_BASE_DIR ?? path.resolve(repoRoot, "..", "ai-orchestrator-worktrees");
+  const worktreesBaseDir = defaultWorktreesBaseDir();
   const worktreePath = path.join(worktreesBaseDir, runId);
 
   await execFileAsync("git", ["worktree", "add", "-b", branchName, worktreePath, baseRef], {
@@ -277,10 +294,7 @@ export async function mergeFeatureBranchIntoBase(params: {
     params.featureBranch
   );
 
-  const baseWorktreePath = path.join(
-    process.env.WORKTREES_BASE_DIR ?? path.resolve(params.repoRoot, "..", "ai-orchestrator-worktrees"),
-    `base-${randomUUID()}`
-  );
+  const baseWorktreePath = path.join(defaultWorktreesBaseDir(), `base-${randomUUID()}`);
 
   await execFileAsync("git", ["worktree", "add", "--detach", baseWorktreePath, params.baseBranch], {
     cwd: params.repoRoot,
