@@ -266,6 +266,13 @@ export class ClaudeCodeExecutor implements Executor {
         "--no-session-persistence",
       ];
       if (this.options.model) args.push("--model", this.options.model);
+      // Hallazgo de validación en vivo (FEATURE-025-Parte-2): sin `--effort` explícito, el CLI
+      // elige por default un nivel que algunas cuentas de claude.ai conectadas por OAuth no tienen
+      // habilitado (falla con "API Error: 400 Invalid effort level", reproducido en el VPS con
+      // varios modelos, incluso sin --model). No ocurre con API key. "medium" es el nivel más alto
+      // confirmado que funciona -- si en el futuro se necesita "high"/"xhigh" para cuentas que sí
+      // lo soporten, esto debería volverse configurable en vez de fijo.
+      if (auth.authMode === "cli_session") args.push("--effort", "medium");
       args.push(this.buildPrompt(invocation));
       const raw = await this.execAndCapture("docker", args, undefined, {
         ...this.buildChildEnv(auth.authMode === "api_key" ? auth.apiKey : undefined),
