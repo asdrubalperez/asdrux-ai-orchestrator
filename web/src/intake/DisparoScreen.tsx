@@ -1,6 +1,6 @@
 import React from "react";
 import { AlertTriangle, Loader2, Upload } from "lucide-react";
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "../components/ui/button";
 import { apiUrl } from "../lib/api";
@@ -28,6 +28,7 @@ export function DisparoScreen() {
   const [inputText, setInputText] = React.useState("");
   const [mapping, setMapping] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [errorCode, setErrorCode] = React.useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = React.useState(false);
   const [fields, setFields] = React.useState<IntakeFieldDefinition[]>([]);
   const [values, setValues] = React.useState<BusinessCaseValues>({});
@@ -48,6 +49,7 @@ export function DisparoScreen() {
     if (inputText.trim().length === 0) return;
     setMapping(true);
     setError(null);
+    setErrorCode(null);
     try {
       const response = await fetch(apiUrl("/intake/map"), {
         method: "POST",
@@ -56,10 +58,13 @@ export function DisparoScreen() {
         body: JSON.stringify({ inputText }),
       });
       if (!response.ok) {
-        // FEATURE-025-Parte-1 (ampliación): 409 con mensaje claro cuando el "Asistente de Entrada"
-        // no tiene credencial propia, o resuelve a un proveedor/modo que el mapeo todavía no
-        // soporta (Codex/OAuth, ver FEATURE-025-Parte-3) -- se muestra tal cual, no un HTTP genérico.
-        const errorBody = (await response.json().catch(() => null)) as { message?: string } | null;
+        // FEATURE-025-Parte-3: el body ya trae {error: code, message} accionable para las 4
+        // combinaciones de proveedor/modo de autenticación -- se muestra tal cual, nunca un HTTP
+        // genérico. intake_credential_missing (sin credencial/conexión OAuth propia, o
+        // reautenticación requerida) dirige a Configuración; el resto son errores del proveedor o
+        // de la respuesta, se puede reintentar sin cambiar configuración.
+        const errorBody = (await response.json().catch(() => null)) as { error?: string; message?: string } | null;
+        setErrorCode(errorBody?.error ?? null);
         throw new Error(errorBody?.message ?? `HTTP ${response.status}`);
       }
       const body = (await response.json()) as { fields: IntakeFieldDefinition[]; values: BusinessCaseValues };
@@ -93,7 +98,19 @@ export function DisparoScreen() {
           onChange={(event) => setInputText(event.target.value)}
         />
 
-        {error ? <p className="mt-2 text-sm text-rose-700">{error}</p> : null}
+        {error ? (
+          <p className="mt-2 text-sm text-rose-700">
+            {error}
+            {errorCode === "intake_credential_missing" ? (
+              <>
+                {" "}
+                <Link to="/settings/agents" className="underline">
+                  Ir a Configuración
+                </Link>
+              </>
+            ) : null}
+          </p>
+        ) : null}
 
         <div className="mt-4 flex items-center justify-between">
           <input

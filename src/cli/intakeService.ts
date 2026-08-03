@@ -33,17 +33,23 @@ import { parsePipelineDefinitionRow } from "./escalation.js";
 import { executePipelineRun } from "./commands/runStart.js";
 import { mapBusinessCase, type BusinessCaseValues } from "../intake/mapBusinessCase.js";
 import { respondToEscalation } from "./respondService.js";
-import { AgentCredentialMissingError, resolveExecutorAuthentication } from "../auth/aiCredentialService.js";
+import {
+  AgentCredentialMissingError,
+  finalizeExecutorAuthentication,
+  resolveExecutorAuthentication,
+} from "../auth/aiCredentialService.js";
 
 export async function getIntakeFields() {
   return getIntakeFieldDefinitions();
 }
 
 /**
- * FEATURE-025-Parte-1 (ampliación): el mapeo llama directo a la API de Anthropic
- * (src/intake/mapBusinessCase.ts) -- todavía no sabe hablar con Codex ni con una sesión OAuth.
- * Se corta acá, antes de intentar la llamada, en vez de dejar que mapBusinessCase falle de forma
- * genérica. Alcance de la integración con Codex/OAuth: FEATURE-025-Parte-3.
+ * FEATURE-025-Parte-3: las 4 combinaciones (Claude/Codex × api_key/cli_session) están soportadas --
+ * la selección real vive en intakeMappingAdapters.ts, resuelta según provider + el modo de
+ * autenticación efectivo, exactamente igual que los 5 roles reales. Estos dos errores quedan
+ * declarados por compatibilidad hacia atrás (nunca deberían alcanzarse hoy -- `ExecutorProviderName`
+ * y `AuthMode` son uniones cerradas ya validadas por el CHECK constraint de la DB) y por si en el
+ * futuro se agrega un proveedor/modo nuevo antes de que este mapeo lo soporte.
  */
 export class IntakeMappingProviderUnsupportedError extends Error {}
 export class IntakeMappingAuthModeUnsupportedError extends Error {}
@@ -51,36 +57,33 @@ export class IntakeMappingAuthModeUnsupportedError extends Error {}
 export async function mapIntakeText(params: { userId: string; inputText: string; previousValues?: BusinessCaseValues }) {
   const fields = await getIntakeFieldDefinitions();
   const config = await resolveAgentConfig(params.userId, "intake");
+  // FEATURE-025-Parte-3, sección 5.17: a diferencia de los 5 roles reales (executorMetadata
+  // persistido por fase), el mapeo de intake no crea ningún run/evento -- sin este log no hay
+  // ninguna forma de confirmar después de los hechos qué adaptador/modelo/modo de auth resolvió
+  // realmente. Nunca incluye el texto del caso ni ningún secreto.
+  const startedAt = Date.now();
+  console.log(
+    `[intake-mapping] userId=${params.userId} provider=${config.executorProvider} model=${config.model ?? "(default)"} authMode=${config.authMode}`
+  );
 
-  if (config.executorProvider !== "claude") {
-    throw new IntakeMappingProviderUnsupportedError(
-      `El mapeo de intake todavía no soporta "${config.executorProvider}" -- configurá Claude para el rol "Asistente de Entrada" (o la configuración global).`
-    );
-  }
-  // FEATURE-025-Parte-2: chequeo por config.authMode ANTES de resolver la autenticación --
-  // resolveExecutorAuthentication ahora materializa una sesión OAuth real para cli_session
-  // (conexión + directorio temporal), y el mapeo no tiene ningún camino que la use. Materializarla
-  // solo para descartarla acá sería trabajo real desperdiciado y dejaría un temporal a limpiar.
-  if (config.authMode !== "api_key") {
-    throw new IntakeMappingAuthModeUnsupportedError(
-      'El mapeo de intake todavía no soporta "Sesión OAuth" -- configurá el modo "API key propia" para el rol "Asistente de Entrada" (o la configuración global).'
-    );
-  }
   const authentication = await resolveExecutorAuthentication(params.userId, config);
-  if (authentication.mode !== "api_key") {
-    throw new IntakeMappingAuthModeUnsupportedError(
-      'El mapeo de intake todavía no soporta "Sesión OAuth" -- configurá el modo "API key propia" para el rol "Asistente de Entrada" (o la configuración global).'
-    );
+  try {
+    const values = await mapBusinessCase({
+      inputText: params.inputText,
+      fields,
+      previousValues: params.previousValues,
+      provider: config.executorProvider,
+      model: config.model,
+      authentication,
+    });
+    console.log(`[intake-mapping] resultado=ok durationMs=${Date.now() - startedAt}`);
+    return { fields, values };
+  } catch (err) {
+    console.log(`[intake-mapping] resultado=error durationMs=${Date.now() - startedAt} tipo=${(err as Error).constructor.name}`);
+    throw err;
+  } finally {
+    await finalizeExecutorAuthentication(authentication);
   }
-
-  const values = await mapBusinessCase({
-    inputText: params.inputText,
-    fields,
-    previousValues: params.previousValues,
-    apiKey: authentication.apiKey,
-    model: config.model ?? undefined,
-  });
-  return { fields, values };
 }
 
 export class IntakeProjectNotFoundError extends Error {}
