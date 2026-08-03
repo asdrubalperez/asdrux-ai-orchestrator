@@ -55,7 +55,7 @@ const activeLogins = new Map<string, ActiveCodexLogin>();
 
 function extractChallenge(message: any): { verificationUri: string; userCode: string; expiresAt: string | null } | null {
   const params = message.params ?? message.result ?? {};
-  const verificationUri = params.verificationUri ?? params.verification_uri ?? params.url;
+  const verificationUri = params.verificationUrl ?? params.verificationUri ?? params.verification_uri ?? params.url;
   const userCode = params.userCode ?? params.user_code ?? params.code;
   if (typeof verificationUri !== "string" || typeof userCode !== "string") return null;
   const expiresAt = params.expiresAt ?? params.expires_at ?? null;
