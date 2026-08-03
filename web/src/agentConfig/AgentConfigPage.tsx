@@ -327,7 +327,7 @@ function AgentConfigForm(props: {
           onChange={(event) => setAuthMode(event.target.value as AuthMode)}
         >
           <option value="api_key">API key propia</option>
-          <option value="cli_session">Sesión OAuth (transitorio, ver Parte 2)</option>
+          <option value="cli_session">Sesión OAuth (personal)</option>
         </select>
       </div>
 
