@@ -57,6 +57,14 @@ export class IntakeMappingAuthModeUnsupportedError extends Error {}
 export async function mapIntakeText(params: { userId: string; inputText: string; previousValues?: BusinessCaseValues }) {
   const fields = await getIntakeFieldDefinitions();
   const config = await resolveAgentConfig(params.userId, "intake");
+  // FEATURE-025-Parte-3, sección 5.17: a diferencia de los 5 roles reales (executorMetadata
+  // persistido por fase), el mapeo de intake no crea ningún run/evento -- sin este log no hay
+  // ninguna forma de confirmar después de los hechos qué adaptador/modelo/modo de auth resolvió
+  // realmente. Nunca incluye el texto del caso ni ningún secreto.
+  const startedAt = Date.now();
+  console.log(
+    `[intake-mapping] userId=${params.userId} provider=${config.executorProvider} model=${config.model ?? "(default)"} authMode=${config.authMode}`
+  );
 
   const authentication = await resolveExecutorAuthentication(params.userId, config);
   try {
@@ -68,7 +76,11 @@ export async function mapIntakeText(params: { userId: string; inputText: string;
       model: config.model,
       authentication,
     });
+    console.log(`[intake-mapping] resultado=ok durationMs=${Date.now() - startedAt}`);
     return { fields, values };
+  } catch (err) {
+    console.log(`[intake-mapping] resultado=error durationMs=${Date.now() - startedAt} tipo=${(err as Error).constructor.name}`);
+    throw err;
   } finally {
     await finalizeExecutorAuthentication(authentication);
   }
