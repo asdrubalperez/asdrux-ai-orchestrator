@@ -5,9 +5,9 @@
 * **Name:** OAuth personal por usuario y proveedor de IA
 * **Type:** Autenticación / aislamiento de credenciales / integración de proveedores
 * **Owner:** Asdrubal Pérez
-* **Status:** Aprobado — en implementación (2026-08-02)
+* **Status:** Cerrada — validada end-to-end en vivo en el VPS (2026-08-03)
 * **Priority:** Alta
-* **Approval Gate:** Abierto — aprobado por el owner tras cerrar el hallazgo de la capa holder/worker (sección 7.11)
+* **Approval Gate:** Cerrado — aprobado por el owner tras cerrar el hallazgo de la capa holder/worker (sección 7.11); validación E2E real con cuentas de Claude y Codex completada
 * **Dependencia principal:** FEATURE-025 Parte 1
 * **Spike técnico:** Cerrado satisfactoriamente
 
@@ -1735,4 +1735,54 @@ Antes de aprobar deben cerrarse estas decisiones:
 
     * Confirmar que el rol `intake` consumirá esta infraestructura en FEATURE-025 Parte 3 y no amplía el alcance de Parte 2.
 
-**Estado del gate:** cerrado — diseño completo pendiente de revisión técnica final y aprobación explícita.
+**Estado del gate:** cerrado — diseño completo, revisado técnicamente y aprobado explícitamente.
+
+## 10.1 Resultado de la validación E2E en vivo (2026-08-03)
+
+Validada punta a punta en el VPS por el owner, con cuentas reales de Claude y Codex conectadas por
+OAuth. Circuito completo ejercitado: Architect (roadmap de dos releases) → Functional → Planning →
+loop Developer↔QA → aprobación de merge (Modo Manual) → cierre de release r1 → continuación al
+release r2 (Activo) → mismo circuito completo de nuevo → resuelto. Confirmado en la práctica:
+
+* Conexión/desconexión OAuth por usuario y proveedor desde `/settings/agents`, incluyendo el aviso
+  de runs activos al desconectar.
+* Materialización/promoción de la sesión funcionando de punta a punta (sin pérdida ni corrupción del
+  archivo de sesión a través de múltiples fases e invocaciones).
+* Bloqueo del worker verificado indirectamente: ninguna fase filtró `CLAUDE_CONFIG_DIR`/`CODEX_HOME`.
+
+La validación en vivo encontró y corrigió, en el camino, varios bugs reales — algunos específicos de
+OAuth, otros preexistentes pero nunca antes ejercitados con el circuito completo + credenciales
+reales por usuario. Detalle completo de cada uno en la entrada de `docs/ROADMAP.md`
+(`### ✅ FEATURE-025-Parte-2`). Resumen:
+
+1. `git push` de la aprobación de merge (Modo Manual) fallaba con "Invalid username or token" —
+   `mergeFeatureBranchIntoBase` nunca recibía `gitAuth`, a diferencia de `pushRunBranch`/
+   `cloneRunRepository`. Corregido (parámetro `gitAuth` opcional threaded desde
+   `respondMergeApproval`).
+2. El handler de errores genérico de Express (`app.ts`) no logueaba nada — un 500 real era invisible
+   en `journalctl`. Corregido.
+3. `isNotApplicableOutput` solo reconocía la forma objeto (`{notApplicable: true}`), que
+   `PHASE_RESULT_SCHEMA` de `CodexExecutor` no puede producir (`outputArtifact` restringido a
+   `string|null`) — la señal de "esta escalación no me corresponde" se perdía, causando que Architect
+   re-propusiera un roadmap ya cerrado desde cero. Corregido reconociendo también la forma string
+   embebida ("NO_APLICA: true").
+4. La base de worktrees se anidaba en cadena (`ai-orchestrator-worktrees` repetido hasta 4 veces) en
+   runs con varios reingresos — el default dependía de `repoRoot`, que en el flujo real
+   "standalone-clone" es el worktree del run padre. Corregido con una base estable independiente de
+   `repoRoot` (`defaultWorktreesBaseDir`, mismo criterio que `cloneRunRepository`).
+5. Sesión OAuth de Claude fallaba con "API Error: 400 Invalid effort level" en cuentas donde el
+   nivel de esfuerzo por default del CLI no está habilitado. Corregido fijando `--effort medium`
+   para `cli_session`.
+6. El modelo real ejecutado podía diferir silenciosamente del configurado, por remapeo del propio
+   Claude Code cuando la cuenta conectada no tiene el modelo pedido disponible (comportamiento
+   documentado oficialmente; el aviso se suprime bajo `--output-format json`). Mitigado traduciendo
+   el modelo configurado a su alias genérico (`opus`/`sonnet`/`haiku`) solo para `cli_session` —
+   sigue siendo una limitación de la cuenta/organización conectada cuando esta restringe modelos, no
+   del código (confirmado: con una cuenta personal sin esa restricción, el modelo real coincide con
+   el configurado).
+7. Catálogo de modelos de Codex desactualizado (faltaba `gpt-5.6-terra`) — corregido contra la
+   documentación oficial vigente.
+
+**No ejecutado en esta sesión, explícitamente pendiente de confirmación separada del owner:** el
+cutover legacy (borrado del caché OAuth global anterior en el VPS, sección 5.18/6.6) — es
+destructivo y el propio diseño lo exige como paso separado y validado.

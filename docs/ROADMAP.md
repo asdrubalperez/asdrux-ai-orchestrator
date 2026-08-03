@@ -271,16 +271,14 @@
   la rama `feature/025-parte-1-asistente-modelo-credenciales`, pendiente de validación E2E en VPS.
   Diseño en
   `docs/features/FEATURE-025-Parte-1-Asistente-Modelo-y-Credenciales-API-por-Agente.md`.
-- FEATURE-025-Parte-2 — OAuth personal por proveedor de IA (Claude/Codex). Prioridad Media, después
-  de Parte 1. El modo `cli_session` ya existe como selector por usuario/rol, pero el secreto real
-  detrás es hoy una sesión OAuth compartida del host (`CLAUDE_OAUTH_CACHE_DIR`/
-  `CODEX_OAUTH_CACHE_DIR`, variables de entorno globales) — mismo problema de credencial compartida
-  que Parte 1 resuelve para `api_key`. Se separó de Parte 1 porque su viabilidad técnica no está
-  confirmada (a diferencia de GitHub/FEATURE-026, no se sabe si Claude Code CLI/Codex CLI exponen
-  un OAuth delegable equivalente) — requiere un spike técnico antes de cerrar el diseño funcional.
-  Diseño preliminar en
-  `docs/features/FEATURE-025-Parte-2-OAuth-Personal-por-Proveedor-de-IA.md`. Contexto completo de
-  la priorización y la división en
+- ✅ FEATURE-025-Parte-2 — OAuth personal por proveedor de IA (Claude/Codex). Implementada y
+  validada end-to-end en el VPS con cuentas reales de Claude y Codex (circuito completo Architect→
+  Functional→Planning→Developer↔QA→merge→cierre de release→continuación al release siguiente). El
+  spike técnico confirmó que ambos CLIs exponen un flujo de login delegable por usuario. Detalle
+  completo de la implementación y de los bugs encontrados/corregidos durante la validación en la
+  sección detallada más abajo y en
+  `docs/features/FEATURE-025-Parte-2-OAuth-Personal-por-Proveedor-de-IA.md`. Contexto de la
+  priorización y la división en
   `docs/research/HANDOFF-FEATURE-025-priorizacion-y-division-en-dos-partes.md`.
 - FEATURE-025-Parte-3 — Soporte Codex/OAuth para el Asistente de Entrada (mapeo de intake).
   Prioridad Baja. Surgió al implementar Parte 1: el mapeo (`mapBusinessCase.ts`) es una llamada
@@ -339,8 +337,8 @@
 
 ## Priorización — Matriz Esfuerzo × Impacto
 
-Ponderación de los ítems 🟡 Confirmado (más FEATURE-026/028/029/032/036/037/038/042/043, ya ✅
-Ejecutado, dejados aquí como referencia histórica de la corrida de priorización). FEATURE-030 fue
+Ponderación de los ítems 🟡 Confirmado (más FEATURE-025-Parte-2/026/028/029/032/036/037/038/042/043,
+ya ✅ Ejecutado, dejados aquí como referencia histórica de la corrida de priorización). FEATURE-030 fue
 retirada de esta matriz — su alcance quedó absorbido por FEATURE-042 (ver detalle en la sección de
 abajo).
 Ordenada por Ponderación (Alta → Media → Baja) y, dentro de cada nivel, por Impacto y luego por
@@ -819,21 +817,62 @@ real entre las tres superficies de configuración originales — contexto comple
 Diseño preliminar completo (Scope, Functional Rules borrador, modelo de datos abierto, Risks) en
 `docs/features/FEATURE-025-Parte-1-Asistente-Modelo-y-Credenciales-API-por-Agente.md`.
 
-### 🟡 FEATURE-025-Parte-2 — OAuth personal por proveedor de IA
-Separada de Parte 1 el 2026-08-02. El modo de autenticación `cli_session` ya existe como selector
-por usuario/rol desde FEATURE-016, pero el secreto real detrás es hoy una única sesión OAuth
+### ✅ FEATURE-025-Parte-2 — OAuth personal por proveedor de IA
+Separada de Parte 1 el 2026-08-02. El modo de autenticación `cli_session` ya existía como selector
+por usuario/rol desde FEATURE-016, pero el secreto real detrás era una única sesión OAuth
 **compartida del host** (`CLAUDE_OAUTH_CACHE_DIR`/`CODEX_OAUTH_CACHE_DIR`, variables de entorno
-globales del proceso, confirmado contra `claudeCodeExecutor.ts`/`codexExecutor.ts`) — el selector
-aparenta ser por-usuario pero no lo es, mismo problema de credencial compartida que Parte 1 resuelve
-para `api_key`.
+globales del proceso) — el selector aparentaba ser por-usuario pero no lo era, mismo problema de
+credencial compartida que Parte 1 resolvió para `api_key`. El spike técnico previo confirmó que
+tanto Claude Code CLI (`claude auth login --claudeai`) como Codex CLI (`account/login/start` vía
+app-server, `chatgptDeviceCode`) exponen un flujo de login delegable por usuario.
 
-Se separó de Parte 1 porque, a diferencia de GitHub (FEATURE-026, OAuth Apps estándar y bien
-documentados), no está confirmado que Claude Code CLI o Codex CLI expongan un mecanismo de OAuth
-delegable equivalente — requiere un spike técnico antes de poder cerrar el diseño funcional
-completo con la misma confianza que Parte 1. No bloquea ni depende de Parte 1 más allá de compartir
-la misma UI/tabla de configuración de agente.
+Implementada: conexión/desconexión OAuth por usuario y proveedor desde `/settings/agents`, sesión
+cifrada (AES-256-GCM + AAD ligado al proveedor) con CAS por `session_version`, materialización
+efímera por invocación (directorio temporal, montado escribible solo durante la fase, recogido y
+promovido al terminar — nunca el caché global de antes), single-flight de refresh, y bloqueo
+explícito de `CLAUDE_CONFIG_DIR`/`CODEX_HOME` en los 4 puntos de aislamiento holder/worker.
 
-Diseño preliminar (con el spike técnico requerido explícito en la sección 7.1) en
+Validada end-to-end en vivo en el VPS por el owner, con cuentas reales de Claude y Codex, dos
+releases completos (MVP + evolución) del mismo caso de negocio, circuito completo Architect→
+Functional→Planning→Developer↔QA→merge Modo Manual→cierre de release→continuación al release
+siguiente. La validación encontró y corrigió, en el camino, varios bugs reales no relacionados con
+OAuth per se pero expuestos por primera vez al ejercitar el circuito completo con credenciales
+reales por usuario:
+
+- `mergeFeatureBranchIntoBase` nunca recibía la credencial de GitHub del owner del run (a diferencia
+  de `pushRunBranch`/`cloneRunRepository`) — el push de la aprobación de merge fallaba con
+  "Invalid username or token" (no un token vencido: nunca se inyectaba ninguno).
+- El handler de errores genérico de Express no logueaba nada — un 500 real quedaba invisible en
+  `journalctl`.
+- `isNotApplicableOutput` solo reconocía la forma objeto (`{notApplicable: true}`) documentada como
+  "la que usa Codex", pero el schema JSON de `CodexExecutor` restringe `outputArtifact` a
+  `string|null` — estructuralmente no puede producir esa forma. Cuando Codex pasaba una revisión de
+  escalamiento sin ARTEFACTO/ROADMAP reales, la señal de "paso" se perdía, la fase siguiente recibía
+  un contexto vacío, y el reintento automático resultante perdía el `humanSolution` original
+  ("no reproponer el roadmap, ya hay un release siguiente activo") — Architect terminaba
+  re-proponiendo el roadmap desde cero, revirtiendo un release ya cerrado. Corregido reconociendo
+  también la forma string ("NO_APLICA: true" embebida como texto, misma convención que ya usa para
+  ROADMAP/FEATURES).
+- Base de worktrees se anidaba en cadena (`ai-orchestrator-worktrees` repetido hasta 4 veces) en
+  runs con varios reingresos/continuaciones — el default asumía un `repoRoot` estable de un único
+  repo compartido (diseño original de FEATURE-019), pero el flujo real "standalone-clone" pasa el
+  worktree del run padre como `repoRoot` del hijo, componiendo un nivel más por cada hop.
+- Sesión OAuth de Claude fallaba con "API Error: 400 Invalid effort level" -- el CLI, sin `--effort`
+  explícito, elige por default un nivel que algunas cuentas conectadas no tienen habilitado. Se fija
+  `--effort medium` para `cli_session`.
+- El modelo real ejecutado podía diferir silenciosamente del configurado: Claude Code remapea el
+  `--model` pedido cuando la cuenta OAuth conectada no lo tiene disponible (confirmado documentado
+  oficialmente — restricciones de modelo a nivel de organización/cuenta), y ese aviso se suprime
+  bajo `--output-format json`. Se traduce el modelo configurado a alias genérico (`opus`/`sonnet`/
+  `haiku`) solo para `cli_session`, que resuelve de forma más confiable a la versión permitida por
+  la cuenta; sigue siendo una limitación de la cuenta conectada, no del código, cuando esa cuenta
+  tiene una organización que restringe modelos (confirmado en vivo: con una cuenta personal sin esa
+  restricción, el modelo real coincide con el configurado).
+
+Cutover legacy (borrado del caché OAuth global previo en el VPS) pendiente de confirmación explícita
+del owner — no ejecutado en esta sesión por ser destructivo sobre el VPS.
+
+Diseño completo (con el spike técnico y su resultado en la sección 7.1) en
 `docs/features/FEATURE-025-Parte-2-OAuth-Personal-por-Proveedor-de-IA.md`.
 
 ### ✅ FEATURE-026 — Autenticación GitHub por usuario para operaciones Git
