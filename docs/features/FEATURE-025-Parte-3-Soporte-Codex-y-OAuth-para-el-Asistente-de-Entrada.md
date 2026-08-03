@@ -5,9 +5,9 @@
 * **Name:** Soporte Codex y OAuth para el Asistente de Entrada
 * **Type:** Ampliación de integración / mapeo de intake
 * **Owner:** Asdrubal Pérez
-* **Status:** Aprobado — en implementación (2026-08-03)
+* **Status:** Cerrada — validada end-to-end en vivo en el VPS (2026-08-03)
 * **Priority:** Media
-* **Approval Gate:** Abierto — aprobado por el owner tras la decisión de arquitectura documentada en 3.1 (OAuth reutiliza el holder Docker de los roles reales; API key mantiene el camino HTTP directo)
+* **Approval Gate:** Cerrado — implementado, desplegado y validado en vivo en las 4 combinaciones (ver sección 11)
 * **Dependencias:**
 
   * FEATURE-025 Parte 1 — implementada
@@ -1453,4 +1453,27 @@ Antes de aprobar deben confirmarse:
 
     * Aprobación explícita del owner antes de implementar.
 
-**Estado del gate:** abierto — diseño completo, revisado técnicamente contra el código real (validación de `mapBusinessCase.ts`, `intakeService.ts`, runtime de Parte 2, protocolo Codex app-server, catálogo de modelos de OpenAI) y aprobado explícitamente por el owner el 2026-08-03, con la decisión de arquitectura de la sección 3.1 (API key vía HTTP directo sin Docker; OAuth reutilizando el holder Docker de los roles reales, sin worker).
+**Estado del gate:** cerrado — diseño completo, revisado técnicamente contra el código real (validación de `mapBusinessCase.ts`, `intakeService.ts`, runtime de Parte 2, protocolo Codex app-server, catálogo de modelos de OpenAI), aprobado explícitamente por el owner el 2026-08-03 con la decisión de arquitectura de la sección 3.1, implementado y validado end-to-end en vivo en el VPS el mismo día (ver sección 11).
+
+---
+
+# 11. Resultado de la validación E2E en vivo
+
+Validación realizada en vivo en el VPS por el owner, probando las 4 combinaciones de la matriz una por una contra el endpoint real `/intake/map`, con logging de observabilidad (`[intake-mapping] provider=... model=... authMode=...` / `resultado=ok|error durationMs=...`) agregado durante la propia validación para poder confirmar en cada caso que el proveedor/modelo/modo de autenticación efectivamente usado coincidía con la configuración del agente (global o con override) elegida por el usuario.
+
+**Resultados:**
+
+| Provider | AuthMode | Modelo | Resultado | Duración |
+|---|---|---|---|---|
+| Claude | OAuth (`cli_session`) | `claude-haiku-4-5-20251001` | ok | 18.0s |
+| Claude | API key | `claude-sonnet-5` | ok | 5.2s |
+| Codex | API key | `gpt-5.6-sol` | ok | 6.4s |
+| Codex | OAuth (`cli_session`) | `gpt-5.6-sol` | ok | 12.0s |
+
+Las 4 combinaciones de la matriz (Claude/Codex × api_key/cli_session) mapearon el caso de negocio correctamente en el primer intento, sin errores ni reintentos. En particular, la combinación de mayor riesgo identificada en el diseño (Codex + OAuth, protocolo JSON-RPC `app-server` nunca antes ejercitado contra una cuenta real) funcionó sin ajustes.
+
+**Lecciones aprendidas:**
+
+* La verificación empírica de qué configuración se está usando realmente (no solo que el mapeo "funcione") requirió agregar logging explícito de `provider`/`model`/`authMode` resueltos — sin eso, un mapeo exitoso con el proveedor equivocado habría pasado desapercibido. Se agregó en `mapIntakeText` (`src/cli/intakeService.ts`) y quedó como observabilidad permanente, no solo para esta validación.
+* El diseño híbrido (API key = HTTP directo; OAuth = reutilización del holder Docker de los roles reales, sin worker/tools) validado en la sección 3.1 resultó directamente implementable sin fricción: `resolveExecutorAuthentication`/`finalizeExecutorAuthentication` eran ya agnósticos de pipeline, y los adaptadores Docker-directos para OAuth no necesitaron tocar `ClaudeCodeExecutor`/`CodexExecutor` más que para reexportar constantes ya existentes (imagen, flags de seguridad, allowlist de env, alias de modelo).
+* Los dos riesgos de diseño explícitamente señalados antes de aprobar (catálogo de modelos de OpenAI sin validar en vivo; protocolo JSON-RPC de Codex OAuth sin validar en vivo) se cerraron ambos en la primera pasada de testing en vivo, sin necesidad de iteración — a diferencia de Parte 2, que requirió 11 rondas de fix/redeploy antes de cerrar. Los adaptadores de mapping (nuevos, sin overlap con el runtime de pipeline ya endurecido en Parte 1/2) resultaron mucho más simples de validar por no tener tools, worker ni estado de pipeline involucrado.

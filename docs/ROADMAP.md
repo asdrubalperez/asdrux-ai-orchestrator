@@ -252,6 +252,21 @@
   central de esta Feature. Diseño completo (Functional Rules, Scope, 10 escenarios de validación,
   Approval Gate) y resultado de implementación en
   `docs/features/FEATURE-043-Separar-configuración-de-ejecución-del-caso-de-negocio.md`.
+- ✅ FEATURE-025-Parte-3 — Soporte Codex/OAuth para el Asistente de Entrada (mapeo de intake).
+  Cierra el corte explícito dejado por Parte 1: el mapeo (`mapBusinessCase.ts`) ahora soporta las 4
+  combinaciones (Claude/Codex × api_key/cli_session), no solo Claude + API key. Decisión de
+  arquitectura híbrida (sección 3.1 del diseño): API key sigue siendo HTTP directo sin Docker; OAuth
+  reutiliza el holder Docker de los roles reales (misma imagen y flags de seguridad de
+  `ClaudeCodeExecutor`/`CodexExecutor`), sin worker, sin MCP, sin tools — el mapeo de intake no
+  necesita ejecutar tools, así que no necesita la mitad "worker" del par holder/worker.
+  **Validación E2E real (2026-08-03, VPS productivo)**: las 4 combinaciones probadas en vivo por el
+  owner contra `/intake/map` funcionaron correctamente en el primer intento, incluida Codex + OAuth
+  (protocolo JSON-RPC `app-server` nunca antes ejercitado contra una cuenta real). Se agregó logging
+  de observabilidad (`provider`/`model`/`authMode` resueltos y `resultado=ok|error`) en
+  `mapIntakeText` durante la propia validación, necesario para confirmar que el mapeo usaba
+  realmente la configuración elegida por el usuario y no solo que "funcionara". Diseño completo y
+  resultado de la validación en
+  `docs/features/FEATURE-025-Parte-3-Soporte-Codex-y-OAuth-para-el-Asistente-de-Entrada.md`.
 
 **🟡 Confirmado**
 - FEATURE-025-Parte-1 — Asistente IA, modelo y credenciales API por agente. Prioridad Alta (próxima
@@ -280,13 +295,6 @@
   `docs/features/FEATURE-025-Parte-2-OAuth-Personal-por-Proveedor-de-IA.md`. Contexto de la
   priorización y la división en
   `docs/research/HANDOFF-FEATURE-025-priorizacion-y-division-en-dos-partes.md`.
-- FEATURE-025-Parte-3 — Soporte Codex/OAuth para el Asistente de Entrada (mapeo de intake).
-  Prioridad Baja. Surgió al implementar Parte 1: el mapeo (`mapBusinessCase.ts`) es una llamada
-  HTTP directa y exclusiva a la API de Anthropic, sin pasar por `ClaudeCodeExecutor`/`CodexExecutor`
-  — si el rol "intake" se configura con Codex o con `cli_session`, hoy corta con un error explícito
-  en vez de intentar algo que no existe. Sin urgencia: el mapeo funciona con Claude + API key
-  propia, la configuración por defecto. Diseño preliminar en
-  `docs/features/FEATURE-025-Parte-3-Soporte-Codex-y-OAuth-para-el-Asistente-de-Entrada.md`.
 - FEATURE-027 — Continuidad durable del loop Developer ↔ QA. Prioridad P0.
 - FEATURE-033 — Lifecycle canónico de `01-PROJECT-BRIEF-TEMPLATE`.
 - FEATURE-034 — Lifecycle canónico de `02-ARCHITECTURE-TEMPLATE`.
@@ -337,7 +345,7 @@
 
 ## Priorización — Matriz Esfuerzo × Impacto
 
-Ponderación de los ítems 🟡 Confirmado (más FEATURE-025-Parte-2/026/028/029/032/036/037/038/042/043,
+Ponderación de los ítems 🟡 Confirmado (más FEATURE-025-Parte-2/025-Parte-3/026/028/029/032/036/037/038/042/043,
 ya ✅ Ejecutado, dejados aquí como referencia histórica de la corrida de priorización). FEATURE-030 fue
 retirada de esta matriz — su alcance quedó absorbido por FEATURE-042 (ver detalle en la sección de
 abajo).
