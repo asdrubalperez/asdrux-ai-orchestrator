@@ -378,6 +378,19 @@ export async function forceUserEscalation(runId: string, userId: string): Promis
 }
 
 /** FEATURE-017: lista mínima de "mis casos" — exclusivamente los del usuario autenticado. */
+/**
+ * FEATURE-025-Parte-2, sección 5.16.2/3: usado por la desconexión de OAuth para advertir sobre
+ * runs activos del usuario -- no distingue qué runs usan efectivamente esta conexión en particular
+ * (la configuración se resuelve por fase, no se persiste "este run usa la conexión X"), así que se
+ * informa el conjunto completo de runs `running` del usuario como advertencia conservadora.
+ */
+export async function listRunningRunIdsForUser(userId: string): Promise<string[]> {
+  const result = await pool.query<{ id: string }>("select id from runs where owner_id = $1 and status = 'running'", [
+    userId,
+  ]);
+  return result.rows.map((row) => row.id);
+}
+
 export async function listRunsForUser(userId: string): Promise<RunRow[]> {
   const result = await pool.query<RunRow>("select * from runs where owner_id = $1 order by created_at desc", [
     userId,
@@ -741,6 +754,119 @@ export async function deleteAiProviderCredential(userId: string, provider: Execu
     userId,
     provider,
   ]);
+}
+
+// FEATURE-025-Parte-2, sección 7.1: conexiones OAuth personales -- CRUD crudo. La materialización,
+// el cifrado/descifrado del envelope y la lógica de refresh/CAS de alto nivel viven en
+// src/auth/aiOAuthSessionService.ts (capa de servicio), mismo criterio de capas que
+// aiCredentialService.ts sobre user_ai_provider_credentials.
+
+export type OAuthConnectionStatus = "connected" | "reauth_required";
+
+export interface UserAiOAuthConnectionRow {
+  id: string;
+  user_id: string;
+  provider: ExecutorProviderName;
+  encrypted_session: string;
+  status: OAuthConnectionStatus;
+  session_version: number;
+  created_at: string;
+  updated_at: string;
+  last_validated_at: string | null;
+  reauth_required_at: string | null;
+}
+
+export async function getAiOAuthConnection(
+  userId: string,
+  provider: ExecutorProviderName
+): Promise<UserAiOAuthConnectionRow | null> {
+  const result = await pool.query<UserAiOAuthConnectionRow>(
+    `select id, user_id, provider, encrypted_session, status, session_version, created_at, updated_at,
+            last_validated_at, reauth_required_at
+     from user_ai_oauth_connections
+     where user_id = $1 and provider = $2`,
+    [userId, provider]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function listAiOAuthConnections(userId: string): Promise<UserAiOAuthConnectionRow[]> {
+  const result = await pool.query<UserAiOAuthConnectionRow>(
+    `select id, user_id, provider, encrypted_session, status, session_version, created_at, updated_at,
+            last_validated_at, reauth_required_at
+     from user_ai_oauth_connections
+     where user_id = $1
+     order by provider asc`,
+    [userId]
+  );
+  return result.rows;
+}
+
+/**
+ * Sección 6.1 del diseño: primera persistencia de una conexión recién autenticada -- siempre
+ * session_version = 1, status = 'connected'. Sustituye cualquier conexión previa del mismo
+ * (user_id, provider) (reautenticar reemplaza, nunca versiona conexiones viejas -- Excluido de la
+ * Feature).
+ */
+export async function createAiOAuthConnection(
+  userId: string,
+  provider: ExecutorProviderName,
+  encryptedSession: string
+): Promise<UserAiOAuthConnectionRow> {
+  const result = await pool.query<UserAiOAuthConnectionRow>(
+    `insert into user_ai_oauth_connections (user_id, provider, encrypted_session, status, session_version, last_validated_at)
+     values ($1, $2, $3, 'connected', 1, now())
+     on conflict (user_id, provider)
+     do update set encrypted_session = excluded.encrypted_session,
+                   status = 'connected',
+                   session_version = 1,
+                   last_validated_at = now(),
+                   reauth_required_at = null,
+                   updated_at = now()
+     returning id, user_id, provider, encrypted_session, status, session_version, created_at, updated_at,
+               last_validated_at, reauth_required_at`,
+    [userId, provider, encryptedSession]
+  );
+  return result.rows[0];
+}
+
+/**
+ * Sección 7.3: compare-and-swap -- una fila afectada igual a cero representa conflicto (otro
+ * proceso ya promovió una versión más nueva). El caller debe releer y descartar la rama local
+ * (Regla 5.11.8), nunca reintentar ciegamente con el mismo `expectedVersion`.
+ */
+export async function promoteAiOAuthSession(params: {
+  connectionId: string;
+  expectedVersion: number;
+  encryptedSession: string;
+}): Promise<UserAiOAuthConnectionRow | null> {
+  const result = await pool.query<UserAiOAuthConnectionRow>(
+    `update user_ai_oauth_connections
+     set encrypted_session = $3,
+         session_version = session_version + 1,
+         status = 'connected',
+         last_validated_at = now(),
+         reauth_required_at = null,
+         updated_at = now()
+     where id = $1 and session_version = $2
+     returning id, user_id, provider, encrypted_session, status, session_version, created_at, updated_at,
+               last_validated_at, reauth_required_at`,
+    [params.connectionId, params.expectedVersion, params.encryptedSession]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function markAiOAuthConnectionReauthRequired(connectionId: string): Promise<void> {
+  await pool.query(
+    `update user_ai_oauth_connections
+     set status = 'reauth_required', reauth_required_at = now(), updated_at = now()
+     where id = $1`,
+    [connectionId]
+  );
+}
+
+export async function deleteAiOAuthConnection(userId: string, provider: ExecutorProviderName): Promise<void> {
+  await pool.query("delete from user_ai_oauth_connections where user_id = $1 and provider = $2", [userId, provider]);
 }
 
 export async function recordRunConfigVersions(runId: string, client?: PoolClient): Promise<void> {

@@ -1,21 +1,36 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { KeyRound, Loader2, Trash2 } from "lucide-react";
+import { ExternalLink, KeyRound, Loader2, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
 import { queryClient } from "../lib/queryClient";
+import { ApiError } from "./api";
 import {
+  cancelOAuthLogin,
   clearRoleAgentConfig,
   deleteAiCredential,
+  disconnectOAuth,
   getAgentConfig,
   getAiCredentialStatuses,
+  getOAuthConnectionStatuses,
+  pollCodexLogin,
   setAiCredential,
   setGlobalAgentConfig,
   setRoleAgentConfig,
+  startOAuthLogin,
+  submitClaudeLoginCode,
 } from "./api";
-import type { AgentRole, AiCredentialStatus, AuthMode, EffectiveAgentConfig, ExecutorProviderName } from "./types";
+import type {
+  AgentRole,
+  AiCredentialStatus,
+  AuthMode,
+  EffectiveAgentConfig,
+  ExecutorProviderName,
+  OAuthConnectionStatus,
+  OAuthLoginChallenge,
+} from "./types";
 
 const ROLE_LABELS: Record<AgentRole, string> = {
   architect: "Architect",
@@ -47,12 +62,16 @@ const DEFAULT_CONFIG: EffectiveAgentConfig = { executorProvider: "claude", authM
 export function AgentConfigPage() {
   const configQuery = useQuery({ queryKey: ["agent-config"], queryFn: () => getAgentConfig() });
   const credentialsQuery = useQuery({ queryKey: ["agent-credentials"], queryFn: () => getAiCredentialStatuses() });
+  const oauthQuery = useQuery({ queryKey: ["ai-oauth-connections"], queryFn: () => getOAuthConnectionStatuses() });
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["agent-config"] });
   };
   const invalidateCredentials = () => {
     void queryClient.invalidateQueries({ queryKey: ["agent-credentials"] });
+  };
+  const invalidateOAuth = () => {
+    void queryClient.invalidateQueries({ queryKey: ["ai-oauth-connections"] });
   };
 
   return (
@@ -69,6 +88,28 @@ export function AgentConfigPage() {
           Volver a proyectos
         </Link>
       </div>
+
+      <section className="rounded-lg border border-zinc-200 bg-white p-5">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Conexiones OAuth (personal)</h2>
+        <p className="mt-1 text-xs text-zinc-500">
+          Conectá tu propia cuenta de Claude o ChatGPT para usar el modo "Sesión OAuth". Reemplaza la sesión
+          compartida del servidor por una conexión tuya, aislada.
+        </p>
+        <div className="mt-4 space-y-4">
+          {oauthQuery.isLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />
+          ) : (
+            (["claude", "codex"] as const).map((provider) => (
+              <OAuthConnectionRow
+                key={provider}
+                provider={provider}
+                status={oauthQuery.data?.connections.find((c) => c.provider === provider) ?? null}
+                onChanged={invalidateOAuth}
+              />
+            ))
+          )}
+        </div>
+      </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-5">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Credenciales de IA</h2>
@@ -378,6 +419,200 @@ function CredentialRow(props: {
           </Button>
         </div>
       ) : null}
+      {error ? <p className="text-sm text-rose-700">{error}</p> : null}
+    </div>
+  );
+}
+
+const OAUTH_STATUS_LABEL: Record<OAuthConnectionStatus["status"], string> = {
+  not_connected: "No conectado",
+  connected: "Conectado",
+  reauth_required: "Requiere reautenticación",
+};
+
+function OAuthConnectionRow(props: {
+  provider: ExecutorProviderName;
+  status: OAuthConnectionStatus | null;
+  onChanged: () => void;
+}) {
+  const [challenge, setChallenge] = React.useState<OAuthLoginChallenge | null>(null);
+  const [code, setCode] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [activeRunIds, setActiveRunIds] = React.useState<string[] | null>(null);
+  const pollTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (pollTimer.current) clearTimeout(pollTimer.current);
+    };
+  }, []);
+
+  const statusValue = props.status?.status ?? "not_connected";
+
+  const authenticate = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await startOAuthLogin(props.provider);
+      setChallenge(result);
+      if (result.provider === "codex") {
+        pollCodex(result.attemptId);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo iniciar la conexión.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pollCodex = (attemptId: string) => {
+    pollTimer.current = setTimeout(async () => {
+      try {
+        const outcome = await pollCodexLogin(attemptId);
+        if (outcome.pending) {
+          pollCodex(attemptId);
+          return;
+        }
+        setChallenge(null);
+        props.onChanged();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo confirmar la conexión de Codex.");
+        setChallenge(null);
+      }
+    }, 3000);
+  };
+
+  const submitCode = async () => {
+    if (challenge?.provider !== "claude" || !code.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await submitClaudeLoginCode(challenge.attemptId, code);
+      setChallenge(null);
+      setCode("");
+      props.onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo confirmar el código.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancel = async () => {
+    if (!challenge) return;
+    if (pollTimer.current) clearTimeout(pollTimer.current);
+    setBusy(true);
+    try {
+      await cancelOAuthLogin(props.provider, challenge.attemptId);
+    } catch {
+      // best-effort
+    } finally {
+      setChallenge(null);
+      setCode("");
+      setBusy(false);
+    }
+  };
+
+  const disconnect = async (force: boolean) => {
+    setBusy(true);
+    setError(null);
+    setActiveRunIds(null);
+    try {
+      await disconnectOAuth(props.provider, force);
+      props.onChanged();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409 && Array.isArray((err.body as any)?.activeRunIds)) {
+        setActiveRunIds((err.body as { activeRunIds: string[] }).activeRunIds);
+        return;
+      }
+      setError(err instanceof Error ? err.message : "No se pudo desconectar.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="h-4 w-4 text-zinc-500" />
+          <span className="text-sm font-medium text-zinc-800">{PROVIDER_LABELS[props.provider]}</span>
+          <Badge variant={statusValue === "connected" ? "success" : statusValue === "reauth_required" ? "warning" : "outline"}>
+            {OAUTH_STATUS_LABEL[statusValue]}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-2">
+          {statusValue === "connected" ? (
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => void disconnect(false)}>
+              <Trash2 className="h-4 w-4" />
+              Desconectar
+            </Button>
+          ) : challenge ? (
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => void cancel()}>
+              Cancelar
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => void authenticate()}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {statusValue === "reauth_required" ? "Reautenticar" : "Autenticar"}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {challenge?.provider === "claude" ? (
+        <div className="space-y-2 rounded-md border border-zinc-200 bg-zinc-50 p-3">
+          <a
+            href={challenge.authorizeUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1 text-sm text-blue-700 underline"
+          >
+            Abrir autorización de Claude <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+          <div className="flex items-center gap-2">
+            <Input placeholder="Código de autorización" value={code} onChange={(event) => setCode(event.target.value)} />
+            <Button size="sm" disabled={busy || !code.trim()} onClick={() => void submitCode()}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Confirmar
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {challenge?.provider === "codex" ? (
+        <div className="space-y-1 rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm">
+          <a
+            href={challenge.verificationUri}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1 text-blue-700 underline"
+          >
+            Abrir autorización de Codex <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+          <p>
+            Código: <span className="font-mono font-semibold">{challenge.userCode}</span>
+          </p>
+          {challenge.expiresAt ? <p className="text-xs text-zinc-500">Vence: {challenge.expiresAt}</p> : null}
+          <p className="text-xs text-zinc-500">Esperando confirmación en el navegador...</p>
+        </div>
+      ) : null}
+
+      {activeRunIds ? (
+        <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <p>Tenés {activeRunIds.length} run(s) en curso. Desconectar ahora podría afectarlos si necesitan renovar sesión.</p>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setActiveRunIds(null)}>
+              Esperar
+            </Button>
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => void disconnect(true)}>
+              Desconectar igual
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       {error ? <p className="text-sm text-rose-700">{error}</p> : null}
     </div>
   );

@@ -7,7 +7,9 @@ const channelToken = process.env.QA_CHANNEL_TOKEN;
 const workerSocket = process.env.QA_WORKER_SOCKET;
 if (!worktree || !channelToken || !workerSocket) throw new Error("QA worker configuration is required");
 
-for (const secret of ["ANTHROPIC_API_KEY", "CODEX_API_KEY", "TAVILY_API_KEY"]) {
+// FEATURE-025-Parte-2: CLAUDE_CONFIG_DIR/CODEX_HOME apuntan al directorio OAuth materializado --
+// el worker no debe poder ni detectar que existe, mismo criterio que las API keys.
+for (const secret of ["ANTHROPIC_API_KEY", "CODEX_API_KEY", "TAVILY_API_KEY", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]) {
   if (process.env[secret]) throw new Error(`SECRET_IN_WORKER_ENV:${secret}`);
 }
 

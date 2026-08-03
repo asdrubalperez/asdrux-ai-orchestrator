@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readValidSession } from "../../auth/session.js";
 import { createGitProcessAuth } from "../../auth/gitConnectionService.js";
-import { resolveExecutorAuthentication } from "../../auth/aiCredentialService.js";
+import { finalizeExecutorAuthentication, resolveExecutorAuthentication } from "../../auth/aiCredentialService.js";
 import { ClaudeCodeExecutor } from "../../executor/claudeCodeExecutor.js";
 import { CodexExecutor } from "../../executor/codexExecutor.js";
 import {
@@ -389,7 +389,7 @@ export async function executePipelineRun(params: {
         phase.agentRole === "planning" ? await withRoleContext(projectId, runId, baseContext) : baseContext;
       const roleInstructions = await readRole(phase.agentRole);
       const selection = await resolveSelection(phase.agentRole);
-      const executor = await buildExecutor(selection, worktree.worktreePath, runId, userId);
+      const { executor, finalizeAuth } = await buildExecutor(selection, worktree.worktreePath, runId, userId);
 
       const invocation: PhaseInvocation = {
         agentRole: phase.agentRole,
@@ -401,7 +401,14 @@ export async function executePipelineRun(params: {
       phaseTiming.agentRole = invocation.agentRole;
       phaseTiming.startedAt = Date.now();
       await recordRunEvent(runId, "phase_started", { agentRole: invocation.agentRole });
-      const result = await executor.runPhase(invocation, { timeoutMs: timeoutForLinearPhase(phase.agentRole) });
+      // FEATURE-025-Parte-2, Regla 5.9.11/12: recoge un posible refresh OAuth y limpia el temporal
+      // materializado, sin importar si la fase terminó bien o mal -- no-op para api_key.
+      let result: PhaseResult;
+      try {
+        result = await executor.runPhase(invocation, { timeoutMs: timeoutForLinearPhase(phase.agentRole) });
+      } finally {
+        await finalizeAuth();
+      }
       const durationMs = Date.now() - phaseTiming.startedAt;
       // FEATURE-020: Planning nunca pasa; el marcador aplica a Architect/Functional acá.
       const isPass =
@@ -582,20 +589,38 @@ export async function executePipelineRun(params: {
     if (pipelineSpec.definition.loop) {
       const developerSelection = await resolveSelection("developer");
       const qaSelection = await resolveSelection("qa");
-      const developerExecutor = await buildExecutor(developerSelection, worktree.worktreePath, runId, userId, {
-        sandbox: "container",
-      });
-      const qaExecutor = await buildExecutor(qaSelection, worktree.worktreePath, runId, userId);
-      const finalResult = await runDeveloperQaLoop({
-        executor: qaExecutor,
-        developerExecutor,
-        readRole,
+      const { executor: developerExecutor, finalizeAuth: finalizeDeveloperAuth } = await buildExecutor(
+        developerSelection,
+        worktree.worktreePath,
         runId,
-        planningResult: previousResult as PhaseResult,
-        maxAttempts: pipelineSpec.definition.loop.maxAttempts,
-        phaseTiming,
-        featureLifecycle: true,
-      });
+        userId,
+        { sandbox: "container" }
+      );
+      const { executor: qaExecutor, finalizeAuth: finalizeQaAuth } = await buildExecutor(
+        qaSelection,
+        worktree.worktreePath,
+        runId,
+        userId
+      );
+      // FEATURE-025-Parte-2, Regla 5.9.11/12: ambos executors viven durante todo el loop
+      // Developer↔QA (incluido el chequeo de readiness interno) -- se recoge/limpia recién cuando
+      // termina, no-op para api_key.
+      let finalResult: PhaseResult;
+      try {
+        finalResult = await runDeveloperQaLoop({
+          executor: qaExecutor,
+          developerExecutor,
+          readRole,
+          runId,
+          planningResult: previousResult as PhaseResult,
+          maxAttempts: pipelineSpec.definition.loop.maxAttempts,
+          phaseTiming,
+          featureLifecycle: true,
+        });
+      } finally {
+        await finalizeDeveloperAuth();
+        await finalizeQaAuth();
+      }
 
       if (finalResult.status === "completed") {
         // FEATURE-019: en vez de finishRun con push+cleanup inmediato, la Feature aprobada
@@ -2005,11 +2030,13 @@ export function parseAuthMode(value: string): AuthMode {
 
 /**
  * FEATURE-025-Parte-1, sección 5.10: corte técnico previo a la invocación -- resuelve la
- * autenticación efectiva (credencial propia del usuario para `api_key`, nada para `cli_session`)
- * antes de construir el Executor. Si falta la credencial, `resolveExecutorAuthentication` lanza
- * `AgentCredentialMissingError`, que se propaga y cae en el catch genérico de
- * `executePipelineRun` (mismo mecanismo que cualquier otro error técnico mid-run: finaliza el run
- * como `failed` con un evento `run_error`, nunca invoca al agente).
+ * autenticación efectiva (credencial propia del usuario para `api_key`, conexión OAuth personal
+ * materializada para `cli_session` desde FEATURE-025-Parte-2) antes de construir el Executor. Si
+ * falta la credencial/conexión, `resolveExecutorAuthentication` lanza un error que se propaga y
+ * cae en el catch genérico de `executePipelineRun` (mismo mecanismo que cualquier otro error
+ * técnico mid-run: finaliza el run como `failed` con un evento `run_error`, nunca invoca al
+ * agente). `finalizeAuth` DEBE llamarse en un `finally` por el caller después de usar el Executor
+ * (recoge un posible refresh OAuth y limpia el temporal -- no-op para `api_key`).
  */
 async function buildExecutor(
   selection: EffectiveAgentConfig,
@@ -2017,14 +2044,17 @@ async function buildExecutor(
   requestingRunId: string,
   userId: string,
   opts: { sandbox?: "host" | "container" } = {}
-): Promise<RunExecutor> {
+): Promise<{ executor: RunExecutor; finalizeAuth: () => Promise<void> }> {
   const authentication = await resolveExecutorAuthentication(userId, selection);
   const apiKey = authentication.mode === "api_key" ? authentication.apiKey : undefined;
+  const oauthDirectory = authentication.mode === "cli_session" ? authentication.oauthDirectory : undefined;
   const model = selection.model ?? undefined;
+  const finalizeAuth = () => finalizeExecutorAuthentication(authentication);
 
-  if (selection.executorProvider === "codex") {
-    return new CodexExecutor({ workingDirectory, requestingRunId, model, authMode: selection.authMode, apiKey, ...opts });
-  }
+  const executor =
+    selection.executorProvider === "codex"
+      ? new CodexExecutor({ workingDirectory, requestingRunId, model, authMode: selection.authMode, apiKey, oauthDirectory, ...opts })
+      : new ClaudeCodeExecutor({ workingDirectory, requestingRunId, model, authMode: selection.authMode, apiKey, oauthDirectory, ...opts });
 
-  return new ClaudeCodeExecutor({ workingDirectory, requestingRunId, model, authMode: selection.authMode, apiKey, ...opts });
+  return { executor, finalizeAuth };
 }

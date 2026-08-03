@@ -1,5 +1,13 @@
 import { apiUrl } from "../lib/api";
-import type { AgentConfigResponse, AgentRole, AiCredentialStatus, EffectiveAgentConfig } from "./types";
+import type {
+  AgentConfigResponse,
+  AgentRole,
+  AiCredentialStatus,
+  EffectiveAgentConfig,
+  ExecutorProviderName,
+  OAuthConnectionStatus,
+  OAuthLoginChallenge,
+} from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -59,4 +67,42 @@ export function setAiCredential(
 
 export function deleteAiCredential(provider: "claude" | "codex"): Promise<{ ok: true }> {
   return request(`/agent-credentials/${encodeURIComponent(provider)}`, { method: "DELETE" });
+}
+
+// FEATURE-025-Parte-2: conexiones OAuth personales.
+
+export function getOAuthConnectionStatuses(): Promise<{ connections: OAuthConnectionStatus[] }> {
+  return request("/ai-oauth-connections");
+}
+
+export function startOAuthLogin(provider: ExecutorProviderName): Promise<OAuthLoginChallenge> {
+  return request(`/ai-oauth-connections/${encodeURIComponent(provider)}/login`, { method: "POST" });
+}
+
+export function submitClaudeLoginCode(
+  attemptId: string,
+  code: string
+): Promise<{ connection: OAuthConnectionStatus }> {
+  return request(`/ai-oauth-connections/claude/login/${encodeURIComponent(attemptId)}/code`, {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
+}
+
+export function pollCodexLogin(
+  attemptId: string
+): Promise<{ pending: true } | { pending: false; connection: OAuthConnectionStatus }> {
+  return request(`/ai-oauth-connections/codex/login/${encodeURIComponent(attemptId)}/poll`, { method: "POST" });
+}
+
+export function cancelOAuthLogin(provider: ExecutorProviderName, attemptId: string): Promise<{ ok: true }> {
+  return request(`/ai-oauth-connections/${encodeURIComponent(provider)}/login/${encodeURIComponent(attemptId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function disconnectOAuth(provider: ExecutorProviderName, force = false): Promise<{ ok: true }> {
+  return request(`/ai-oauth-connections/${encodeURIComponent(provider)}${force ? "?force=true" : ""}`, {
+    method: "DELETE",
+  });
 }

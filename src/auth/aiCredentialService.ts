@@ -8,6 +8,13 @@ import {
 } from "../db/repository.js";
 import { aiCredentialEncryptionKeyFromEnv } from "./aiCredentialEncryptionKey.js";
 import { decryptGitToken, encryptGitToken } from "./gitCredentialEncryption.js";
+import {
+  collectAndPromoteOAuthSession,
+  cleanupMaterializedOAuthSession,
+  materializeOAuthSession,
+  resolveOAuthConnection,
+  type MaterializedOAuthSession,
+} from "./aiOAuthSessionService.js";
 
 // FEATURE-025-Parte-1: capa de servicio sobre user_ai_provider_credentials -- cifrado/descifrado y
 // resolución de autenticación en runtime, mismo criterio de capas que gitConnectionService.ts sobre
@@ -22,6 +29,10 @@ import { decryptGitToken, encryptGitToken } from "./gitCredentialEncryption.js";
  * cuando este error se lanza).
  */
 export class AgentCredentialMissingError extends Error {}
+
+/** FEATURE-025-Parte-2, sección 5.2.4/5: not_connected/reauth_required, distinguibles del caso genérico de api_key. */
+export class AgentOAuthNotConnectedError extends AgentCredentialMissingError {}
+export class AgentOAuthReauthRequiredError extends AgentCredentialMissingError {}
 
 export interface AiCredentialStatus {
   provider: ExecutorProviderName;
@@ -60,17 +71,34 @@ export async function removeAiCredential(userId: string, provider: ExecutorProvi
 /**
  * Sección 6.3 del diseño: resolución separada y efímera de la autenticación efectiva -- nunca
  * forma parte de un objeto que pueda persistirse o serializarse junto a la configuración funcional
- * (`EffectiveAgentConfig`). Para `cli_session` no hay credencial que resolver (Regla 5.5.2, sigue
- * usando el mecanismo compartido del host hasta FEATURE-025-Parte-2).
+ * (`EffectiveAgentConfig`). FEATURE-025-Parte-2, sección 5.2: `cli_session` resuelve la conexión
+ * OAuth personal del owner del run y materializa un temporal exclusivo y escribible -- reemplaza
+ * el caché global compartido de antes. El caller SIEMPRE debe llamar
+ * `finalizeExecutorAuthentication` en un `finally` después de usar el Executor, para recoger un
+ * posible refresh y limpiar el temporal (Regla 5.9.12).
  */
-export type ResolvedExecutorAuthentication = { mode: "cli_session" } | { mode: "api_key"; apiKey: string };
+export type ResolvedExecutorAuthentication =
+  | { mode: "cli_session"; oauthDirectory: string; materialized: MaterializedOAuthSession }
+  | { mode: "api_key"; apiKey: string };
 
 export async function resolveExecutorAuthentication(
   userId: string,
   config: EffectiveAgentConfig
 ): Promise<ResolvedExecutorAuthentication> {
   if (config.authMode === "cli_session") {
-    return { mode: "cli_session" };
+    const resolved = await resolveOAuthConnection(userId, config.executorProvider);
+    if (resolved.status === "not_connected") {
+      throw new AgentOAuthNotConnectedError(
+        `No hay una conexión OAuth propia para "${config.executorProvider}". Conectala en la configuración de agente antes de ejecutar.`
+      );
+    }
+    if (resolved.status === "reauth_required") {
+      throw new AgentOAuthReauthRequiredError(
+        `La conexión OAuth de "${config.executorProvider}" requiere reautenticación. Reconectala en la configuración de agente.`
+      );
+    }
+    const materialized = await materializeOAuthSession(resolved.connection);
+    return { mode: "cli_session", oauthDirectory: materialized.directory, materialized };
   }
 
   const credential = await getAiProviderCredential(userId, config.executorProvider);
@@ -87,5 +115,19 @@ export async function resolveExecutorAuthentication(
     throw new AgentCredentialMissingError(
       `No se pudo descifrar la credencial registrada para "${config.executorProvider}". Registrala de nuevo en la configuración de agente.`
     );
+  }
+}
+
+/**
+ * Regla 5.9.11/12: recoge un posible refresh (lo promueve por CAS) y elimina siempre el temporal,
+ * incluso si `collectAndPromoteOAuthSession` falla -- nunca deja un directorio materializado
+ * huérfano. No-op para `api_key` (nada que limpiar).
+ */
+export async function finalizeExecutorAuthentication(authentication: ResolvedExecutorAuthentication): Promise<void> {
+  if (authentication.mode !== "cli_session") return;
+  try {
+    await collectAndPromoteOAuthSession(authentication.materialized);
+  } finally {
+    await cleanupMaterializedOAuthSession(authentication.materialized);
   }
 }

@@ -5,7 +5,9 @@ const socket = process.env.SEARCH_PROXY_SOCKET;
 const token = process.env.SEARCH_PROXY_TOKEN;
 const apiKey = process.env.TAVILY_API_KEY;
 if (!socket || !token || !apiKey) throw new Error("Search proxy configuration is required");
-for (const secret of ["ANTHROPIC_API_KEY", "CODEX_API_KEY"]) {
+// FEATURE-025-Parte-2: mismo criterio que las API keys -- CLAUDE_CONFIG_DIR/CODEX_HOME nunca deben
+// llegar a este proceso.
+for (const secret of ["ANTHROPIC_API_KEY", "CODEX_API_KEY", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]) {
   if (process.env[secret]) throw new Error(`SECRET_IN_SEARCH_PROXY_ENV:${secret}`);
 }
 

@@ -91,6 +91,13 @@ export interface ClaudeCodeExecutorOptions {
    * proceso como fuente de ejecución -- sin fallback a una clave global del host.
    */
   apiKey?: string;
+  /**
+   * FEATURE-025-Parte-2, sección 5.9/7.9: requerido cuando authMode === "cli_session" -- directorio
+   * temporal, exclusivo y ESCRIBIBLE materializado por el caller (`materializeOAuthSession`, contra
+   * la conexión OAuth personal del usuario dueño del run). Reemplaza el caché global de solo
+   * lectura de CLAUDE_OAUTH_CACHE_DIR -- este Executor ya no lee esa variable de entorno.
+   */
+  oauthDirectory?: string;
 }
 
 interface RawCliResult {
@@ -105,7 +112,7 @@ interface RawCliResult {
 // .cmd requiere shell:true, y cmd.exe no puede transportar argumentos multilínea (roleInstructions
 // y el prompt con contexto JSON los tienen) — los trunca/rompe. Se resuelve y se invoca el .exe
 // real directamente para evitar el shell por completo.
-function resolveClaudeBinary(): string {
+export function resolveClaudeBinary(): string {
   if (process.platform !== "win32") return "claude";
 
   const candidates = execFileSync("where", ["claude"], { encoding: "utf8" })
@@ -139,11 +146,12 @@ export class ClaudeCodeExecutor implements Executor {
     const authMode = this.options.authMode ?? "api_key";
 
     if (authMode === "cli_session") {
-      const oauthCacheDir = process.env.CLAUDE_OAUTH_CACHE_DIR;
+      // FEATURE-025-Parte-2: ya no lee CLAUDE_OAUTH_CACHE_DIR del proceso -- el caller materializa
+      // la conexión OAuth personal del usuario dueño del run y pasa el directorio resultante acá.
+      const oauthCacheDir = this.options.oauthDirectory;
       if (!oauthCacheDir || !existsSync(oauthCacheDir)) {
         throw new Error(
-          "authMode=cli_session requiere sesión OAuth válida; no encontrada o vencida " +
-          "(CLAUDE_OAUTH_CACHE_DIR ausente o el directorio no existe)."
+          "oauthDirectory no fue provisto para authMode=cli_session (esperado de materializeOAuthSession)."
         );
       }
       return this.runRoleIsolated(invocation, { authMode, oauthCacheDir }, options);
@@ -208,16 +216,21 @@ export class ClaudeCodeExecutor implements Executor {
         data: { role: invocation.agentRole, provider: "claude", tools: [...worker.effectiveTools], nativeTools: [] },
       });
       // FEATURE-016: "api_key" inyecta ANTHROPIC_API_KEY y corre con `--bare` (default, sin
-      // cambios). "cli_session" nunca inyecta la key: monta de solo lectura el caché OAuth
-      // dedicado y corre SIN `--bare` porque --bare deshabilita OAuth de raíz (confirmado, ver
+      // cambios). "cli_session" nunca inyecta la key: monta el directorio OAuth materializado por
+      // el caller y corre SIN `--bare` porque --bare deshabilita OAuth de raíz (confirmado, ver
       // docs/features/FEATURE-016-auth-oauth-executors.md sección 7.4) — se agrega
       // `--setting-sources ""` como mitigación parcial (suprime hooks y auto-discovery de
       // CLAUDE.md; LSP/plugin-sync/prefetch de red quedan activos, riesgo aceptado explícitamente
-      // por el owner, ver sección 9 de esa Feature).
+      // por el owner, ver sección 9 de esa Feature). FEATURE-025-Parte-2: el montaje pasa a ser
+      // escribible (sin `:ro`) -- es un temporal exclusivo por invocación (nunca el caché global
+      // compartido de antes), el CLI puede actualizar su propio archivo de sesión durante un
+      // refresh y el caller lo recoge/promueve después (collectAndPromoteOAuthSession). El
+      // contenedor sigue corriendo con `--read-only` a nivel global (línea de abajo); solo este
+      // volumen puntual es escribible.
       const authArgs =
         auth.authMode === "cli_session"
           ? ["-e", `CLAUDE_CONFIG_DIR=${OAUTH_CACHE_CONTAINER_PATH}`,
-             "-v", `${auth.oauthCacheDir}:${OAUTH_CACHE_CONTAINER_PATH}:ro`]
+             "-v", `${auth.oauthCacheDir}:${OAUTH_CACHE_CONTAINER_PATH}`]
           : ["-e", "ANTHROPIC_API_KEY"];
       const cliModeArgs = auth.authMode === "cli_session" ? ["--setting-sources", ""] : ["--bare"];
 

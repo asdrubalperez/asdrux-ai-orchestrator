@@ -84,6 +84,13 @@ test("worker refuses provider, search and database credentials", () => {
   assert.throws(() => new IsolatedToolWorker({ worktree: ".", policy: policy(), env: { DATABASE_URL_DEV: "postgres-canary" } }), /SECRET_IN_WORKER_ENV/);
 });
 
+// FEATURE-025-Parte-2, sección 7.11: el worker no debe poder ni detectar que existe un directorio
+// OAuth materializado -- mismo criterio que las API keys.
+test("worker refuses CLAUDE_CONFIG_DIR/CODEX_HOME (directorio OAuth materializado)", () => {
+  assert.throws(() => new IsolatedToolWorker({ worktree: ".", policy: policy(), env: { CLAUDE_CONFIG_DIR: "/tmp/oauth" } }), /SECRET_IN_WORKER_ENV/);
+  assert.throws(() => new IsolatedToolWorker({ worktree: ".", policy: policy(), env: { CODEX_HOME: "/tmp/oauth" } }), /SECRET_IN_WORKER_ENV/);
+});
+
 test("worker dispatches artifact tools only through the read proxy", async () => {
   const calls: string[] = [];
   const worker = new IsolatedToolWorker({

@@ -37,6 +37,17 @@ import {
   setAiCredential,
 } from "../auth/aiCredentialService.js";
 import { AGENT_MODEL_CATALOG, isModelSupportedByProvider } from "../executor/agentModelCatalog.js";
+import { LoginInProgressError } from "../auth/aiOAuthLoginRegistry.js";
+import { ClaudeLoginError } from "../auth/claudeLoginAdapter.js";
+import { CodexLoginError } from "../auth/codexLoginAdapter.js";
+import {
+  cancelOAuthLogin,
+  disconnectOAuth,
+  listOAuthConnectionStatuses,
+  pollCodexOAuthLogin,
+  startOAuthLogin,
+  submitOAuthLoginCode,
+} from "../auth/aiOAuthConnectionService.js";
 import {
   completeGitHubOAuth,
   disconnectGitHub,
@@ -357,6 +368,131 @@ export function createApp(config: ServerConfig): express.Express {
         return;
       }
       await removeAiCredential(req.user!.id, provider);
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // FEATURE-025-Parte-2: conexiones OAuth personales por proveedor -- reemplazan el caché global
+  // compartido de cli_session. Ninguna respuesta expone tokens/blobs (Regla 7.14).
+
+  app.get("/ai-oauth-connections", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const connections = await listOAuthConnectionStatuses(req.user!.id);
+      res.json({ connections });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/ai-oauth-connections/:provider/login", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const provider = stringParam(req.params.provider);
+      if (provider !== "claude" && provider !== "codex") {
+        res.status(400).json({ error: "invalid_provider" });
+        return;
+      }
+      const challenge = await startOAuthLogin(req.user!.id, provider);
+      res.json(challenge);
+    } catch (err) {
+      if (err instanceof LoginInProgressError) {
+        res.status(409).json({ error: "connection_in_progress", message: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  app.post(
+    "/ai-oauth-connections/claude/login/:attemptId/code",
+    requireSession,
+    async (req: AuthenticatedRequest, res, next) => {
+      try {
+        if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+        const attemptId = stringParam(req.params.attemptId);
+        const code = typeof req.body?.code === "string" ? req.body.code : null;
+        if (!attemptId || !code) {
+          res.status(400).json({ error: "invalid_login_code_body" });
+          return;
+        }
+        const connection = await submitOAuthLoginCode(req.user!.id, attemptId, code);
+        res.json({ connection });
+      } catch (err) {
+        if (err instanceof ClaudeLoginError) {
+          res.status(409).json({ error: "login_failed", message: err.message });
+          return;
+        }
+        next(err);
+      }
+    }
+  );
+
+  // Sección 5.7.3/4: Codex confirma en el navegador, sin que la UI envíe un código -- este
+  // endpoint está pensado para polling corto desde el frontend (responde `pending` en <3s si el
+  // usuario todavía no terminó, sin consumir el intento).
+  app.post(
+    "/ai-oauth-connections/codex/login/:attemptId/poll",
+    requireSession,
+    async (req: AuthenticatedRequest, res, next) => {
+      try {
+        if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+        const attemptId = stringParam(req.params.attemptId);
+        if (!attemptId) {
+          res.status(400).json({ error: "invalid_attempt_id" });
+          return;
+        }
+        const outcome = await pollCodexOAuthLogin(req.user!.id, attemptId);
+        if (outcome.pending) {
+          res.json({ pending: true });
+          return;
+        }
+        res.json({ pending: false, connection: outcome.connection });
+      } catch (err) {
+        if (err instanceof CodexLoginError) {
+          res.status(409).json({ error: "login_failed", message: err.message });
+          return;
+        }
+        next(err);
+      }
+    }
+  );
+
+  app.delete(
+    "/ai-oauth-connections/:provider/login/:attemptId",
+    requireSession,
+    async (req: AuthenticatedRequest, res, next) => {
+      try {
+        if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+        const provider = stringParam(req.params.provider);
+        const attemptId = stringParam(req.params.attemptId);
+        if ((provider !== "claude" && provider !== "codex") || !attemptId) {
+          res.status(400).json({ error: "invalid_cancel_login_params" });
+          return;
+        }
+        await cancelOAuthLogin(provider, attemptId);
+        res.status(200).json({ ok: true });
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  app.delete("/ai-oauth-connections/:provider", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const provider = stringParam(req.params.provider);
+      if (provider !== "claude" && provider !== "codex") {
+        res.status(400).json({ error: "invalid_provider" });
+        return;
+      }
+      const force = stringParam(req.query.force as string | string[] | undefined) === "true";
+      const result = await disconnectOAuth(req.user!.id, provider, force);
+      if (!result.disconnected) {
+        res.status(409).json({ error: "active_runs_using_connection", activeRunIds: result.activeRunIds });
+        return;
+      }
       res.status(200).json({ ok: true });
     } catch (err) {
       next(err);

@@ -57,6 +57,15 @@ export async function mapIntakeText(params: { userId: string; inputText: string;
       `El mapeo de intake todavía no soporta "${config.executorProvider}" -- configurá Claude para el rol "Asistente de Entrada" (o la configuración global).`
     );
   }
+  // FEATURE-025-Parte-2: chequeo por config.authMode ANTES de resolver la autenticación --
+  // resolveExecutorAuthentication ahora materializa una sesión OAuth real para cli_session
+  // (conexión + directorio temporal), y el mapeo no tiene ningún camino que la use. Materializarla
+  // solo para descartarla acá sería trabajo real desperdiciado y dejaría un temporal a limpiar.
+  if (config.authMode !== "api_key") {
+    throw new IntakeMappingAuthModeUnsupportedError(
+      'El mapeo de intake todavía no soporta "Sesión OAuth" -- configurá el modo "API key propia" para el rol "Asistente de Entrada" (o la configuración global).'
+    );
+  }
   const authentication = await resolveExecutorAuthentication(params.userId, config);
   if (authentication.mode !== "api_key") {
     throw new IntakeMappingAuthModeUnsupportedError(

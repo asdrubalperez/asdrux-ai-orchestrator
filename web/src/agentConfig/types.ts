@@ -22,3 +22,28 @@ export interface AiCredentialStatus {
   configured: boolean;
   updatedAt: string | null;
 }
+
+// FEATURE-025-Parte-2: conexiones OAuth personales por proveedor.
+export type OAuthConnectionStatusValue = "not_connected" | "connected" | "reauth_required";
+
+export interface OAuthConnectionStatus {
+  provider: ExecutorProviderName;
+  status: OAuthConnectionStatusValue;
+  lastValidatedAt: string | null;
+}
+
+export interface ClaudeLoginChallenge {
+  provider: "claude";
+  attemptId: string;
+  authorizeUrl: string;
+}
+
+export interface CodexLoginChallenge {
+  provider: "codex";
+  attemptId: string;
+  verificationUri: string;
+  userCode: string;
+  expiresAt: string | null;
+}
+
+export type OAuthLoginChallenge = ClaudeLoginChallenge | CodexLoginChallenge;

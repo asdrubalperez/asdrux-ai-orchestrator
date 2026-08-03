@@ -13,9 +13,11 @@ if (!worktree || !channelToken || !workerSocket || !role) {
   throw new Error("Isolated worker configuration is required");
 }
 const policy = resolveRolePolicy(role);
+// FEATURE-025-Parte-2: CLAUDE_CONFIG_DIR/CODEX_HOME apuntan al directorio OAuth materializado --
+// el worker no debe poder ni detectar que existe, mismo criterio que las API keys.
 for (const secret of [
   "ANTHROPIC_API_KEY", "CODEX_API_KEY", "TAVILY_API_KEY", "DATABASE_URL", "DATABASE_URL_DEV",
-  "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD",
+  "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD", "CLAUDE_CONFIG_DIR", "CODEX_HOME",
 ]) {
   if (process.env[secret]) throw new Error(`SECRET_IN_WORKER_ENV:${secret}`);
 }

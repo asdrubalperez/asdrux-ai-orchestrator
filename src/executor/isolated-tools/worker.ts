@@ -21,9 +21,11 @@ export interface WorkerOptions {
 export class IsolatedToolWorker {
   #calls = 0;
   constructor(private readonly options: WorkerOptions) {
+    // FEATURE-025-Parte-2: CLAUDE_CONFIG_DIR/CODEX_HOME apuntan al directorio OAuth materializado
+    // -- el worker no debe poder ni detectar que existe, mismo criterio que las API keys.
     for (const secret of [
       "ANTHROPIC_API_KEY", "CODEX_API_KEY", "TAVILY_API_KEY", "DATABASE_URL", "DATABASE_URL_DEV",
-      "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD",
+      "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD", "CLAUDE_CONFIG_DIR", "CODEX_HOME",
     ]) {
       if (options.env?.[secret]) throw new Error(`SECRET_IN_WORKER_ENV:${secret}`);
     }

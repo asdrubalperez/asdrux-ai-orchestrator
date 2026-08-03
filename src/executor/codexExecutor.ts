@@ -102,6 +102,13 @@ export interface CodexExecutorOptions {
    * proceso como fuente de ejecución -- sin fallback a una clave global del host.
    */
   apiKey?: string;
+  /**
+   * FEATURE-025-Parte-2, sección 5.9/7.9: requerido cuando authMode === "cli_session" -- directorio
+   * temporal, exclusivo y ESCRIBIBLE materializado por el caller (`materializeOAuthSession`, contra
+   * la conexión OAuth personal del usuario dueño del run). Reemplaza el caché global de solo
+   * lectura de CODEX_OAUTH_CACHE_DIR -- este Executor ya no lee esa variable de entorno.
+   */
+  oauthDirectory?: string;
 }
 
 interface RawCodexResult {
@@ -110,7 +117,7 @@ interface RawCodexResult {
   exitCode: number | null;
 }
 
-function resolveCodexBinary(): string {
+export function resolveCodexBinary(): string {
   if (process.platform !== "win32") {
     const home = process.env.HOME;
     const candidates = [
@@ -152,11 +159,12 @@ export class CodexExecutor implements Executor {
     const authMode = this.options.authMode ?? "api_key";
 
     if (authMode === "cli_session") {
-      const oauthCacheDir = process.env.CODEX_OAUTH_CACHE_DIR;
+      // FEATURE-025-Parte-2: ya no lee CODEX_OAUTH_CACHE_DIR del proceso -- el caller materializa
+      // la conexión OAuth personal del usuario dueño del run y pasa el directorio resultante acá.
+      const oauthCacheDir = this.options.oauthDirectory;
       if (!oauthCacheDir || !existsSync(oauthCacheDir)) {
         throw new Error(
-          "authMode=cli_session requiere sesión OAuth válida; no encontrada o vencida " +
-          "(CODEX_OAUTH_CACHE_DIR ausente o el directorio no existe)."
+          "oauthDirectory no fue provisto para authMode=cli_session (esperado de materializeOAuthSession)."
         );
       }
       return this.runRoleIsolated(invocation, { authMode, oauthCacheDir }, options);
@@ -200,14 +208,17 @@ export class CodexExecutor implements Executor {
       data: { role: invocation.agentRole, provider: "codex", tools: [...worker.effectiveTools], nativeTools: [] },
     });
     // FEATURE-016: "api_key" inyecta CODEX_API_KEY (default, sin cambios). "cli_session" nunca
-    // inyecta la key: monta de solo lectura el caché OAuth dedicado y apunta CODEX_HOME ahí —
-    // confirmado que CODEX_HOME es la variable real que Codex usa para localizar auth.json (ver
-    // docs/features/FEATURE-016-auth-oauth-executors.md sección 7.3). Codex no tiene un
-    // equivalente a `--bare`/`--safe-mode` que bloquee esto.
+    // inyecta la key: monta el directorio OAuth materializado por el caller y apunta CODEX_HOME
+    // ahí — confirmado que CODEX_HOME es la variable real que Codex usa para localizar auth.json
+    // (ver docs/features/FEATURE-016-auth-oauth-executors.md sección 7.3). Codex no tiene un
+    // equivalente a `--bare`/`--safe-mode` que bloquee esto. FEATURE-025-Parte-2: el montaje pasa
+    // a ser escribible (sin `:ro`) -- temporal exclusivo por invocación, el caller lo recoge y
+    // promueve después (collectAndPromoteOAuthSession). El contenedor sigue con `--read-only` a
+    // nivel global; solo este volumen puntual es escribible.
     const authArgs =
       auth.authMode === "cli_session"
         ? ["-e", `CODEX_HOME=${OAUTH_CACHE_CONTAINER_PATH}`,
-           "-v", `${auth.oauthCacheDir}:${OAUTH_CACHE_CONTAINER_PATH}:ro`]
+           "-v", `${auth.oauthCacheDir}:${OAUTH_CACHE_CONTAINER_PATH}`]
         : ["-e", "CODEX_API_KEY"];
 
     const dockerArgs = [
@@ -283,12 +294,14 @@ export class CodexExecutor implements Executor {
         if (!message.method && message.id === initializeId) {
           if (message.error) { fail(new Error(JSON.stringify(message.error))); return; }
           child.stdin.write(JSON.stringify({ method: "initialized", params: {} }) + "\n");
-          loginRequestId = send(
-            "account/login/start",
+          // FEATURE-025-Parte-2, sección 5.15.4/5: "account/login/start" solo pertenece al
+          // adaptador de conexión (codexLoginAdapter.ts) -- nunca se inicia un login nuevo en cada
+          // run. Para cli_session, la sesión ya está materializada en CODEX_HOME (auth.json,
+          // montado más abajo); se confirma con "account/read" en vez de reintentar login.
+          loginRequestId =
             auth.authMode === "cli_session"
-              ? { type: "chatgpt" }
-              : { type: "apiKey", apiKey: env.CODEX_API_KEY }
-          );
+              ? send("account/read", {})
+              : send("account/login/start", { type: "apiKey", apiKey: env.CODEX_API_KEY });
           return;
         }
         if (!message.method && message.id === loginRequestId) {
