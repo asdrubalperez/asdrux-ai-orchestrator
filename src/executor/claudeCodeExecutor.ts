@@ -108,6 +108,24 @@ interface RawCliResult {
   modelUsage?: Record<string, { outputTokens?: number }>;
 }
 
+// Hallazgo de validación en vivo (FEATURE-025-Parte-2): con authMode "cli_session" (OAuth), pedir
+// un ID de modelo fijo con fecha/versión (ej. "claude-sonnet-5") puede terminar corriendo en un
+// modelo TOTALMENTE distinto (ej. Opus 4.8) sin ningún error visible -- Claude Code remapea
+// silenciosamente el modelo solicitado cuando la cuenta conectada no lo tiene disponible, y esa
+// advertencia se suprime específicamente con --output-format json (la única forma de leerlo es el
+// campo modelUsage del resultado, ver docs oficiales de "Model configuration" de Claude Code).
+// Confirmado en el VPS contra una cuenta real: mismo problema con o sin --model, con cualquiera de
+// los 3 modelos del catálogo. Los alias genéricos (opus/sonnet/haiku) sí resuelven de forma
+// confiable "la versión más reciente que la cuenta permite" -- se traduce acá, solo para OAuth, sin
+// tocar el catálogo (que sigue con IDs exactos porque el rol "intake" llama directo a la API de
+// Anthropic -- mapBusinessCase.ts -- donde estos alias NO son válidos).
+function toCliSessionModelAlias(model: string): string {
+  if (model.startsWith("claude-opus")) return "opus";
+  if (model.startsWith("claude-sonnet")) return "sonnet";
+  if (model.startsWith("claude-haiku")) return "haiku";
+  return model;
+}
+
 // En Windows, `claude` suele resolverse a un shim .cmd que envuelve el .exe real. Invocar el
 // .cmd requiere shell:true, y cmd.exe no puede transportar argumentos multilínea (roleInstructions
 // y el prompt con contexto JSON los tienen) — los trunca/rompe. Se resuelve y se invoca el .exe
@@ -265,7 +283,11 @@ export class ClaudeCodeExecutor implements Executor {
         "--output-format", "json",
         "--no-session-persistence",
       ];
-      if (this.options.model) args.push("--model", this.options.model);
+      if (this.options.model) {
+        const modelArg =
+          auth.authMode === "cli_session" ? toCliSessionModelAlias(this.options.model) : this.options.model;
+        args.push("--model", modelArg);
+      }
       // Hallazgo de validación en vivo (FEATURE-025-Parte-2): sin `--effort` explícito, el CLI
       // elige por default un nivel que algunas cuentas de claude.ai conectadas por OAuth no tienen
       // habilitado (falla con "API Error: 400 Invalid effort level", reproducido en el VPS con
