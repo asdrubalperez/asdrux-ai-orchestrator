@@ -418,6 +418,12 @@ export class CodexExecutor implements Executor {
     }
   }
 
+  // Hallazgo de validación en vivo (FEATURE-025-Parte-2): PHASE_RESULT_SCHEMA restringe
+  // outputArtifact a string|null (nunca objeto) -- si el modelo declara NO_APLICA: true sin
+  // ARTEFACTO/ROADMAP reales que embeber como texto, tendía a poner outputArtifact en JSON null
+  // directo, perdiendo la señal de paso por completo: la fase siguiente recibía un contexto vacío,
+  // escalaba, y el reintento automático perdía además el humanSolution original -- causando que
+  // Architect volviera a proponer el roadmap desde cero (ver isNotApplicableOutput en escalation.ts).
   private buildPrompt(invocation: PhaseInvocation): string {
     return [
       "INSTRUCCIONES DE ROL:",
@@ -429,6 +435,12 @@ export class CodexExecutor implements Executor {
       "",
       "Responde exclusivamente con un objeto JSON que respete el schema provisto por --output-schema.",
       "No agregues Markdown ni texto fuera del JSON final.",
+      "",
+      "IMPORTANTE sobre outputArtifact (string|null) cuando declarás NO_APLICA: true (Regla 6 de tu",
+      "rol): outputArtifact NO puede quedar en JSON null en ese caso, aunque ARTEFACTO y ROADMAP",
+      "sean null -- debe ser el string con las etiquetas correspondientes, por ejemplo:",
+      '  "ARTEFACTO: null\\nROADMAP: null\\nNO_APLICA: true"',
+      "outputArtifact solo debe ser JSON null cuando NO_APLICA sea null o esté ausente.",
       "",
       "CONTEXTO (artefacto de fase anterior):",
       JSON.stringify(invocation.context, null, 2),

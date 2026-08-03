@@ -290,12 +290,15 @@ test("isReentryContext distingue un contexto de reingreso de un artifact normal"
   assert.equal(isReentryContext("texto plano"), false);
 });
 
-test("isNotApplicableOutput acepta booleano real (Codex) o el string 'true' (Claude, convención de texto)", () => {
+test("isNotApplicableOutput acepta booleano real, el string 'true' (forma objeto), o la línea NO_APLICA: true embebida en un outputArtifact string (Codex, PHASE_RESULT_SCHEMA restringe outputArtifact a string|null)", () => {
   assert.equal(isNotApplicableOutput({ notApplicable: true }), true);
   assert.equal(isNotApplicableOutput({ notApplicable: "true" }), true);
   assert.equal(isNotApplicableOutput({ notApplicable: false }), false);
   assert.equal(isNotApplicableOutput({ text: "propuesta real" }), false);
   assert.equal(isNotApplicableOutput(null), false);
+  assert.equal(isNotApplicableOutput("ARTEFACTO: null\nROADMAP: null\nNO_APLICA: true"), true);
+  assert.equal(isNotApplicableOutput("ARTEFACTO: null\nROADMAP: null\nNO_APLICA: null"), false);
+  assert.equal(isNotApplicableOutput("ARTEFACTO: propuesta real\nROADMAP: null"), false);
 });
 
 // Corrección del runtime de circuitos (triangulación 2026-07-29)

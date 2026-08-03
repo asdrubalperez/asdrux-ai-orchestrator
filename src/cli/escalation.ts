@@ -385,12 +385,21 @@ export function isReentryContext(value: unknown): value is ReentryContext {
 /**
  * FEATURE-020, Regla 5: marcador que un rol usa para indicar que una escalación en revisión no le
  * corresponde — el orquestador reconoce esta forma exacta para avanzar de fase sin tratarla como
- * un artifact normal. Acepta booleano real (`CodexExecutor`, JSON nativo) o el string `"true"`
- * (`ClaudeCodeExecutor`, convención de texto plano — mismo patrón que `RELEASE_COMPLETO`).
+ * un artifact normal. Acepta booleano real (forma objeto estructurado de Claude) o el string
+ * `"true"` (convención de texto plano de Codex, embebido como línea "NO_APLICA: true" dentro de un
+ * outputArtifact string — mismo criterio dual que `isTaggedFieldNull`, vía `extractTaggedField`).
+ *
+ * Hallazgo de validación en vivo (FEATURE-025-Parte-2): antes solo aceptaba la forma objeto
+ * (`{notApplicable: true}`) -- el esquema JSON de CodexExecutor (`PHASE_RESULT_SCHEMA`) restringe
+ * `outputArtifact` a `string | null`, así que Codex nunca puede producir esa forma objeto. Cuando
+ * Codex declaraba NO_APLICA sin ARTEFACTO/ROADMAP reales que embeber como texto, terminaba
+ * emitiendo `outputArtifact: null` liso -- la señal de "paso" se perdía por completo, la fase
+ * siguiente recibía `context: null`, escalaba por contexto ausente, y el reintento automático
+ * resultante perdía además el `humanSolution` original (ej. "no reproponer el roadmap, ya hay un
+ * release siguiente activo"), causando que Architect volviera a proponer el roadmap desde cero.
  */
 export function isNotApplicableOutput(value: unknown): boolean {
-  if (value === null || typeof value !== "object") return false;
-  const notApplicable = (value as { notApplicable?: unknown }).notApplicable;
+  const notApplicable = extractTaggedField(value, "NO_APLICA", "notApplicable");
   return notApplicable === true || notApplicable === "true";
 }
 
