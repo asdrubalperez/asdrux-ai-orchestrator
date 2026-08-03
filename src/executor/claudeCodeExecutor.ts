@@ -384,7 +384,10 @@ export class ClaudeCodeExecutor implements Executor {
         outputArtifact: null,
         summary: raw.result,
         escalationReason: null,
-        executorMetadata: { provider: "claude-code-cli", authMode },
+        // FEATURE-025-Parte-1: el modelo real usado (raw.modelUsage) suele venir vacío en un fallo
+        // de API -- se reporta igual el modelo CONFIGURADO (this.options.model), no null, para que
+        // el chip de la UI no oculte qué asistente/modelo se estaba intentando invocar.
+        executorMetadata: { provider: "claude-code-cli", model: this.options.model, authMode },
       };
     }
 
