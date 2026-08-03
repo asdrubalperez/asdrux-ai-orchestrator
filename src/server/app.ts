@@ -950,7 +950,10 @@ export function createApp(config: ServerConfig): express.Express {
     res.sendFile(path.join(frontendDist, "index.html"));
   });
 
-  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    // Hallazgo de validación en vivo (FEATURE-025-Parte-2): este handler nunca logueaba nada -- un
+    // 500 real quedaba completamente invisible en journalctl, sin ningún rastro para diagnosticar.
+    console.error(`[server] error no manejado en ${req.method} ${req.path}:`, err);
     const message = err instanceof Error ? err.message : "Error desconocido";
     res.status(500).json({ error: message });
   });
