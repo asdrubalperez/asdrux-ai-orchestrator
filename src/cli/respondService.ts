@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AgentRole } from "../contracts/executor.js";
+import { createGitProcessAuth } from "../auth/gitConnectionService.js";
 import { pool } from "../db/pool.js";
 import {
   createRun,
@@ -538,11 +539,22 @@ async function respondMergeApproval(params: {
   // tocó la DB todavía — el run sigue "escalated", tal como estaba, sin ningún cambio de estado
   // falso. Mismo patrón que ya usa el camino genérico de escalamiento (más arriba en este archivo):
   // el paso que puede fallar corre antes de comprometer el estado del run.
-  await mergeFeatureBranchIntoBase({
-    repoRoot: params.repoRoot,
-    baseBranch: params.mergeApproval.baseBranch,
-    featureBranch: params.mergeApproval.featureBranch,
-  });
+  // Hallazgo de validación en vivo (FEATURE-025-Parte-2): mergeFeatureBranchIntoBase nunca recibía
+  // la credencial de GitHub del owner del run -- el push corría sin ningún token real y GitHub lo
+  // rechazaba con "Invalid username or token" (no es un token vencido, nunca se inyectaba
+  // ninguno). Mismo criterio que runStart.ts al pushear la rama del run: credencial efímera del
+  // owner, creada justo antes de usarla y descartada enseguida.
+  const gitAuth = await createGitProcessAuth(params.userId);
+  try {
+    await mergeFeatureBranchIntoBase({
+      repoRoot: params.repoRoot,
+      baseBranch: params.mergeApproval.baseBranch,
+      featureBranch: params.mergeApproval.featureBranch,
+      gitAuth,
+    });
+  } finally {
+    await gitAuth.dispose();
+  }
 
   const client = await pool.connect();
   try {

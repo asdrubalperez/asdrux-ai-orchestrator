@@ -242,6 +242,16 @@ export async function mergeFeatureBranchIntoBase(params: {
   repoRoot: string;
   baseBranch: string;
   featureBranch: string;
+  /**
+   * Hallazgo de validación en vivo (FEATURE-025-Parte-2): a diferencia de pushRunBranch/
+   * cloneRunRepository, esta función nunca aceptó gitAuth -- el fetch/push acá abajo corrían con
+   * gitNoPromptEnv() sin credencial real, así que dependían por completo de lo que ya hubiera
+   * configurado el remote `origin` del worktree (típicamente nada, para un repo privado). GitHub
+   * rechazaba el push con "Invalid username or token" -- no era un token vencido, era que nunca se
+   * inyectaba ninguno. Sin gitAuth (compatibilidad con el flujo legacy del host), se mantiene el
+   * comportamiento previo sin cambios.
+   */
+  gitAuth?: GitProcessAuth;
 }): Promise<BaseBranchSyncResult> {
   // La rama persistente del clon administrado es la base de la siguiente Feature. Antes de
   // integrar, se avanza por fast-forward hasta el estado remoto vigente; después del push se
@@ -254,7 +264,7 @@ export async function mergeFeatureBranchIntoBase(params: {
       "origin",
       `refs/heads/${params.baseBranch}:refs/remotes/origin/${params.baseBranch}`,
     ],
-    { cwd: params.repoRoot, env: gitNoPromptEnv() }
+    { cwd: params.repoRoot, env: gitNoPromptEnv(params.gitAuth?.authEnv) }
   );
   await fastForwardLocalBranch(
     params.repoRoot,
@@ -300,7 +310,7 @@ export async function mergeFeatureBranchIntoBase(params: {
     ).stdout.trim();
     await execFileAsync("git", ["push", "origin", `HEAD:refs/heads/${params.baseBranch}`], {
       cwd: baseWorktreePath,
-      env: gitNoPromptEnv(),
+      env: gitNoPromptEnv(params.gitAuth?.authEnv),
     });
     const remoteSha = await remoteBranchSha({
       branchName: params.baseBranch,
