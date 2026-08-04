@@ -180,18 +180,24 @@ nombrados**, ver detalle en la subsección siguiente y en la Regla 5.10.
 - rol y estado;
 - API keys de proveedores de IA;
 - conexiones OAuth de Claude y Codex;
-- configuración global de agente (proveedor/modo/modelo por defecto para los 6 roles) — pasa a ser
-  **obligatoria**;
+- configuración **Global** de agente: una única combinación de asistente o proveedor de IA, modelo
+  y método de autenticación que se aplica a Architect, Functional, Planning, Developer y QA, así
+  como al Asistente de Entrada;
 - hasta 3 perfiles de configuración de agente, cada uno con:
   - nombre editable por el usuario;
-  - personalización por agente (los 6 roles: architect, functional, planning, developer, qa,
-    intake).
+  - personalización por agente, en el orden visible del pipeline: Asistente de Entrada, Architect,
+    Functional, Planning, Developer y QA.
+
+Aunque el Asistente de Entrada no es técnicamente un rol del pipeline, a efectos de configuración y
+experiencia del usuario se comporta como una unidad configurable equivalente y se presenta primero
+porque es el primer agente con el que interactúa el usuario.
 
 **Proyecto:**
 
 - conexión GitHub seleccionada para ese proyecto;
 - repositorio asociado;
-- selección de cuál perfil de cuenta aplica a este proyecto (o ninguno).
+- selección de exactamente una opción de configuración de cuenta: **Global** o uno de los perfiles
+  personalizados disponibles.
 
 **Caso o run:**
 
@@ -200,39 +206,76 @@ nombrados**, ver detalle en la subsección siguiente y en la Regla 5.10.
 La pantalla de configuración de agentes del proyecto:
 
 - muestra en modo lectura qué proveedores están disponibles para la cuenta;
-- no permite editar credenciales de cuenta ni el contenido de los perfiles (eso se edita
-  exclusivamente en el módulo de cuenta);
+- no permite editar credenciales de cuenta ni el contenido de Global o de los perfiles (eso se
+  edita exclusivamente en el módulo de cuenta);
 - ofrece acceso directo al módulo de cuenta para agregar, quitar o reconectar credenciales, y para
   crear/editar/borrar perfiles;
-- permite seleccionar, para este proyecto puntual, cuál perfil de cuenta aplica (o ninguno, usando
-  la configuración global).
+- permite seleccionar, para este proyecto puntual, **Global** o uno de los perfiles personalizados.
 
-**Resolución al ejecutar un rol:** override del perfil seleccionado por el proyecto para ese rol →
-configuración global de la cuenta → default del sistema. Si el proyecto no tiene perfil
-seleccionado (nunca eligió uno, o el que tenía fue borrado), se usa directamente la configuración
-global de la cuenta.
+**Resolución al ejecutar un agente:** configuración específica del agente dentro del perfil
+seleccionado → configuración Global de la cuenta → default técnico del sistema. Cuando el proyecto
+usa Global, los seis agentes utilizan la misma combinación de asistente de IA, modelo y método de
+autenticación.
 
-#### Perfiles de configuración de agentes (cuenta)
+#### Configuración Global
+
+- **Global siempre existe** como opción del selector del proyecto.
+- Todo proyecto nuevo queda con **Global preseleccionada**.
+- Global representa una única combinación de cuenta compuesta por:
+  - asistente o proveedor de IA;
+  - modelo;
+  - método de autenticación.
+- Esa misma combinación se aplica a Architect, Functional, Planning, Developer y QA, así como al
+  **Asistente de Entrada**, que no es técnicamente un rol del pipeline, pero a efectos de
+  configuración y experiencia del usuario se comporta como uno.
+- Global puede estar incompleta.
+- La cuenta y el proyecto pueden existir aunque Global todavía no esté lista.
+- El proyecto no podrá operar mientras la resolución de asistente de IA, modelo y método de
+  autenticación no conduzca a una configuración válida y a una credencial disponible.
+
+#### Perfiles personalizados
 
 - Alta, edición y borrado de hasta 3 perfiles por cuenta.
-- Cada perfil: nombre editable + configuración por cada uno de los 6 roles (reutiliza el mismo
-  formulario que ya existe hoy para la configuración de agente, multiplicado por perfil).
-- La configuración global de cuenta pasa a ser obligatoria — es el fallback final antes del default
-  del sistema, ya no es opcional.
-- El selector de configuración del proyecto lista **Global** (configuración global de cuenta) como
-  una opción explícita, junto con los perfiles personalizados que el usuario tenga creados (0 a 3)
-  — nunca queda "sin selección" de forma implícita.
-- Al crear un proyecto, queda preseleccionada **Global** por defecto, salvo que la configuración
-  global no esté configurada (en ese caso no hay preselección, mismo gate de configuración
-  faltante ya existente). Cambiar a un perfil personalizado es una decisión consciente y visible
-  del usuario, no un default oculto.
-- Selección de perfil por proyecto: exactamente una opción entre Global y los perfiles disponibles,
-  nunca "ninguna".
-- Al borrar un perfil que algún proyecto tiene seleccionado, ese proyecto queda automáticamente sin
-  perfil (usa la configuración global) — sin estado de bloqueo intermedio ni acción manual
-  requerida más allá de que el usuario, si quiere, elija otro perfil después.
+- Los perfiles personalizados son la superficie que permite definir configuraciones distintas por
+  agente.
+- Cada perfil puede establecer una combinación específica de asistente de IA, modelo y método de
+  autenticación para:
+  - Asistente de Entrada;
+  - Architect;
+  - Functional;
+  - Planning;
+  - Developer;
+  - QA.
+- Aunque el Asistente de Entrada no sea técnicamente un rol del pipeline, se trata como una unidad
+  configurable equivalente desde la perspectiva del usuario, y se mantiene primero porque en ese
+  orden van apareciendo los agentes en el pipeline.
+- El selector de configuración del proyecto lista **Global** como opción explícita, junto con los
+  perfiles personalizados que el usuario tenga creados — nunca queda "sin selección" de forma
+  implícita.
+- Cambiar de Global a un perfil personalizado es una decisión consciente y visible del usuario, no
+  un default oculto.
+- Al borrar un perfil que algún proyecto tiene seleccionado, ese proyecto pasa automáticamente a
+  **Global** (`agent_config_profile_id = null`) — sin estado de bloqueo intermedio ni acción manual
+  requerida.
 - El límite de 3 perfiles se valida en el servicio de aplicación, no requiere constraint de base de
   datos.
+
+#### Migración de configuración existente
+
+La configuración actual incluye una opción global y configuraciones específicas por rol.
+
+Durante la migración:
+
+- la combinación global actual pasa a ser la nueva configuración **Global**;
+- las configuraciones específicas por rol existentes dejan de mantenerse como overrides
+  independientes y se consolidan dentro de Global;
+- no se crea un perfil personalizado artificial;
+- no se reasignan proyectos actuales a perfiles;
+- todos los proyectos existentes quedan usando Global;
+- los perfiles personalizados comienzan vacíos y solo se crean de forma voluntaria por el usuario.
+
+El objetivo es conservar una configuración operativa simple y predecible, evitando trasladar
+automáticamente la complejidad histórica de overrides por rol al nuevo modelo de perfiles.
 
 #### Rate limiting
 
@@ -296,13 +339,20 @@ El diseño técnico puede usar columnas simples si son suficientes; no se exige 
 ### 5.3 Preparación del proyecto
 
 - El usuario crea explícitamente cada proyecto.
-- Un proyecto puede existir sin repositorio.
-- No puede operar hasta tener:
+- Un proyecto puede existir sin repositorio ni configuración de IA completa.
+- Todo proyecto nuevo queda con **Global preseleccionada**.
+- Un proyecto no puede operar hasta tener:
   - una conexión GitHub válida seleccionada;
   - un repositorio configurado;
-  - una preferencia global de IA resoluble;
-  - una credencial válida para el proveedor finalmente resuelto.
-- La configuración global es suficiente mientras ningún rol tenga un override incompatible.
+  - una selección de configuración válida: Global o un perfil personalizado perteneciente al
+    propietario del proyecto;
+  - una resolución válida de asistente de IA, modelo y método de autenticación;
+  - una credencial disponible para el método de autenticación finalmente resuelto.
+- Cuando el proyecto usa Global, todos los agentes utilizan la misma combinación de asistente de
+  IA, modelo y método de autenticación.
+- Cuando usa un perfil personalizado, cada agente puede resolver una combinación específica; si el
+  perfil no define una configuración para un agente, cae a Global y luego al default técnico del
+  sistema.
 
 ### 5.4 Email y enumeración
 
@@ -329,6 +379,8 @@ El diseño técnico puede usar columnas simples si son suficientes; no se exige 
 - El `user_id` autoritativo procede de la sesión del servidor.
 - Nunca se confía en un `user_id` enviado por el cliente.
 - Los administradores solo acceden a datos permitidos por endpoints administrativos explícitos.
+- El perfil seleccionado por un proyecto debe pertenecer al mismo usuario propietario del proyecto;
+  nunca se acepta un `profileId` de otra cuenta aunque el cliente lo envíe.
 
 ### 5.8 Jerarquía administrativa
 
@@ -347,31 +399,35 @@ El diseño técnico puede usar columnas simples si son suficientes; no se exige 
 | Ver proyectos ajenos en modo lectura | No | Sí | Sí |
 | Ejecutar o modificar proyectos ajenos | No | No | No |
 
+Los administradores que consultan proyectos ajenos en modo lectura pueden ver el nombre de la
+opción de configuración seleccionada y el estado de preparación, pero no editar Global, perfiles,
+credenciales ni valores secretos.
+
 ### 5.9 Último acceso
 
 - La fecha de último acceso es informativa.
 - Debe actualizarse mediante un evento de autenticación exitoso claramente definido.
 - No debe depender de cada request ni generar escrituras innecesarias.
 
-### 5.10 Perfiles de configuración de agentes
+### 5.10 Configuración Global y perfiles personalizados
 
 - Un usuario puede tener hasta 3 perfiles de configuración de agente, cada uno con nombre propio y
-  personalización de los 6 roles (architect, functional, planning, developer, qa, intake).
+  personalización de los seis agentes configurables: Asistente de Entrada, Architect, Functional,
+  Planning, Developer y QA.
 - El límite de 3 se valida en el servicio de aplicación, no en la base de datos.
-- La configuración global de la cuenta es obligatoria como fallback final antes del default del
-  sistema — deja de ser opcional.
-- El selector de configuración de un proyecto lista **Global** como opción explícita, junto con los
-  perfiles personalizados existentes — nunca queda en un estado de "nada seleccionado" implícito.
-- Al crear un proyecto, queda preseleccionada **Global** por defecto, salvo que la configuración
-  global no esté configurada (en ese caso no hay preselección posible). Cambiar a un perfil
-  personalizado es una decisión explícita y visible del usuario.
-- Al borrar un perfil, todo proyecto que lo tuviera seleccionado pasa automáticamente a **Global**
-  (misma representación técnica: `agent_config_profile_id = null`) — sin estado de bloqueo
-  intermedio, sin acción manual requerida.
-- Resolución por rol al ejecutar: override del perfil seleccionado por el proyecto para ese rol →
-  configuración global de la cuenta → default del sistema.
-- Los perfiles, igual que las credenciales, se editan únicamente desde el módulo de cuenta. El
-  proyecto solo elige cuál aplica.
+- Global siempre existe como una opción explícita y todo proyecto nuevo la tiene preseleccionada.
+- Global contiene una única combinación de asistente de IA, modelo y método de autenticación que se
+  aplica a los seis agentes.
+- Global puede estar incompleta; esto no impide crear la cuenta ni el proyecto, pero sí operar hasta
+  que la resolución conduzca a una combinación válida y a una credencial disponible.
+- Un proyecto selecciona exactamente una opción: Global o uno de los perfiles personalizados de su
+  propietario.
+- Al borrar un perfil, todo proyecto que lo tuviera seleccionado pasa automáticamente a Global
+  (`agent_config_profile_id = null`) sin estado de bloqueo intermedio.
+- Resolución al ejecutar un agente: configuración específica del agente dentro del perfil
+  seleccionado → configuración Global de la cuenta → default técnico del sistema.
+- Los perfiles, Global y las credenciales se editan únicamente desde el módulo de cuenta. El
+  proyecto solo elige cuál opción aplica.
 
 ---
 
@@ -417,12 +473,15 @@ La implementación deberá determinar el cambio mínimo necesario en:
 - servicio de email;
 - rate limiting;
 - tabla nueva `agent_config_profiles` (perfiles de configuración de agente por cuenta, hasta 3);
-- columna `projects.agent_config_profile_id` (FK a `agent_config_profiles`, `ON DELETE SET NULL`);
+- columna `projects.agent_config_profile_id` (FK a `agent_config_profiles`, `ON DELETE SET NULL`;
+  `null` representa la selección Global);
 - `resolveAgentConfig` (`src/db/repository.ts:662-668`) pasa a recibir `profileId` además de
-  `userId`/`role`, con la nueva precedencia perfil → global de cuenta → default;
-- migración del único juego de overrides por rol que existe hoy (`user_agent_config` con
-  `role is not null`, sin `project_id`) hacia un perfil por defecto, para no alterar el
-  comportamiento de proyectos ya en uso al desplegar.
+  `userId`/`role`, con la nueva precedencia perfil por agente → Global de cuenta → default técnico;
+- migración de la combinación global actual hacia la nueva configuración Global;
+- consolidación de las configuraciones específicas por rol existentes dentro de Global, sin crear
+  un perfil personalizado artificial ni reasignar proyectos a perfiles;
+- todos los proyectos existentes quedan usando Global y los perfiles personalizados comienzan
+  vacíos, creados únicamente por decisión del usuario.
 
 No se aprueba todavía ninguna tabla, endpoint o librería concreta.
 
@@ -498,6 +557,10 @@ La migración deberá:
 - definir valores y backfill para filas actuales;
 - convertir de forma explícita la cuenta del owner en superadministrador protegido;
 - no invalidar sesiones existentes salvo que el diseño aprobado lo requiera;
+- migrar la combinación global actual a la nueva configuración Global;
+- consolidar dentro de Global las configuraciones específicas por rol existentes, sin crear perfiles
+  personalizados artificiales;
+- dejar todos los proyectos existentes seleccionando Global;
 - validar datos reales antes de endurecer constraints;
 - ser reversible cuando sea razonable o disponer de un procedimiento de rollback documentado.
 
@@ -573,7 +636,8 @@ La migración deberá:
 ### Escenario 14 — Lectura administrativa de proyectos
 
 - **Input:** administrador consulta proyectos de un usuario.
-- **Expected output:** datos permitidos en modo lectura, sin secretos ni acciones operativas.
+- **Expected output:** datos permitidos en modo lectura, incluyendo nombre de la opción de
+  configuración seleccionada y estado de preparación, sin secretos ni acciones operativas.
 
 ### Escenario 15 — Rate limiting
 
@@ -582,17 +646,20 @@ La migración deberá:
 
 ### Escenario 16 — Proyecto sin configuración
 
-- **Input:** usuario crea proyecto sin conexión GitHub ni repositorio.
-- **Expected output:** proyecto creado pero marcado/no presentado como operativo; no puede iniciar casos.
+- **Input:** usuario crea proyecto sin conexión GitHub, repositorio o configuración Global completa.
+- **Expected output:** proyecto creado con Global preseleccionada pero marcado/no presentado como
+  operativo; no puede iniciar casos.
 
 ### Escenario 17 — Configuración de agentes
 
 - **Input:** usuario abre configuración de proyecto.
-- **Expected output:** preferencias editables; disponibilidad de credenciales mostrada en lectura; enlace a configuración de cuenta.
+- **Expected output:** disponibilidad de credenciales mostrada en lectura; Global o perfil
+  seleccionado de forma visible; enlace a configuración de cuenta para editar Global, perfiles y
+  credenciales.
 
 ### Escenario 18 — Crear perfil de configuración
 
-- **Input:** usuario con menos de 3 perfiles crea uno nuevo con nombre y configuración por rol.
+- **Input:** usuario con menos de 3 perfiles crea uno nuevo con nombre y configuración por agente.
 - **Expected output:** perfil creado, disponible para selección en cualquiera de sus proyectos.
 
 ### Escenario 19 — Límite de perfiles
@@ -603,20 +670,28 @@ La migración deberá:
 ### Escenario 20 — Selección de perfil por proyecto
 
 - **Input:** usuario selecciona un perfil existente para un proyecto.
-- **Expected output:** al ejecutar un rol de ese proyecto con override definido en el perfil, se usa
-  ese override; los roles sin override en el perfil caen a la configuración global de la cuenta.
+- **Expected output:** al ejecutar un agente de ese proyecto con configuración definida en el perfil,
+  se usa esa combinación; los agentes sin configuración específica en el perfil caen a Global.
 
 ### Escenario 21 — Borrado de un perfil seleccionado
 
 - **Input:** usuario borra un perfil que un proyecto tiene seleccionado.
-- **Expected output:** el proyecto queda automáticamente sin perfil (selección en `null`), resuelve
-  contra la configuración global de la cuenta sin bloqueo ni acción manual previa.
+- **Expected output:** el proyecto pasa automáticamente a Global (`agent_config_profile_id = null`)
+  sin bloqueo ni acción manual previa.
 
-### Escenario 22 — Configuración global obligatoria
+### Escenario 22 — Global incompleta
 
-- **Input:** proyecto sin perfil seleccionado, cuenta sin configuración global definida.
-- **Expected output:** corte técnico explícito (mismo gate de credencial faltante ya existente), no
-  un default silencioso indefinido.
+- **Input:** proyecto con Global seleccionada y cuenta cuya combinación Global de asistente de IA,
+  modelo o método de autenticación está incompleta o no dispone de credencial válida.
+- **Expected output:** el proyecto existe pero no puede operar; el sistema muestra un gate técnico
+  explícito y accionable, no un default silencioso indefinido.
+
+### Escenario 23 — Migración de configuración existente
+
+- **Input:** cuenta existente con combinación global y configuraciones específicas por rol.
+- **Expected output:** la combinación resultante queda representada como Global; no se crea un perfil
+  artificial, todos los proyectos existentes usan Global y no aparecen perfiles personalizados
+  hasta que el usuario los cree.
 
 ### Validation Evidence
 
@@ -636,7 +711,10 @@ La validación deberá incluir:
   - suspensión y reactivación;
   - jerarquía administrativa;
   - rate limiting;
-  - separación visual cuenta/proyecto.
+  - separación visual cuenta/proyecto;
+  - Global preseleccionada e incompleta;
+  - creación, selección y borrado de perfiles;
+  - migración de una cuenta existente sin perfil artificial.
 
 Las pruebas automatizadas no sustituyen la evidencia E2E real.
 
@@ -658,8 +736,13 @@ Las pruebas automatizadas no sustituyen la evidencia E2E real.
 12. La política de contraseña podría romper flujos existentes si se aplica retroactivamente a hashes actuales; solo debe exigirse al definir una contraseña nueva.
 13. El cambio autenticado de contraseña puede añadir complejidad innecesaria; es una capacidad condicionada por esfuerzo.
 14. Los indicadores administrativos de conexiones son opcionales y no deben forzar descifrado ni agregaciones complejas.
-15. Migrar el único juego de overrides por rol que existe hoy (uno por usuario, sin `project_id`) hacia un perfil por defecto requiere backfill cuidadoso para no cambiar el comportamiento de proyectos ya en uso al desplegar.
-16. Hacer obligatoria la configuración global de cuenta puede afectar a cuentas existentes que hoy operan sin una fila global explícita (cayendo al default hardcodeado `claude + api_key`) si el backfill/gate de esa obligatoriedad no se define con cuidado.
+15. La configuración actual admite overrides por rol, mientras la nueva Global es una única combinación
+    para todos los agentes. DAIA debe validar y documentar la regla determinística con la que esos
+    valores se consolidarán en Global para evitar una migración ambigua o una pérdida silenciosa de
+    intención.
+16. Global puede existir incompleta. El gate operativo debe distinguir claramente entre proyecto
+    creado y proyecto listo para ejecutar, sin bloquear el onboarding ni aplicar un default
+    silencioso que oculte la falta de configuración o credencial.
 
 ---
 
@@ -678,7 +761,8 @@ Antes de aprobar se requiere:
    **Completado 2026-08-04** — el punto 13 invalidaba la sección 4 original (config "por
    proyecto" no existe en el código real); corregido con el modelo de perfiles de configuración
    nombrados (sección 4, Regla 5.10).
-4. revisión final de alcance por ARIA y el owner — **pendiente**.
+4. revisión final de alcance por ARIA y el owner — **en curso; definición de Global, perfiles y
+   migración actualizada el 2026-08-04 para nueva revisión DAIA**.
 5. aprobación humana explícita del owner — **pendiente**.
 
 Hasta ese momento queda prohibido implementar FEATURE-041.
