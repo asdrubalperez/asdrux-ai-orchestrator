@@ -736,10 +736,15 @@ Las pruebas automatizadas no sustituyen la evidencia E2E real.
 12. La política de contraseña podría romper flujos existentes si se aplica retroactivamente a hashes actuales; solo debe exigirse al definir una contraseña nueva.
 13. El cambio autenticado de contraseña puede añadir complejidad innecesaria; es una capacidad condicionada por esfuerzo.
 14. Los indicadores administrativos de conexiones son opcionales y no deben forzar descifrado ni agregaciones complejas.
-15. La configuración actual admite overrides por rol, mientras la nueva Global es una única combinación
-    para todos los agentes. DAIA debe validar y documentar la regla determinística con la que esos
-    valores se consolidarán en Global para evitar una migración ambigua o una pérdida silenciosa de
-    intención.
+15. **[RESUELTO 2026-08-04, confirmado explícitamente por el owner]** La configuración actual admite
+    overrides por rol, mientras la nueva Global es una única combinación para todos los agentes. El
+    owner confirmó que hoy puede tener overrides por rol en proyectos actuales y que acepta
+    conscientemente perderlos durante la migración: la regla determinística es la ya descrita en
+    "Migración de configuración existente" — la fila global actual (`role IS NULL`) se convierte en
+    la nueva Global; cualquier override por rol existente se descarta sin migrarse a ningún perfil;
+    no se crea ningún perfil artificial; todos los proyectos existentes quedan usando Global. No es
+    una pérdida silenciosa: queda documentada aquí como decisión explícita del owner, no como un
+    default no revisado.
 16. Global puede existir incompleta. El gate operativo debe distinguir claramente entre proyecto
     creado y proyecto listo para ejecutar, sin bloquear el onboarding ni aplicar un default
     silencioso que oculte la falta de configuración o credencial.
@@ -761,8 +766,11 @@ Antes de aprobar se requiere:
    **Completado 2026-08-04** — el punto 13 invalidaba la sección 4 original (config "por
    proyecto" no existe en el código real); corregido con el modelo de perfiles de configuración
    nombrados (sección 4, Regla 5.10).
-4. revisión final de alcance por ARIA y el owner — **en curso; definición de Global, perfiles y
-   migración actualizada el 2026-08-04 para nueva revisión DAIA**.
+4. revisión final de alcance por ARIA y el owner — **re-revisión DAIA del ajuste de Global/perfiles/
+   migración completada 2026-08-04** (Riesgo 15 resuelto con confirmación explícita del owner: los
+   overrides por rol actuales se descartan a propósito al consolidar en Global, sin migrarlos a
+   ningún perfil). Queda pendiente la revisión final de alcance conjunta de ARIA + owner sobre el
+   documento completo.
 5. aprobación humana explícita del owner — **pendiente**.
 
 Hasta ese momento queda prohibido implementar FEATURE-041.
