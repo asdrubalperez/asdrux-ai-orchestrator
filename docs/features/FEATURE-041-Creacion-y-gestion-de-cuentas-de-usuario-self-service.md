@@ -5,10 +5,11 @@
 - **Name:** Creación y gestión de cuentas de usuario (self-service)
 - **Type:** Product / Security / Identity
 - **Owner:** Asdru
-- **Status:** Diseño — Approval Gate abierto
+- **Status:** Diseño — revalidación técnica DAIA completada (2026-08-04) — Approval Gate abierto
 - **Priority:** Alta
 - **Playbook Mode:** Standard
 - **Template:** `docs/playbook/07-FEATURE-TEMPLATE.md` v2.1
+- **Rama de trabajo:** `feature/041-cuentas-de-usuario-self-service`
 
 ---
 
@@ -165,19 +166,32 @@ Después de implementar FEATURE-041:
 
 #### Separación cuenta / proyecto / caso
 
+**[Corrección DAIA, 2026-08-04]** La revalidación técnica obligatoria (punto 13 de la sección 7)
+confirmó que `user_agent_config` es hoy exclusivamente por (`user_id`, `role`) — no existe, ni
+existió nunca, ninguna noción de proyecto en esa tabla. La configuración de agentes (proveedor,
+modo, modelo por rol) es y era de **cuenta**, no de proyecto. Discutido con el owner: en vez de
+migrar a una configuración arbitraria por proyecto (alto esfuerzo, rompe la separación
+cuenta/proyecto ya definida para credenciales), se adopta el modelo de **perfiles de configuración
+nombrados**, ver detalle en la subsección siguiente y en la Regla 5.10.
+
 **Cuenta:**
 
 - email, contraseña y nombre visible;
 - rol y estado;
 - API keys de proveedores de IA;
-- conexiones OAuth de Claude y Codex.
+- conexiones OAuth de Claude y Codex;
+- configuración global de agente (proveedor/modo/modelo por defecto para los 6 roles) — pasa a ser
+  **obligatoria**;
+- hasta 3 perfiles de configuración de agente, cada uno con:
+  - nombre editable por el usuario;
+  - personalización por agente (los 6 roles: architect, functional, planning, developer, qa,
+    intake).
 
 **Proyecto:**
 
 - conexión GitHub seleccionada para ese proyecto;
 - repositorio asociado;
-- proveedor y modo predeterminados;
-- overrides por agente o rol.
+- selección de cuál perfil de cuenta aplica a este proyecto (o ninguno).
 
 **Caso o run:**
 
@@ -186,9 +200,31 @@ Después de implementar FEATURE-041:
 La pantalla de configuración de agentes del proyecto:
 
 - muestra en modo lectura qué proveedores están disponibles para la cuenta;
-- no permite editar credenciales de cuenta;
-- ofrece acceso directo al módulo de cuenta para agregar, quitar o reconectar credenciales;
-- mantiene la edición de preferencias de uso del proyecto.
+- no permite editar credenciales de cuenta ni el contenido de los perfiles (eso se edita
+  exclusivamente en el módulo de cuenta);
+- ofrece acceso directo al módulo de cuenta para agregar, quitar o reconectar credenciales, y para
+  crear/editar/borrar perfiles;
+- permite seleccionar, para este proyecto puntual, cuál perfil de cuenta aplica (o ninguno, usando
+  la configuración global).
+
+**Resolución al ejecutar un rol:** override del perfil seleccionado por el proyecto para ese rol →
+configuración global de la cuenta → default del sistema. Si el proyecto no tiene perfil
+seleccionado (nunca eligió uno, o el que tenía fue borrado), se usa directamente la configuración
+global de la cuenta.
+
+#### Perfiles de configuración de agentes (cuenta)
+
+- Alta, edición y borrado de hasta 3 perfiles por cuenta.
+- Cada perfil: nombre editable + configuración por cada uno de los 6 roles (reutiliza el mismo
+  formulario que ya existe hoy para la configuración de agente, multiplicado por perfil).
+- La configuración global de cuenta pasa a ser obligatoria — es el fallback final antes del default
+  del sistema, ya no es opcional.
+- Selección de perfil por proyecto: cero o un perfil por proyecto, nunca más de uno.
+- Al borrar un perfil que algún proyecto tiene seleccionado, ese proyecto queda automáticamente sin
+  perfil (usa la configuración global) — sin estado de bloqueo intermedio ni acción manual
+  requerida más allá de que el usuario, si quiere, elija otro perfil después.
+- El límite de 3 perfiles se valida en el servicio de aplicación, no requiere constraint de base de
+  datos.
 
 #### Rate limiting
 
@@ -309,6 +345,22 @@ El diseño técnico puede usar columnas simples si son suficientes; no se exige 
 - Debe actualizarse mediante un evento de autenticación exitoso claramente definido.
 - No debe depender de cada request ni generar escrituras innecesarias.
 
+### 5.10 Perfiles de configuración de agentes
+
+- Un usuario puede tener hasta 3 perfiles de configuración de agente, cada uno con nombre propio y
+  personalización de los 6 roles (architect, functional, planning, developer, qa, intake).
+- El límite de 3 se valida en el servicio de aplicación, no en la base de datos.
+- La configuración global de la cuenta es obligatoria como fallback final antes del default del
+  sistema — deja de ser opcional.
+- Un proyecto selecciona, como máximo, un perfil de cuenta. Si no selecciona ninguno, usa
+  directamente la configuración global.
+- Al borrar un perfil, todo proyecto que lo tuviera seleccionado queda automáticamente sin perfil
+  (usa la configuración global) — sin estado de bloqueo intermedio, sin acción manual requerida.
+- Resolución por rol al ejecutar: override del perfil seleccionado por el proyecto para ese rol →
+  configuración global de la cuenta → default del sistema.
+- Los perfiles, igual que las credenciales, se editan únicamente desde el módulo de cuenta. El
+  proyecto solo elige cuál aplica.
+
 ---
 
 ## 6. Estrategia Algorítmica (Opcional)
@@ -351,9 +403,44 @@ La implementación deberá determinar el cambio mínimo necesario en:
 - rutas públicas de autenticación;
 - UI de cuenta y administración;
 - servicio de email;
-- rate limiting.
+- rate limiting;
+- tabla nueva `agent_config_profiles` (perfiles de configuración de agente por cuenta, hasta 3);
+- columna `projects.agent_config_profile_id` (FK a `agent_config_profiles`, `ON DELETE SET NULL`);
+- `resolveAgentConfig` (`src/db/repository.ts:662-668`) pasa a recibir `profileId` además de
+  `userId`/`role`, con la nueva precedencia perfil → global de cuenta → default;
+- migración del único juego de overrides por rol que existe hoy (`user_agent_config` con
+  `role is not null`, sin `project_id`) hacia un perfil por defecto, para no alterar el
+  comportamiento de proyectos ya en uso al desplegar.
 
 No se aprueba todavía ninguna tabla, endpoint o librería concreta.
+
+### Resultado de la revalidación técnica DAIA (2026-08-04)
+
+Los 17 puntos de "Revalidaciones obligatorias para DAIA" fueron confirmados contra `main` real
+(migraciones y código, no documentación aspiracional). Sin sorpresas relevantes salvo el punto 13
+(ver más abajo). Resumen de los hallazgos que sí importan al diseño:
+
+- `users.password_hash` es nullable desde el schema original (`0002_users_projects_phase_a.sql`) —
+  no hay constraint que impida hoy una fila sin password.
+- Hash de contraseñas: `bcryptjs`, cost 12 (`src/auth/password.ts`). Único punto de escritura hoy
+  es el CLI `seed:user` — no existe endpoint HTTP de alta/cambio de password.
+- `sessions`: TTL fijo 48h (`src/auth/sessionCore.ts:3`), revocación vía `revoked_at`, token crudo
+  nunca persistido (solo su hash). Confirmado razonable, se conserva.
+- No existe CSRF ni rate limiting genérico. La mitigación real es `requireAllowedOrigin` llamado a
+  mano en cada ruta mutante (`src/auth/webSession.ts:182-186`) — cualquier endpoint nuevo de esta
+  Feature debe replicarlo explícitamente. Rate limiting solo existe hoy para login (en memoria, 5
+  intentos/15min); el resto de rutas nuevas de esta Feature necesitan su propia protección.
+- `last_login_at` no existe en ningún lado del código — hay que crearlo desde cero.
+- `user_git_connections` es 1:1 por (usuario, proveedor) — no hay multi-conexión que resolver, la
+  ambigüedad que el diseño original insinuaba no existe en la práctica.
+- 9 tablas tienen FK hacia `users.id` — deben revisarse todas antes de tocar constraints de `users`
+  (listado completo disponible en el handoff de la sesión de validación).
+- **Punto 13 (crítico):** `user_agent_config` es exclusivamente por (`user_id`, `role`) — sin
+  ninguna columna `project_id` en ninguna migración (`0008`, `0021`, `0022`) ni en
+  `resolveAgentConfig`/`repository.ts:624-706`. La sección 4 original de este documento asumía
+  incorrectamente que era por proyecto. Resuelto mediante el modelo de perfiles nombrados (ver
+  sección 4 y Regla 5.10) — evaluado contra la alternativa de config arbitraria por proyecto real
+  (esfuerzo 8/10 vs. 5/10 de perfiles, descartada por desproporcionada para el caso de uso real).
 
 ### Revalidaciones obligatorias para DAIA
 
@@ -373,7 +460,8 @@ No se aprueba todavía ninguna tabla, endpoint o librería concreta.
     - qué ocurre al eliminar o reconectar una conexión;
     - si el modelo actual satisface una conexión y un repositorio por proyecto.
 12. Determinar si la discrepancia GitHub pertenece a FEATURE-041, FEATURE-042 o una Feature separada; no ampliarla automáticamente.
-13. Confirmar si `user_agent_config` es realmente por proyecto o solo por usuario y rol.
+13. ~~Confirmar si `user_agent_config` es realmente por proyecto o solo por usuario y rol.~~
+    **[RESUELTO 2026-08-04, ver "Resultado de la revalidación técnica DAIA" más abajo]**
 14. Evaluar si el cambio autenticado de contraseña es pequeño; de no serlo, excluirlo y reutilizar recuperación.
 15. Evaluar el costo real de indicadores administrativos no sensibles; excluirlos si exigen agregaciones o cambios amplios.
 16. Revisar código y documentación de FEATURE-010, 013B, 014, 025, 026 y 042.
@@ -490,6 +578,34 @@ La migración deberá:
 - **Input:** usuario abre configuración de proyecto.
 - **Expected output:** preferencias editables; disponibilidad de credenciales mostrada en lectura; enlace a configuración de cuenta.
 
+### Escenario 18 — Crear perfil de configuración
+
+- **Input:** usuario con menos de 3 perfiles crea uno nuevo con nombre y configuración por rol.
+- **Expected output:** perfil creado, disponible para selección en cualquiera de sus proyectos.
+
+### Escenario 19 — Límite de perfiles
+
+- **Input:** usuario con 3 perfiles ya creados intenta crear un cuarto.
+- **Expected output:** rechazo con mensaje accionable, ningún perfil creado.
+
+### Escenario 20 — Selección de perfil por proyecto
+
+- **Input:** usuario selecciona un perfil existente para un proyecto.
+- **Expected output:** al ejecutar un rol de ese proyecto con override definido en el perfil, se usa
+  ese override; los roles sin override en el perfil caen a la configuración global de la cuenta.
+
+### Escenario 21 — Borrado de un perfil seleccionado
+
+- **Input:** usuario borra un perfil que un proyecto tiene seleccionado.
+- **Expected output:** el proyecto queda automáticamente sin perfil (selección en `null`), resuelve
+  contra la configuración global de la cuenta sin bloqueo ni acción manual previa.
+
+### Escenario 22 — Configuración global obligatoria
+
+- **Input:** proyecto sin perfil seleccionado, cuenta sin configuración global definida.
+- **Expected output:** corte técnico explícito (mismo gate de credencial faltante ya existente), no
+  un default silencioso indefinido.
+
 ### Validation Evidence
 
 La validación deberá incluir:
@@ -530,6 +646,8 @@ Las pruebas automatizadas no sustituyen la evidencia E2E real.
 12. La política de contraseña podría romper flujos existentes si se aplica retroactivamente a hashes actuales; solo debe exigirse al definir una contraseña nueva.
 13. El cambio autenticado de contraseña puede añadir complejidad innecesaria; es una capacidad condicionada por esfuerzo.
 14. Los indicadores administrativos de conexiones son opcionales y no deben forzar descifrado ni agregaciones complejas.
+15. Migrar el único juego de overrides por rol que existe hoy (uno por usuario, sin `project_id`) hacia un perfil por defecto requiere backfill cuidadoso para no cambiar el comportamiento de proyectos ya en uso al desplegar.
+16. Hacer obligatoria la configuración global de cuenta puede afectar a cuentas existentes que hoy operan sin una fila global explícita (cayendo al default hardcodeado `claude + api_key`) si el backfill/gate de esa obligatoriedad no se define con cuidado.
 
 ---
 
@@ -541,10 +659,17 @@ La creación de este documento no autoriza implementación.
 
 Antes de aprobar se requiere:
 
-1. revisión técnica de DAIA contra `main` y datos reales;
-2. respuesta explícita a las revalidaciones obligatorias;
-3. ajuste del documento cuando los hallazgos invaliden alguna consideración técnica;
-4. revisión final de alcance por ARIA y el owner;
-5. aprobación humana explícita del owner.
+1. ~~revisión técnica de DAIA contra `main` y datos reales~~ **Completada 2026-08-04.**
+2. ~~respuesta explícita a las revalidaciones obligatorias~~ **Completada 2026-08-04, los 17 puntos
+   respondidos, ver sección 7.**
+3. ~~ajuste del documento cuando los hallazgos invaliden alguna consideración técnica~~
+   **Completado 2026-08-04** — el punto 13 invalidaba la sección 4 original (config "por
+   proyecto" no existe en el código real); corregido con el modelo de perfiles de configuración
+   nombrados (sección 4, Regla 5.10).
+4. revisión final de alcance por ARIA y el owner — **pendiente**.
+5. aprobación humana explícita del owner — **pendiente**.
 
 Hasta ese momento queda prohibido implementar FEATURE-041.
+
+Trabajo realizado en la rama `feature/041-cuentas-de-usuario-self-service`, no en `main` — toda
+Feature se trabaja en su propia rama salvo excepción explícita del owner.
