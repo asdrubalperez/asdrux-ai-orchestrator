@@ -219,7 +219,15 @@ global de la cuenta.
   formulario que ya existe hoy para la configuración de agente, multiplicado por perfil).
 - La configuración global de cuenta pasa a ser obligatoria — es el fallback final antes del default
   del sistema, ya no es opcional.
-- Selección de perfil por proyecto: cero o un perfil por proyecto, nunca más de uno.
+- El selector de configuración del proyecto lista **Global** (configuración global de cuenta) como
+  una opción explícita, junto con los perfiles personalizados que el usuario tenga creados (0 a 3)
+  — nunca queda "sin selección" de forma implícita.
+- Al crear un proyecto, queda preseleccionada **Global** por defecto, salvo que la configuración
+  global no esté configurada (en ese caso no hay preselección, mismo gate de configuración
+  faltante ya existente). Cambiar a un perfil personalizado es una decisión consciente y visible
+  del usuario, no un default oculto.
+- Selección de perfil por proyecto: exactamente una opción entre Global y los perfiles disponibles,
+  nunca "ninguna".
 - Al borrar un perfil que algún proyecto tiene seleccionado, ese proyecto queda automáticamente sin
   perfil (usa la configuración global) — sin estado de bloqueo intermedio ni acción manual
   requerida más allá de que el usuario, si quiere, elija otro perfil después.
@@ -352,10 +360,14 @@ El diseño técnico puede usar columnas simples si son suficientes; no se exige 
 - El límite de 3 se valida en el servicio de aplicación, no en la base de datos.
 - La configuración global de la cuenta es obligatoria como fallback final antes del default del
   sistema — deja de ser opcional.
-- Un proyecto selecciona, como máximo, un perfil de cuenta. Si no selecciona ninguno, usa
-  directamente la configuración global.
-- Al borrar un perfil, todo proyecto que lo tuviera seleccionado queda automáticamente sin perfil
-  (usa la configuración global) — sin estado de bloqueo intermedio, sin acción manual requerida.
+- El selector de configuración de un proyecto lista **Global** como opción explícita, junto con los
+  perfiles personalizados existentes — nunca queda en un estado de "nada seleccionado" implícito.
+- Al crear un proyecto, queda preseleccionada **Global** por defecto, salvo que la configuración
+  global no esté configurada (en ese caso no hay preselección posible). Cambiar a un perfil
+  personalizado es una decisión explícita y visible del usuario.
+- Al borrar un perfil, todo proyecto que lo tuviera seleccionado pasa automáticamente a **Global**
+  (misma representación técnica: `agent_config_profile_id = null`) — sin estado de bloqueo
+  intermedio, sin acción manual requerida.
 - Resolución por rol al ejecutar: override del perfil seleccionado por el proyecto para ese rol →
   configuración global de la cuenta → default del sistema.
 - Los perfiles, igual que las credenciales, se editan únicamente desde el módulo de cuenta. El
