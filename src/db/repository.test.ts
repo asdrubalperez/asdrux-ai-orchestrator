@@ -2,15 +2,16 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import {
+  createAgentConfigProfile,
   createRun,
   createRunPendingStart,
-  deleteRoleAgentConfigOverride,
+  deleteAgentConfigProfile,
   getGlobalAgentConfig,
-  getRoleAgentConfigOverride,
+  getProfileAgentConfigOverride,
   getRootRunExecutionContext,
   resolveAgentConfig,
   setGlobalAgentConfig,
-  setRoleAgentConfigOverride,
+  setProfileAgentConfigOverride,
 } from "./repository.js";
 import { pool } from "./pool.js";
 
@@ -107,11 +108,11 @@ test("createRunPendingStart persiste base_branch_name separado de business_case;
   }
 });
 
-// FEATURE-025-Parte-1, sección 5.1/5.7: precedencia rol -> global -> default, y el modelo viaja
-// junto con provider/authMode en la misma fila (sección 7.1). Sin transacción/rollback -- estas
-// funciones usan `pool` directamente (mismo criterio que gitConnectionService.ts, sin client
-// inyectado); limpieza manual en el finally.
-test("resolveAgentConfig: precedencia rol > global > default, incluido el modelo", async (t) => {
+// FEATURE-041, Regla 5.10: precedencia override-de-perfil -> Global de cuenta -> default, y el
+// modelo viaja junto con provider/authMode en la misma fila (FEATURE-025-Parte-1, sección 7.1).
+// Sin transacción/rollback -- estas funciones usan `pool` directamente (mismo criterio que
+// gitConnectionService.ts, sin client inyectado); limpieza manual en el finally.
+test("resolveAgentConfig: precedencia override-de-perfil > Global > default, incluido el modelo", async (t) => {
   try {
     await pool.query("select 1");
   } catch (error) {
@@ -130,12 +131,19 @@ test("resolveAgentConfig: precedencia rol > global > default, incluido el modelo
   }
   const userId = prerequisite.rows[0].owner_id;
 
+  // El usuario de prueba es una cuenta real (ej. en el VPS dev, "asdru") que puede ya tener una
+  // Global configurada -- se guarda para restaurarla, y se limpia la fila para tener una base
+  // limpia real ("sin ninguna fila") en vez de asumir que la cuenta nunca tuvo una.
+  const preExistingGlobal = await getGlobalAgentConfig(userId);
+  await pool.query("delete from user_agent_config where user_id = $1 and role is null", [userId]);
+
+  let profileId: string | undefined;
   try {
-    // Sin ninguna fila -> default (claude/api_key, sin modelo).
-    const withoutConfig = await resolveAgentConfig(userId, "architect");
+    // Sin ninguna fila y sin perfil -> default (claude/api_key, sin modelo).
+    const withoutConfig = await resolveAgentConfig(userId, "architect", null);
     assert.deepEqual(withoutConfig, { executorProvider: "claude", authMode: "api_key", model: null });
 
-    // Configuración global -> todos los roles sin override la heredan.
+    // Configuración Global -> todos los roles sin override de perfil la heredan.
     const global = await setGlobalAgentConfig(userId, {
       executorProvider: "codex",
       authMode: "api_key",
@@ -143,24 +151,29 @@ test("resolveAgentConfig: precedencia rol > global > default, incluido el modelo
     });
     assert.deepEqual(global, { executorProvider: "codex", authMode: "api_key", model: "gpt-5.6-luna" });
     assert.deepEqual(await getGlobalAgentConfig(userId), global);
-    assert.deepEqual(await resolveAgentConfig(userId, "developer"), global);
+    assert.deepEqual(await resolveAgentConfig(userId, "developer", null), global);
 
-    // Override de rol -> ese rol usa su propia combinación; los demás siguen en la global.
-    const roleOverride = await setRoleAgentConfigOverride(userId, "developer", {
+    // Override dentro de un perfil -> ese rol, en ese perfil, usa su propia combinación; los demás
+    // roles del mismo perfil, y cualquier rol sin perfil seleccionado, siguen en la Global.
+    const profile = await createAgentConfigProfile(userId, "Perfil de prueba");
+    profileId = profile.id;
+    const profileOverride = await setProfileAgentConfigOverride(userId, profileId, "developer", {
       executorProvider: "claude",
       authMode: "cli_session",
       model: "claude-opus-5",
     });
-    assert.deepEqual(await getRoleAgentConfigOverride(userId, "developer"), roleOverride);
-    assert.deepEqual(await resolveAgentConfig(userId, "developer"), roleOverride);
-    assert.deepEqual(await resolveAgentConfig(userId, "qa"), global);
+    assert.deepEqual(await getProfileAgentConfigOverride(userId, profileId, "developer"), profileOverride);
+    assert.deepEqual(await resolveAgentConfig(userId, "developer", profileId), profileOverride);
+    assert.deepEqual(await resolveAgentConfig(userId, "qa", profileId), global);
+    assert.deepEqual(await resolveAgentConfig(userId, "developer", null), global);
 
-    // Eliminar el override -> ese rol vuelve a heredar la global (Regla 5.1.3).
-    await deleteRoleAgentConfigOverride(userId, "developer");
-    assert.equal(await getRoleAgentConfigOverride(userId, "developer"), null);
-    assert.deepEqual(await resolveAgentConfig(userId, "developer"), global);
+    // Borrar el perfil -> cualquier resolución que lo referenciara cae a Global (Escenario 21: en
+    // la práctica el proyecto pasa a profileId null, resolveAgentConfig ya lo cubre arriba).
+    await deleteAgentConfigProfile(profileId, userId);
+    assert.equal(await getProfileAgentConfigOverride(userId, profileId, "developer"), null);
   } finally {
-    await deleteRoleAgentConfigOverride(userId, "developer").catch(() => {});
+    if (profileId) await deleteAgentConfigProfile(profileId, userId).catch(() => {});
     await pool.query("delete from user_agent_config where user_id = $1 and role is null", [userId]).catch(() => {});
+    if (preExistingGlobal) await setGlobalAgentConfig(userId, preExistingGlobal).catch(() => {});
   }
 });

@@ -54,6 +54,17 @@ export function selectProject(projectId: string): Promise<{ selectedProjectId: s
   return request(`/projects/${encodeURIComponent(projectId)}/select`, { method: "POST" });
 }
 
+// FEATURE-041, Regla 5.10: profileId null selecciona Global explícitamente.
+export function setProjectAgentConfigProfile(
+  projectId: string,
+  profileId: string | null
+): Promise<{ project: { agent_config_profile_id: string | null } }> {
+  return request(`/projects/${encodeURIComponent(projectId)}/agent-config-profile`, {
+    method: "PUT",
+    body: JSON.stringify({ profileId }),
+  });
+}
+
 export function getGitHubConnectionStatus(): Promise<{ connection: GitConnectionSummary }> {
   return request("/auth/github/status");
 }

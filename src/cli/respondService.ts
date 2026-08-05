@@ -10,6 +10,7 @@ import {
   getRunDetailForUser,
   recordRunConfigVersions,
   recordRunEvent,
+  getProjectAgentConfigProfileId,
   resolveAgentConfig,
   resolveEscalatedRunStatus,
   setProjectConfig,
@@ -318,7 +319,11 @@ export async function respondToEscalation(params: {
     // no un valor inventado -- cada fase del child run resuelve la suya propia de todos modos.
     const firstPhaseSelection: EffectiveAgentConfig = cliAgentOverride
       ? { ...cliAgentOverride, model: model ?? null }
-      : await resolveAgentConfig(params.userId, FULL_PIPELINE.definition.phases[0].agentRole);
+      : await resolveAgentConfig(
+          params.userId,
+          FULL_PIPELINE.definition.phases[0].agentRole,
+          await getProjectAgentConfigProfileId(projectId)
+        );
     const childRun = await createRun({
       id: childRunId,
       pipelineDefinitionId: pipelineDefinitionRow.id,

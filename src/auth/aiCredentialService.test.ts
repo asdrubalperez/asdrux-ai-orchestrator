@@ -1,19 +1,53 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { pool } from "../db/pool.js";
+import { getAiOAuthConnection, type UserAiOAuthConnectionRow } from "../db/repository.js";
 import { generateGitCredentialEncryptionKey } from "./gitCredentialEncryption.js";
 import {
   AgentCredentialMissingError,
+  AgentOAuthNotConnectedError,
   listAiCredentialStatuses,
   removeAiCredential,
   resolveExecutorAuthentication,
   setAiCredential,
 } from "./aiCredentialService.js";
 
+async function snapshotAndClearOAuthConnection(userId: string, provider: "claude" | "codex") {
+  const existing = await getAiOAuthConnection(userId, provider);
+  await pool.query("delete from user_ai_oauth_connections where user_id = $1 and provider = $2", [userId, provider]);
+  return existing;
+}
+
+async function restoreOAuthConnection(userId: string, provider: "claude" | "codex", row: UserAiOAuthConnectionRow | null) {
+  if (!row) return;
+  await pool.query(
+    `insert into user_ai_oauth_connections
+       (id, user_id, provider, encrypted_session, status, session_version, created_at, updated_at, last_validated_at, reauth_required_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     on conflict (user_id, provider) do update set
+       encrypted_session = excluded.encrypted_session, status = excluded.status,
+       session_version = excluded.session_version, last_validated_at = excluded.last_validated_at,
+       reauth_required_at = excluded.reauth_required_at`,
+    [
+      row.id,
+      userId,
+      provider,
+      row.encrypted_session,
+      row.status,
+      row.session_version,
+      row.created_at,
+      row.updated_at,
+      row.last_validated_at,
+      row.reauth_required_at,
+    ]
+  );
+}
+
 // FEATURE-025-Parte-1: valida el mecanismo central que el handoff de revisión técnica identificó
 // como críticamente riesgoso -- resolveExecutorAuthentication siempre resuelve la credencial VIGENTE
-// en el momento (nunca una copia congelada), y cli_session nunca exige ni toca ninguna credencial
-// (Regla 5.5.2, sigue usando el mecanismo compartido del host hasta FEATURE-025-Parte-2).
+// en el momento (nunca una copia congelada). FEATURE-025-Parte-2: cli_session ya no usa el
+// mecanismo compartido del host -- resuelve la conexión OAuth propia del usuario y corta con
+// AgentOAuthNotConnectedError si no hay una.
 //
 // Sin transacción/rollback (mismo criterio que gitConnectionService.ts: sus funciones de
 // repository.ts tampoco aceptan un client inyectado) -- limpieza manual en el finally.
@@ -39,15 +73,19 @@ test("resolveExecutorAuthentication: ausencia, alta, rotación y eliminación de
 
   const originalKey = process.env.AI_CREDENTIAL_ENCRYPTION_KEY;
   process.env.AI_CREDENTIAL_ENCRYPTION_KEY = generateGitCredentialEncryptionKey();
+  // La conexión OAuth de "claude" es de cuenta, compartida con el resto de la app (incluida la
+  // cuenta real en el VPS dev, que puede tener una conexión real de otra Feature validada en vivo
+  // en esta misma sesión) -- se guarda para restaurarla exacta al terminar, en vez de solo borrarla
+  // y dejar la cuenta real degradada.
+  const originalClaudeOAuth = await snapshotAndClearOAuthConnection(userId, "claude");
 
   try {
-    // cli_session nunca exige credencial, sin importar si el usuario tiene una configurada o no.
-    const cliSessionAuth = await resolveExecutorAuthentication(userId, {
-      executorProvider: "claude",
-      authMode: "cli_session",
-      model: null,
-    });
-    assert.deepEqual(cliSessionAuth, { mode: "cli_session" });
+    // cli_session sin conexión OAuth propia -> corte técnico distinguible (FEATURE-025-Parte-2),
+    // nunca resuelve con éxito ni cae a ningún mecanismo compartido del host.
+    await assert.rejects(
+      resolveExecutorAuthentication(userId, { executorProvider: "claude", authMode: "cli_session", model: null }),
+      AgentOAuthNotConnectedError
+    );
 
     // api_key sin credencial propia -> corte técnico, nunca fallback a una clave global.
     await assert.rejects(
@@ -97,6 +135,7 @@ test("resolveExecutorAuthentication: ausencia, alta, rotación y eliminación de
   } finally {
     await removeAiCredential(userId, "claude").catch(() => {});
     await removeAiCredential(userId, "codex").catch(() => {});
+    await restoreOAuthConnection(userId, "claude", originalClaudeOAuth).catch(() => {});
     if (originalKey === undefined) delete process.env.AI_CREDENTIAL_ENCRYPTION_KEY;
     else process.env.AI_CREDENTIAL_ENCRYPTION_KEY = originalKey;
   }

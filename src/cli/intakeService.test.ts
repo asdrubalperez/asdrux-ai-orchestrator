@@ -2,13 +2,58 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { pool } from "../db/pool.js";
 import {
-  deleteRoleAgentConfigOverride,
-  setRoleAgentConfigOverride,
+  getAiProviderCredential,
+  getAiOAuthConnection,
+  getGlobalAgentConfig,
+  setGlobalAgentConfig,
+  type UserAiOAuthConnectionRow,
+  type UserAiProviderCredentialRow,
 } from "../db/repository.js";
 import { removeAiCredential } from "../auth/aiCredentialService.js";
 import { generateGitCredentialEncryptionKey } from "../auth/gitCredentialEncryption.js";
 import { mapIntakeText } from "./intakeService.js";
 import { AgentCredentialMissingError, AgentOAuthNotConnectedError } from "../auth/aiCredentialService.js";
+
+async function snapshotAndClearOAuthConnection(userId: string, provider: "claude" | "codex") {
+  const existing = await getAiOAuthConnection(userId, provider);
+  await pool.query("delete from user_ai_oauth_connections where user_id = $1 and provider = $2", [userId, provider]);
+  return existing;
+}
+
+async function restoreOAuthConnection(userId: string, provider: "claude" | "codex", row: UserAiOAuthConnectionRow | null) {
+  if (!row) return;
+  await pool.query(
+    `insert into user_ai_oauth_connections
+       (id, user_id, provider, encrypted_session, status, session_version, created_at, updated_at, last_validated_at, reauth_required_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     on conflict (user_id, provider) do update set
+       encrypted_session = excluded.encrypted_session, status = excluded.status,
+       session_version = excluded.session_version, last_validated_at = excluded.last_validated_at,
+       reauth_required_at = excluded.reauth_required_at`,
+    [
+      row.id,
+      userId,
+      provider,
+      row.encrypted_session,
+      row.status,
+      row.session_version,
+      row.created_at,
+      row.updated_at,
+      row.last_validated_at,
+      row.reauth_required_at,
+    ]
+  );
+}
+
+async function restoreProviderCredential(userId: string, provider: "claude" | "codex", row: UserAiProviderCredentialRow | null) {
+  if (!row) return;
+  await pool.query(
+    `insert into user_ai_provider_credentials (id, user_id, provider, credential_ciphertext, created_at, updated_at)
+     values ($1, $2, $3, $4, $5, $6)
+     on conflict (user_id, provider) do update set credential_ciphertext = excluded.credential_ciphertext`,
+    [row.id, userId, provider, row.credential_ciphertext, row.created_at, row.updated_at]
+  );
+}
 
 // FEATURE-025-Parte-3: "intake" ahora soporta las 4 combinaciones (Claude/Codex x api_key/
 // cli_session), igual que los 5 roles reales -- el corte ya no depende del proveedor/modo, sino
@@ -34,36 +79,59 @@ test("mapIntakeText corta con un error distinguible cuando 'intake' no tiene cre
   }
   const userId = prerequisite.rows[0].owner_id;
 
+  const project = await pool.query<{ id: string }>("select id from projects where owner_id = $1 limit 1", [userId]);
+  if (!project.rows[0]) {
+    t.skip("Requires at least one project owned by the test user in the integration database");
+    return;
+  }
+  const projectId = project.rows[0].id;
+
   const originalKey = process.env.AI_CREDENTIAL_ENCRYPTION_KEY;
   process.env.AI_CREDENTIAL_ENCRYPTION_KEY = generateGitCredentialEncryptionKey();
+  // La Global, las credenciales y las conexiones OAuth son todas de cuenta, compartidas con el
+  // resto de la app (incluida la cuenta real en el VPS dev, que puede tener credenciales/
+  // conexiones reales de otras Features validadas en vivo en esta misma sesión) -- se guarda todo
+  // para restaurarlo exacto al terminar, en vez de solo borrar y dejar la cuenta real degradada.
+  const originalGlobal = await getGlobalAgentConfig(userId);
+  const originalClaudeCredential = await getAiProviderCredential(userId, "claude");
+  const originalCodexCredential = await getAiProviderCredential(userId, "codex");
+  const originalClaudeOAuth = await snapshotAndClearOAuthConnection(userId, "claude");
+  const originalCodexOAuth = await snapshotAndClearOAuthConnection(userId, "codex");
 
+  // FEATURE-041: "intake" ya no tiene override propio suelto -- se resuelve vía la config Global
+  // de cuenta (profileId null, sin perfil seleccionado por el proyecto de prueba), mismo gate que
+  // antes, sin depender de la mecánica de perfiles para este test.
   try {
     // Claude + api_key, sin credencial propia -- mismo corte técnico que los 5 roles reales.
-    await setRoleAgentConfigOverride(userId, "intake", { executorProvider: "claude", authMode: "api_key", model: null });
+    await setGlobalAgentConfig(userId, { executorProvider: "claude", authMode: "api_key", model: null });
     await removeAiCredential(userId, "claude");
-    await assert.rejects(mapIntakeText({ userId, inputText: "texto de prueba" }), AgentCredentialMissingError);
+    await assert.rejects(mapIntakeText({ userId, projectId, inputText: "texto de prueba" }), AgentCredentialMissingError);
 
     // Codex + api_key, sin credencial propia -- ídem, ahora soportado (antes cortaba por provider).
-    await setRoleAgentConfigOverride(userId, "intake", { executorProvider: "codex", authMode: "api_key", model: null });
+    await setGlobalAgentConfig(userId, { executorProvider: "codex", authMode: "api_key", model: null });
     await removeAiCredential(userId, "codex");
-    await assert.rejects(mapIntakeText({ userId, inputText: "texto de prueba" }), AgentCredentialMissingError);
+    await assert.rejects(mapIntakeText({ userId, projectId, inputText: "texto de prueba" }), AgentCredentialMissingError);
 
     // Claude + cli_session, sin conexión OAuth -- ahora soportado (antes cortaba por authMode).
-    await setRoleAgentConfigOverride(userId, "intake", { executorProvider: "claude", authMode: "cli_session", model: null });
-    await assert.rejects(mapIntakeText({ userId, inputText: "texto de prueba" }), AgentOAuthNotConnectedError);
+    await setGlobalAgentConfig(userId, { executorProvider: "claude", authMode: "cli_session", model: null });
+    await assert.rejects(mapIntakeText({ userId, projectId, inputText: "texto de prueba" }), AgentOAuthNotConnectedError);
 
     // Codex + cli_session, sin conexión OAuth -- ídem.
-    await setRoleAgentConfigOverride(userId, "intake", { executorProvider: "codex", authMode: "cli_session", model: null });
-    await assert.rejects(mapIntakeText({ userId, inputText: "texto de prueba" }), AgentOAuthNotConnectedError);
+    await setGlobalAgentConfig(userId, { executorProvider: "codex", authMode: "cli_session", model: null });
+    await assert.rejects(mapIntakeText({ userId, projectId, inputText: "texto de prueba" }), AgentOAuthNotConnectedError);
 
     // No se prueba el camino "credencial/conexión presente" acá: implicaría una llamada de red real
     // (HTTP) o levantar un contenedor Docker real (OAuth) -- fuera de lo que un test unitario debe
     // ejercitar. La selección de adaptador está cubierta por intakeMappingAdapters.test.ts; cada
     // adaptador HTTP por su propio *.test.ts con fetch mockeado.
   } finally {
-    await deleteRoleAgentConfigOverride(userId, "intake").catch(() => {});
+    if (originalGlobal) await setGlobalAgentConfig(userId, originalGlobal).catch(() => {});
     await removeAiCredential(userId, "claude").catch(() => {});
     await removeAiCredential(userId, "codex").catch(() => {});
+    await restoreProviderCredential(userId, "claude", originalClaudeCredential).catch(() => {});
+    await restoreProviderCredential(userId, "codex", originalCodexCredential).catch(() => {});
+    await restoreOAuthConnection(userId, "claude", originalClaudeOAuth).catch(() => {});
+    await restoreOAuthConnection(userId, "codex", originalCodexOAuth).catch(() => {});
     if (originalKey === undefined) delete process.env.AI_CREDENTIAL_ENCRYPTION_KEY;
     else process.env.AI_CREDENTIAL_ENCRYPTION_KEY = originalKey;
   }

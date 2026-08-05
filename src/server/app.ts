@@ -21,11 +21,21 @@ import {
   getReleasePlansByRelease,
   getRunDetailForUser,
   getGlobalAgentConfig,
-  getRoleAgentConfigOverride,
   setGlobalAgentConfig,
-  setRoleAgentConfigOverride,
-  deleteRoleAgentConfigOverride,
+  listAgentConfigProfiles,
+  countAgentConfigProfiles,
+  getAgentConfigProfileById,
+  createAgentConfigProfile,
+  renameAgentConfigProfile,
+  deleteAgentConfigProfile,
+  listProfileAgentConfigOverrides,
+  setProfileAgentConfigOverride,
+  deleteProfileAgentConfigOverride,
+  setProjectAgentConfigProfile,
+  listProjectsForUser,
+  MAX_AGENT_CONFIG_PROFILES_PER_USER,
   isConfigurableAgentRole,
+  type AgentConfigProfileRow,
   type AuthMode,
   type EffectiveAgentConfig,
   type ExecutorProviderName,
@@ -36,6 +46,36 @@ import {
   removeAiCredential,
   setAiCredential,
 } from "../auth/aiCredentialService.js";
+import {
+  activateAccount,
+  changePassword,
+  completeOnboardingDisplayName,
+  InvalidDisplayNameError,
+  InvalidOrExpiredTokenError,
+  PasswordConfirmationMismatchError,
+  registerAccount,
+  requestPasswordReset,
+  resendVerificationEmail,
+  resetPassword,
+  verifyEmail,
+  WeakPasswordError,
+} from "../auth/accountService.js";
+import {
+  assertAdminOrAbove,
+  CannotActOnSelfError,
+  CannotActOnTargetError,
+  createAccount,
+  demoteToUser,
+  DuplicateAccountError,
+  InsufficientRoleError,
+  listAccounts,
+  promoteToAdmin,
+  reactivateAccount,
+  resendVerificationByAdmin,
+  suspendAccount,
+  TargetNotFoundError,
+} from "../auth/accountAdminService.js";
+import { rateLimitExceeded, recordRateLimitAttempt, RATE_LIMIT_BUCKETS } from "../auth/rateLimit.js";
 import { AGENT_MODEL_CATALOG, isModelSupportedByProvider } from "../executor/agentModelCatalog.js";
 import { LoginInProgressError } from "../auth/aiOAuthLoginRegistry.js";
 import { ClaudeLoginError } from "../auth/claudeLoginAdapter.js";
@@ -69,6 +109,7 @@ import {
   confirmIntake,
   confirmIntakeForProject,
   IntakeMappingAuthModeUnsupportedError,
+  IntakeMappingProjectNotFoundError,
   IntakeMappingProviderUnsupportedError,
   IntakeProjectNotFoundError,
   listMyCases,
@@ -128,9 +169,17 @@ export function createApp(config: ServerConfig): express.Express {
       }
 
       const login = await createWebLoginSession(handle, password);
-      if (!login) {
+      if (login.kind === "invalid_credentials") {
         recordFailedLogin(clientIp);
         res.status(401).json({ error: "invalid_credentials" });
+        return;
+      }
+      if (login.kind === "not_verified") {
+        res.status(403).json({ error: "account_not_verified", message: "Tu cuenta todavía no verificó el email." });
+        return;
+      }
+      if (login.kind === "suspended") {
+        res.status(403).json({ error: "account_suspended", message: "Tu cuenta está suspendida." });
         return;
       }
 
@@ -166,6 +215,379 @@ export function createApp(config: ServerConfig): express.Express {
 
   app.get("/auth/me", requireSession, (req: AuthenticatedRequest, res) => {
     res.json({ user: publicUser(req.user) });
+  });
+
+  // FEATURE-041: registro público + verificación + recuperación de contraseña. Regla 5.4: todas
+  // devuelven una respuesta neutra (200 sin distinción) salvo violaciones de formato/política que
+  // no revelan si la cuenta existe. Rate limiting por IP, mismo mecanismo que /auth/login.
+  app.post("/auth/register", async (req, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const clientIp = clientIpForRateLimit(req);
+      if (rateLimitExceeded("register", clientIp, RATE_LIMIT_BUCKETS.register)) {
+        res.status(429).json({ error: "rate_limited" });
+        return;
+      }
+      recordRateLimitAttempt("register", clientIp, RATE_LIMIT_BUCKETS.register);
+
+      const body = registerBody(req.body);
+      if (!body) {
+        res.status(400).json({ error: "invalid_register_body" });
+        return;
+      }
+      await registerAccount(body);
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      if (err instanceof WeakPasswordError) {
+        res.status(400).json({ error: "weak_password", message: err.message, violations: err.violations });
+        return;
+      }
+      if (err instanceof PasswordConfirmationMismatchError) {
+        res.status(400).json({ error: "password_confirmation_mismatch", message: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  app.post("/auth/verify-email", async (req, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const clientIp = clientIpForRateLimit(req);
+      if (rateLimitExceeded("tokenValidation", clientIp, RATE_LIMIT_BUCKETS.tokenValidation)) {
+        res.status(429).json({ error: "rate_limited" });
+        return;
+      }
+      recordRateLimitAttempt("tokenValidation", clientIp, RATE_LIMIT_BUCKETS.tokenValidation);
+
+      const token = typeof req.body?.token === "string" ? req.body.token : "";
+      if (!token) {
+        res.status(400).json({ error: "invalid_verify_email_body" });
+        return;
+      }
+      await verifyEmail(token);
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      if (err instanceof InvalidOrExpiredTokenError) {
+        res.status(400).json({ error: "invalid_or_expired_token", message: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  app.post("/auth/resend-verification", async (req, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const clientIp = clientIpForRateLimit(req);
+      if (rateLimitExceeded("resendVerification", clientIp, RATE_LIMIT_BUCKETS.resendVerification)) {
+        res.status(429).json({ error: "rate_limited" });
+        return;
+      }
+      recordRateLimitAttempt("resendVerification", clientIp, RATE_LIMIT_BUCKETS.resendVerification);
+
+      const email = typeof req.body?.email === "string" ? req.body.email : "";
+      if (!email) {
+        res.status(400).json({ error: "invalid_resend_verification_body" });
+        return;
+      }
+      await resendVerificationEmail(email);
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/auth/forgot-password", async (req, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const clientIp = clientIpForRateLimit(req);
+      if (rateLimitExceeded("forgotPassword", clientIp, RATE_LIMIT_BUCKETS.forgotPassword)) {
+        res.status(429).json({ error: "rate_limited" });
+        return;
+      }
+      recordRateLimitAttempt("forgotPassword", clientIp, RATE_LIMIT_BUCKETS.forgotPassword);
+
+      const email = typeof req.body?.email === "string" ? req.body.email : "";
+      if (!email) {
+        res.status(400).json({ error: "invalid_forgot_password_body" });
+        return;
+      }
+      await requestPasswordReset(email);
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/auth/reset-password", async (req, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const clientIp = clientIpForRateLimit(req);
+      if (rateLimitExceeded("tokenValidation", clientIp, RATE_LIMIT_BUCKETS.tokenValidation)) {
+        res.status(429).json({ error: "rate_limited" });
+        return;
+      }
+      recordRateLimitAttempt("tokenValidation", clientIp, RATE_LIMIT_BUCKETS.tokenValidation);
+
+      const body = resetPasswordBody(req.body);
+      if (!body) {
+        res.status(400).json({ error: "invalid_reset_password_body" });
+        return;
+      }
+      await resetPassword(body.token, body.password, body.passwordConfirmation);
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      if (err instanceof InvalidOrExpiredTokenError) {
+        res.status(400).json({ error: "invalid_or_expired_token", message: err.message });
+        return;
+      }
+      if (err instanceof WeakPasswordError) {
+        res.status(400).json({ error: "weak_password", message: err.message, violations: err.violations });
+        return;
+      }
+      if (err instanceof PasswordConfirmationMismatchError) {
+        res.status(400).json({ error: "password_confirmation_mismatch", message: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  app.post("/auth/activate-account", async (req, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const clientIp = clientIpForRateLimit(req);
+      if (rateLimitExceeded("tokenValidation", clientIp, RATE_LIMIT_BUCKETS.tokenValidation)) {
+        res.status(429).json({ error: "rate_limited" });
+        return;
+      }
+      recordRateLimitAttempt("tokenValidation", clientIp, RATE_LIMIT_BUCKETS.tokenValidation);
+
+      const body = resetPasswordBody(req.body);
+      if (!body) {
+        res.status(400).json({ error: "invalid_activate_account_body" });
+        return;
+      }
+      await activateAccount(body.token, body.password, body.passwordConfirmation);
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      if (err instanceof InvalidOrExpiredTokenError) {
+        res.status(400).json({ error: "invalid_or_expired_token", message: err.message });
+        return;
+      }
+      if (err instanceof WeakPasswordError) {
+        res.status(400).json({ error: "weak_password", message: err.message, violations: err.violations });
+        return;
+      }
+      if (err instanceof PasswordConfirmationMismatchError) {
+        res.status(400).json({ error: "password_confirmation_mismatch", message: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  // FEATURE-041, Regla 5.2: exentas del gate de onboarding (prefijo /account/, ver
+  // isOnboardingExemptPath) -- son exactamente las acciones necesarias para completarlo o para
+  // cambiar la contraseña ya autenticado.
+  app.patch("/account/display-name", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const displayName = typeof req.body?.displayName === "string" ? req.body.displayName : "";
+      const user = await completeOnboardingDisplayName(req.user!.id, displayName);
+      res.status(200).json({ user: publicUser(user) });
+    } catch (err) {
+      if (err instanceof InvalidDisplayNameError) {
+        res.status(400).json({ error: "invalid_display_name", message: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  app.post("/account/change-password", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const body = changePasswordBody(req.body);
+      if (!body) {
+        res.status(400).json({ error: "invalid_change_password_body" });
+        return;
+      }
+      await changePassword(req.user!.id, body.currentPassword, body.newPassword, body.newPasswordConfirmation);
+      res.setHeader(
+        "Set-Cookie",
+        expiredSessionCookieHeader({ secure: config.cookieSecure, domain: config.cookieDomain })
+      );
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      if (err instanceof InvalidOrExpiredTokenError) {
+        res.status(400).json({ error: "invalid_current_password", message: err.message });
+        return;
+      }
+      if (err instanceof WeakPasswordError) {
+        res.status(400).json({ error: "weak_password", message: err.message, violations: err.violations });
+        return;
+      }
+      if (err instanceof PasswordConfirmationMismatchError) {
+        res.status(400).json({ error: "password_confirmation_mismatch", message: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  // FEATURE-041, Regla 5.8: jerarquía administrativa. Autorización real en accountAdminService.ts
+  // (backend, nunca solo UI -- sección 6). `requireSession` ya bloquea sesión inválida/suspendida/
+  // onboarding pendiente; acá solo falta mapear InsufficientRoleError/CannotActOnSelfError/
+  // CannotActOnTargetError/TargetNotFoundError a sus status HTTP.
+  function handleAdminServiceError(err: unknown, res: express.Response, next: express.NextFunction): void {
+    if (err instanceof InsufficientRoleError) {
+      res.status(403).json({ error: "insufficient_role", message: err.message });
+      return;
+    }
+    if (err instanceof CannotActOnSelfError) {
+      res.status(409).json({ error: "cannot_act_on_self", message: err.message });
+      return;
+    }
+    if (err instanceof CannotActOnTargetError) {
+      res.status(409).json({ error: "cannot_act_on_target", message: err.message });
+      return;
+    }
+    if (err instanceof TargetNotFoundError) {
+      res.status(404).json({ error: "target_not_found" });
+      return;
+    }
+    if (err instanceof DuplicateAccountError) {
+      res.status(409).json({ error: "duplicate_account", message: err.message });
+      return;
+    }
+    next(err);
+  }
+
+  app.get("/admin/users", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const accounts = await listAccounts(req.user!);
+      res.json({ accounts });
+    } catch (err) {
+      handleAdminServiceError(err, res, next);
+    }
+  });
+
+  app.post("/admin/users", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const email = typeof req.body?.email === "string" ? req.body.email : "";
+      if (!email) {
+        res.status(400).json({ error: "invalid_email" });
+        return;
+      }
+      const user = await createAccount(req.user!, email);
+      res.status(201).json({ user: publicUser(user) });
+    } catch (err) {
+      handleAdminServiceError(err, res, next);
+    }
+  });
+
+  app.post("/admin/users/:id/suspend", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const targetId = stringParam(req.params.id);
+      if (!targetId) {
+        res.status(400).json({ error: "invalid_target_id" });
+        return;
+      }
+      const user = await suspendAccount(req.user!, targetId);
+      res.json({ user: publicUser(user) });
+    } catch (err) {
+      handleAdminServiceError(err, res, next);
+    }
+  });
+
+  app.post("/admin/users/:id/reactivate", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const targetId = stringParam(req.params.id);
+      if (!targetId) {
+        res.status(400).json({ error: "invalid_target_id" });
+        return;
+      }
+      const user = await reactivateAccount(req.user!, targetId);
+      res.json({ user: publicUser(user) });
+    } catch (err) {
+      handleAdminServiceError(err, res, next);
+    }
+  });
+
+  app.post("/admin/users/:id/promote", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const targetId = stringParam(req.params.id);
+      if (!targetId) {
+        res.status(400).json({ error: "invalid_target_id" });
+        return;
+      }
+      const user = await promoteToAdmin(req.user!, targetId);
+      res.json({ user: publicUser(user) });
+    } catch (err) {
+      handleAdminServiceError(err, res, next);
+    }
+  });
+
+  app.post("/admin/users/:id/demote", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const targetId = stringParam(req.params.id);
+      if (!targetId) {
+        res.status(400).json({ error: "invalid_target_id" });
+        return;
+      }
+      const user = await demoteToUser(req.user!, targetId);
+      res.json({ user: publicUser(user) });
+    } catch (err) {
+      handleAdminServiceError(err, res, next);
+    }
+  });
+
+  app.post("/admin/users/:id/resend-verification", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const targetId = stringParam(req.params.id);
+      if (!targetId) {
+        res.status(400).json({ error: "invalid_target_id" });
+        return;
+      }
+      await resendVerificationByAdmin(req.user!, targetId);
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      handleAdminServiceError(err, res, next);
+    }
+  });
+
+  // FEATURE-041, Scope "Visibilidad administrativa": modo lectura, sin secretos ni acciones
+  // operativas. Reutiliza listProjectsForUser (ya scoped por ownership, acá el "owner" es el
+  // usuario administrado, no el actor) -- el actor nunca puede ejecutar/modificar, solo leer.
+  app.get("/admin/users/:id/projects", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      assertAdminOrAbove(req.user!);
+      const targetId = stringParam(req.params.id);
+      if (!targetId) {
+        res.status(400).json({ error: "invalid_target_id" });
+        return;
+      }
+      const projects = await listProjectsForUser(targetId);
+      res.json({
+        projects: projects.map((project) => ({
+          id: project.id,
+          name: project.name,
+          repositoryFullName: project.repository_full_name,
+          agentConfigProfileId: project.agent_config_profile_id,
+          createdAt: project.created_at,
+        })),
+      });
+    } catch (err) {
+      handleAdminServiceError(err, res, next);
+    }
   });
 
   // FEATURE-026: navegación top-level (el usuario hace click y el browser sigue el redirect a
@@ -266,16 +688,21 @@ export function createApp(config: ServerConfig): express.Express {
   // 7.13/7.14 del diseño). Ninguna respuesta de credenciales devuelve el secreto (Regla 5.6.5/5.6.6).
   const ALL_AGENT_ROLES = ["architect", "functional", "planning", "developer", "qa", "intake"] as const;
 
+  // FEATURE-041, Regla 5.10: "Global" es la fila sin perfil (comportamiento sin cambios). Los
+  // overrides por rol ahora viven exclusivamente dentro de perfiles nombrados (hasta 3 por cuenta)
+  // -- ya no existe el override "suelto" por rol sin perfil que existía antes de esta Feature.
+  async function serializeAgentConfigProfile(userId: string, profile: AgentConfigProfileRow) {
+    const roles = await listProfileAgentConfigOverrides(userId, profile.id);
+    return { id: profile.id, name: profile.name, roles };
+  }
+
   app.get("/agent-config", requireSession, async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.id;
       const global = await getGlobalAgentConfig(userId);
-      const roleEntries = await Promise.all(
-        ALL_AGENT_ROLES.map(async (role) => [role, await getRoleAgentConfigOverride(userId, role)] as const)
-      );
-      const roles: Partial<Record<(typeof ALL_AGENT_ROLES)[number], EffectiveAgentConfig | null>> = {};
-      for (const [role, value] of roleEntries) roles[role] = value;
-      res.json({ global, roles, catalog: AGENT_MODEL_CATALOG });
+      const profileRows = await listAgentConfigProfiles(userId);
+      const profiles = await Promise.all(profileRows.map((profile) => serializeAgentConfigProfile(userId, profile)));
+      res.json({ global, profiles, maxProfiles: MAX_AGENT_CONFIG_PROFILES_PER_USER, catalog: AGENT_MODEL_CATALOG });
     } catch (err) {
       next(err);
     }
@@ -296,40 +723,147 @@ export function createApp(config: ServerConfig): express.Express {
     }
   });
 
-  app.put("/agent-config/:role", requireSession, async (req: AuthenticatedRequest, res, next) => {
+  app.post("/agent-config/profiles", requireSession, async (req: AuthenticatedRequest, res, next) => {
     try {
       if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
-      const role = stringParam(req.params.role);
-      if (!role || !isConfigurableAgentRole(role)) {
-        res.status(400).json({ error: "invalid_role" });
+      const userId = req.user!.id;
+      const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+      if (name.length === 0) {
+        res.status(400).json({ error: "invalid_profile_name" });
         return;
       }
-      const body = agentConfigBody(req.body);
-      if (!body) {
-        res.status(400).json({ error: "invalid_agent_config_body" });
+      const existing = await countAgentConfigProfiles(userId);
+      if (existing >= MAX_AGENT_CONFIG_PROFILES_PER_USER) {
+        res.status(409).json({ error: "profile_limit_reached" });
         return;
       }
-      const saved = await setRoleAgentConfigOverride(req.user!.id, role, body);
-      res.json({ config: saved });
+      const profile = await createAgentConfigProfile(userId, name);
+      res.status(201).json({ profile: await serializeAgentConfigProfile(userId, profile) });
     } catch (err) {
       next(err);
     }
   });
 
-  app.delete("/agent-config/:role", requireSession, async (req: AuthenticatedRequest, res, next) => {
+  app.patch("/agent-config/profiles/:profileId", requireSession, async (req: AuthenticatedRequest, res, next) => {
     try {
       if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
-      const role = stringParam(req.params.role);
-      if (!role || !isConfigurableAgentRole(role)) {
-        res.status(400).json({ error: "invalid_role" });
+      const userId = req.user!.id;
+      const profileId = stringParam(req.params.profileId);
+      const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+      if (!profileId || name.length === 0) {
+        res.status(400).json({ error: "invalid_profile_name" });
         return;
       }
-      await deleteRoleAgentConfigOverride(req.user!.id, role);
+      const profile = await renameAgentConfigProfile(profileId, userId, name);
+      if (!profile) {
+        res.status(404).json({ error: "profile_not_found" });
+        return;
+      }
+      res.json({ profile: await serializeAgentConfigProfile(userId, profile) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.delete("/agent-config/profiles/:profileId", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const profileId = stringParam(req.params.profileId);
+      if (!profileId) {
+        res.status(400).json({ error: "invalid_profile_id" });
+        return;
+      }
+      // ON DELETE CASCADE/SET NULL: los proyectos que tenían este perfil caen a Global
+      // automáticamente (Regla 5.10, Escenario 21) -- ningún paso adicional acá.
+      await deleteAgentConfigProfile(profileId, req.user!.id);
       res.status(200).json({ ok: true });
     } catch (err) {
       next(err);
     }
   });
+
+  app.put(
+    "/agent-config/profiles/:profileId/:role",
+    requireSession,
+    async (req: AuthenticatedRequest, res, next) => {
+      try {
+        if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+        const userId = req.user!.id;
+        const profileId = stringParam(req.params.profileId);
+        const role = stringParam(req.params.role);
+        if (!profileId || !role || !isConfigurableAgentRole(role)) {
+          res.status(400).json({ error: "invalid_role" });
+          return;
+        }
+        const profile = await getAgentConfigProfileById(profileId, userId);
+        if (!profile) {
+          res.status(404).json({ error: "profile_not_found" });
+          return;
+        }
+        const body = agentConfigBody(req.body);
+        if (!body) {
+          res.status(400).json({ error: "invalid_agent_config_body" });
+          return;
+        }
+        const saved = await setProfileAgentConfigOverride(userId, profileId, role, body);
+        res.json({ config: saved });
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  app.delete(
+    "/agent-config/profiles/:profileId/:role",
+    requireSession,
+    async (req: AuthenticatedRequest, res, next) => {
+      try {
+        if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+        const userId = req.user!.id;
+        const profileId = stringParam(req.params.profileId);
+        const role = stringParam(req.params.role);
+        if (!profileId || !role || !isConfigurableAgentRole(role)) {
+          res.status(400).json({ error: "invalid_role" });
+          return;
+        }
+        await deleteProfileAgentConfigOverride(userId, profileId, role);
+        res.status(200).json({ ok: true });
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  // FEATURE-041, Regla 5.7: `profileId` debe pertenecer al mismo owner del proyecto -- ownership
+  // validado en el repositorio (setProjectAgentConfigProfile), nunca solo por confiar en el body.
+  app.put(
+    "/projects/:projectId/agent-config-profile",
+    requireSession,
+    async (req: AuthenticatedRequest, res, next) => {
+      try {
+        if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+        const projectId = stringParam(req.params.projectId);
+        const profileId =
+          req.body?.profileId === null
+            ? null
+            : typeof req.body?.profileId === "string" && req.body.profileId.trim().length > 0
+              ? req.body.profileId
+              : undefined;
+        if (!projectId || profileId === undefined) {
+          res.status(400).json({ error: "invalid_agent_config_profile_body" });
+          return;
+        }
+        const project = await setProjectAgentConfigProfile({ projectId, ownerId: req.user!.id, profileId });
+        if (!project) {
+          res.status(404).json({ error: "project_or_profile_not_found" });
+          return;
+        }
+        res.json({ project });
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
 
   app.get("/agent-credentials", requireSession, async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -612,6 +1146,10 @@ export function createApp(config: ServerConfig): express.Express {
       }
       if (err instanceof IntakeMappingError) {
         res.status(intakeMappingErrorStatus(err.code)).json({ error: err.code, message: err.message });
+        return;
+      }
+      if (err instanceof IntakeMappingProjectNotFoundError) {
+        res.status(404).json({ error: "project_not_found" });
         return;
       }
       next(err);
@@ -981,11 +1519,32 @@ export function serverConfigFromEnv(): ServerConfig {
   };
 }
 
+// FEATURE-041, Regla 5.2/Riesgo 10: "cuenta activa sin nombre visible: solo accede al módulo de
+// cuenta" -- allowlist de PREFIJOS (deny-by-default), no una lista de rutas bloqueadas: cualquier
+// endpoint nuevo que se agregue después queda bloqueado durante el onboarding a menos que se sume
+// acá a propósito, en vez de quedar expuesto por descuido si alguien olvida un middleware nuevo en
+// cada ruta.
+const ONBOARDING_EXEMPT_PATH_PREFIXES = ["/auth/", "/account/", "/agent-config", "/agent-credentials", "/ai-oauth-connections"];
+
+function isOnboardingExemptPath(path: string): boolean {
+  return ONBOARDING_EXEMPT_PATH_PREFIXES.some((prefix) => path === prefix || path.startsWith(prefix));
+}
+
 async function requireSession(req: AuthenticatedRequest, res: express.Response, next: express.NextFunction) {
   try {
     const auth = await authenticateWebRequest(req);
     if (!auth) {
       res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+    // Defensa en profundidad: suspender ya revoca todas las sesiones (Regla 5.5), esto cubre el
+    // resto de casos borde (ej. sesión ya validada en el instante exacto de la suspensión).
+    if (auth.user.status === "suspended") {
+      res.status(403).json({ error: "account_suspended", message: "Tu cuenta está suspendida." });
+      return;
+    }
+    if (!auth.user.display_name && !isOnboardingExemptPath(req.path)) {
+      res.status(403).json({ error: "onboarding_required", message: "Elegí un nombre visible para continuar." });
       return;
     }
     req.user = auth.user;
@@ -1040,6 +1599,39 @@ function loginBody(body: unknown): { handle: string | null; password: string | n
   };
 }
 
+function registerBody(body: unknown): { email: string; password: string; passwordConfirmation: string } | null {
+  if (body === null || typeof body !== "object") return null;
+  const record = body as Record<string, unknown>;
+  if (typeof record.email !== "string" || record.email.trim().length === 0) return null;
+  if (typeof record.password !== "string" || record.password.length === 0) return null;
+  if (typeof record.passwordConfirmation !== "string") return null;
+  return { email: record.email, password: record.password, passwordConfirmation: record.passwordConfirmation };
+}
+
+function resetPasswordBody(body: unknown): { token: string; password: string; passwordConfirmation: string } | null {
+  if (body === null || typeof body !== "object") return null;
+  const record = body as Record<string, unknown>;
+  if (typeof record.token !== "string" || record.token.length === 0) return null;
+  if (typeof record.password !== "string" || record.password.length === 0) return null;
+  if (typeof record.passwordConfirmation !== "string") return null;
+  return { token: record.token, password: record.password, passwordConfirmation: record.passwordConfirmation };
+}
+
+function changePasswordBody(
+  body: unknown
+): { currentPassword: string; newPassword: string; newPasswordConfirmation: string } | null {
+  if (body === null || typeof body !== "object") return null;
+  const record = body as Record<string, unknown>;
+  if (typeof record.currentPassword !== "string" || record.currentPassword.length === 0) return null;
+  if (typeof record.newPassword !== "string" || record.newPassword.length === 0) return null;
+  if (typeof record.newPasswordConfirmation !== "string") return null;
+  return {
+    currentPassword: record.currentPassword,
+    newPassword: record.newPassword,
+    newPasswordConfirmation: record.newPasswordConfirmation,
+  };
+}
+
 // FEATURE-025-Parte-1, sección 5.3: el modelo no puede persistirse como string libre -- se valida
 // acá, antes de llegar a repository.ts, contra el catálogo cerrado server-side.
 function agentConfigBody(body: unknown): EffectiveAgentConfig | null {
@@ -1083,12 +1675,15 @@ function intakeMappingErrorStatus(code: string): number {
   }
 }
 
-function intakeMapBody(body: unknown): { inputText: string; previousValues?: BusinessCaseValues } | null {
+function intakeMapBody(
+  body: unknown
+): { projectId: string; inputText: string; previousValues?: BusinessCaseValues } | null {
   if (body === null || typeof body !== "object") return null;
   const record = body as Record<string, unknown>;
+  if (typeof record.projectId !== "string" || record.projectId.trim().length === 0) return null;
   if (typeof record.inputText !== "string" || record.inputText.trim().length === 0) return null;
   const previousValues = isBusinessCaseValues(record.previousValues) ? record.previousValues : undefined;
-  return { inputText: record.inputText, previousValues };
+  return { projectId: record.projectId, inputText: record.inputText, previousValues };
 }
 
 function confirmIntakeBody(body: unknown): { businessCase: BusinessCaseValues } | null {
@@ -1153,7 +1748,16 @@ function respondBody(body: unknown): EscalationResponseAction | null {
 }
 
 function publicUser(user: AuthenticatedRequest["user"]) {
-  return user ? { id: user.id, handle: user.handle } : null;
+  return user
+    ? {
+        id: user.id,
+        handle: user.handle,
+        email: user.email,
+        displayName: user.display_name,
+        role: user.role,
+        status: user.status,
+      }
+    : null;
 }
 
 function stringParam(value: string | string[] | undefined): string | null {

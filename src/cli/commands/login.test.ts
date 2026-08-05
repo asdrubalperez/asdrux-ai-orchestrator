@@ -12,6 +12,13 @@ const user: UserRow = {
   handle: "owner",
   password_hash: "hash",
   created_at: "2026-07-21T00:00:00.000Z",
+  email: "owner@example.com",
+  display_name: "Owner",
+  role: "user",
+  status: "active",
+  email_verified_at: "2026-07-21T00:00:00.000Z",
+  last_login_at: null,
+  is_protected_superadmin: false,
 };
 
 test("login con password invalida no crea ni reemplaza una sesion", async () => {

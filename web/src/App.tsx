@@ -1,20 +1,38 @@
 import { Loader2 } from "lucide-react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { LoginView } from "./auth/LoginView";
+import { RegisterView } from "./auth/RegisterView";
+import { VerifyEmailView } from "./auth/VerifyEmailView";
+import { ForgotPasswordView } from "./auth/ForgotPasswordView";
+import { ResetPasswordView } from "./auth/ResetPasswordView";
 import { useCurrentUser } from "./auth/useCurrentUser";
 import { ProjectGate } from "./projects/ProjectGate";
 import { ProjectsListPage } from "./projects/ProjectsListPage";
 import { NewProjectPage } from "./projects/NewProjectPage";
 import { RepositorySettingsPage } from "./projects/RepositorySettingsPage";
+import { ProjectAgentConfigPage } from "./projects/ProjectAgentConfigPage";
 import { ProjectShell } from "./projects/ProjectShell";
 import { AgentConfigPage } from "./agentConfig/AgentConfigPage";
+import { AdminUsersPage } from "./admin/AdminUsersPage";
 import { CasesList } from "./intake/CasesList";
 import { DisparoScreen } from "./intake/DisparoScreen";
 import { RunDetailPage } from "./runs/RunDetailPage";
 
-// FEATURE-042, sección C.2: rutas propuestas. `/auth/github/start|callback` no son rutas de este
-// router -- viven en el backend (src/server/app.ts), el frontend solo las navega/recibe de vuelta
-// vía returnPath (sección C.6).
+// FEATURE-041: las rutas públicas (registro, verificación, recuperación, activación) se resuelven
+// ANTES de requerir sesión -- una persona sin cuenta o sin loguearse todavía necesita llegar a
+// ellas. `/settings/agents` (módulo de cuenta) es la única ruta protegida exenta del gate de
+// onboarding (Regla 5.2) -- ver requireSession/isOnboardingExemptPath en el backend, mismo
+// criterio replicado acá.
+const PUBLIC_ROUTES = (
+  <>
+    <Route path="/register" element={<RegisterView />} />
+    <Route path="/verify-email" element={<VerifyEmailView />} />
+    <Route path="/forgot-password" element={<ForgotPasswordView />} />
+    <Route path="/reset-password" element={<ResetPasswordView mode="reset" />} />
+    <Route path="/activate-account" element={<ResetPasswordView mode="activate" />} />
+  </>
+);
+
 export function App() {
   const auth = useCurrentUser();
 
@@ -28,27 +46,44 @@ export function App() {
   }
 
   if (!auth.user) {
-    return <LoginView onLogin={auth.refresh} />;
+    return (
+      <BrowserRouter>
+        <Routes>
+          {PUBLIC_ROUTES}
+          <Route path="*" element={<LoginView onLogin={auth.refresh} />} />
+        </Routes>
+      </BrowserRouter>
+    );
   }
 
   const user = auth.user;
+  const onboardingPending = !user.displayName;
 
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<ProjectGate />} />
-        <Route path="/projects" element={<ProjectsListPage />} />
-        <Route path="/projects/new" element={<NewProjectPage />} />
-        {/* FEATURE-025-Parte-1: configuración de usuario, no de proyecto -- fuera de ProjectShell. */}
+        {PUBLIC_ROUTES}
+        {/* Regla 5.2: cuenta activa sin nombre visible solo accede al módulo de cuenta. */}
         <Route path="/settings/agents" element={<AgentConfigPage />} />
-        <Route path="/projects/:projectId" element={<ProjectShell user={user} onLogout={auth.logout} />}>
-          <Route index element={<Navigate to="cases" replace />} />
-          <Route path="cases" element={<CasesList />} />
-          <Route path="cases/new" element={<DisparoScreen />} />
-          <Route path="cases/:caseId" element={<RunDetailPage />} />
-          <Route path="settings/repository" element={<RepositorySettingsPage />} />
-        </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {onboardingPending ? (
+          <Route path="*" element={<Navigate to="/settings/agents" replace />} />
+        ) : (
+          <>
+            <Route path="/" element={<ProjectGate />} />
+            <Route path="/projects" element={<ProjectsListPage />} />
+            <Route path="/projects/new" element={<NewProjectPage />} />
+            <Route path="/admin/users" element={<AdminUsersPage />} />
+            <Route path="/projects/:projectId" element={<ProjectShell user={user} onLogout={auth.logout} />}>
+              <Route index element={<Navigate to="cases" replace />} />
+              <Route path="cases" element={<CasesList />} />
+              <Route path="cases/new" element={<DisparoScreen />} />
+              <Route path="cases/:caseId" element={<RunDetailPage />} />
+              <Route path="settings/repository" element={<RepositorySettingsPage />} />
+              <Route path="settings/agent-config" element={<ProjectAgentConfigPage />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </>
+        )}
       </Routes>
     </BrowserRouter>
   );

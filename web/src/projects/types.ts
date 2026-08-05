@@ -16,6 +16,8 @@ export interface ProjectSummary {
   repository: ProjectRepositorySummary | null;
   isConfigured: boolean;
   isSelected: boolean;
+  // FEATURE-041, Regla 5.10: null = Global (config de cuenta).
+  agentConfigProfileId: string | null;
   createdAt: string;
   updatedAt: string;
 }

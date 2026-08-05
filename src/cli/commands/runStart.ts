@@ -35,6 +35,7 @@ import {
   recordArtifact,
   recordRunConfigVersions,
   recordRunEvent,
+  getProjectAgentConfigProfileId,
   resolveAgentConfig,
   setProjectConfig,
   updateRunCurrentPhase,
@@ -243,7 +244,12 @@ export async function runStart(args: string[]): Promise<void> {
   // fase resuelve la suya propia dentro de executePipelineRun — puede diferir por rol si hay
   // overrides en user_agent_config (FEATURE-016).
   const firstPhaseSelection: AgentConfig =
-    cliAgentOverride ?? (await resolveAgentConfig(user.id, pipelineSpec.definition.phases[0].agentRole));
+    cliAgentOverride ??
+    (await resolveAgentConfig(
+      user.id,
+      pipelineSpec.definition.phases[0].agentRole,
+      await getProjectAgentConfigProfileId(project.id)
+    ));
   const baseCommitSha = await headSha(worktree);
 
   const client = await pool.connect();
@@ -357,8 +363,10 @@ export async function executePipelineRun(params: {
   // run. Bajo cliAgentOverride (flags de CLI, Regla 2 de FEATURE-016: nunca consulta la DB), el
   // modelo sigue siendo el `--model` de CLI aplicado a todas las fases -- mismo comportamiento que
   // antes de esta Feature, sin tocarlo (sección 7.12 del diseño).
-  const resolveSelection = (role: AgentRole): Promise<EffectiveAgentConfig> =>
-    cliAgentOverride ? Promise.resolve({ ...cliAgentOverride, model: model ?? null }) : resolveAgentConfig(userId, role);
+  const resolveSelection = async (role: AgentRole): Promise<EffectiveAgentConfig> =>
+    cliAgentOverride
+      ? { ...cliAgentOverride, model: model ?? null }
+      : resolveAgentConfig(userId, role, await getProjectAgentConfigProfileId(projectId));
   const readRole = (agentRole: string) =>
     readFile(path.join(orchestratorRoot, "src", "executor", "roles", `${agentRole}.txt`), "utf8");
 
@@ -1368,7 +1376,11 @@ export async function createPlanningToQaChildRun(params: {
   // reintenta más adelante (respondService.ts, sección 5.9 del diseño).
   const firstPhaseSelection: EffectiveAgentConfig = params.cliAgentOverride
     ? { ...params.cliAgentOverride, model: params.model ?? null }
-    : await resolveAgentConfig(params.userId, "planning");
+    : await resolveAgentConfig(
+        params.userId,
+        "planning",
+        await getProjectAgentConfigProfileId(params.projectId)
+      );
 
   const client = await pool.connect();
   try {
@@ -1438,7 +1450,11 @@ export async function createArchitectReentryChildRun(params: {
   // FEATURE-025-Parte-1, sección 5.12: ver comentario equivalente en createPlanningToQaChildRun.
   const firstPhaseSelection: EffectiveAgentConfig = params.cliAgentOverride
     ? { ...params.cliAgentOverride, model: params.model ?? null }
-    : await resolveAgentConfig(params.userId, "architect");
+    : await resolveAgentConfig(
+        params.userId,
+        "architect",
+        await getProjectAgentConfigProfileId(params.projectId)
+      );
 
   const client = await pool.connect();
   try {

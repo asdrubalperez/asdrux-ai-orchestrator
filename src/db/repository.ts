@@ -60,11 +60,21 @@ export interface ArtifactRow {
   created_at: string;
 }
 
+export type AccountRole = "user" | "admin" | "superadmin";
+export type AccountStatus = "pending_verification" | "active" | "suspended";
+
 export interface UserRow {
   id: string;
   handle: string;
   password_hash: string | null;
   created_at: string;
+  email: string | null;
+  display_name: string | null;
+  role: AccountRole;
+  status: AccountStatus;
+  email_verified_at: string | null;
+  last_login_at: string | null;
+  is_protected_superadmin: boolean;
 }
 
 // FEATURE-042: repository_* son los campos canónicos del repositorio GitHub del proyecto (sección
@@ -85,6 +95,9 @@ export interface ProjectRow {
   repository_full_name: string | null;
   repository_clone_url: string | null;
   repository_visibility: GitHubRepositoryVisibility | null;
+  // FEATURE-041, Regla 5.10: null = Global (config de cuenta); si no-null, referencia un perfil del
+  // mismo owner del proyecto (ownership validado en el servicio al setearlo, no solo por la FK).
+  agent_config_profile_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -156,6 +169,7 @@ export function isConfigurableAgentRole(value: unknown): value is ConfigurableAg
 export interface UserAgentConfigRow {
   id: string;
   user_id: string;
+  profile_id: string | null;
   role: ConfigurableAgentRole | null;
   executor_provider: ExecutorProviderName;
   auth_mode: AuthMode;
@@ -163,6 +177,22 @@ export interface UserAgentConfigRow {
   created_at: string;
   updated_at: string;
 }
+
+/**
+ * FEATURE-041, sección 4/Regla 5.10: hasta 3 perfiles nombrados por cuenta. "Global" no es una fila
+ * de esta tabla -- es la fila de `user_agent_config` con `role is null` (ya existía desde
+ * FEATURE-016). Un perfil es exclusivamente el contenedor de hasta 6 overrides de agente
+ * (`user_agent_config` con `role is not null and profile_id = este perfil`).
+ */
+export interface AgentConfigProfileRow {
+  id: string;
+  user_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export const MAX_AGENT_CONFIG_PROFILES_PER_USER = 3;
 
 /**
  * FEATURE-025-Parte-1, sección 7.2: credencial de IA propia del usuario, cifrada. Misma convención
@@ -630,7 +660,8 @@ function toEffectiveAgentConfig(row: UserAgentConfigRow): EffectiveAgentConfig {
   return { executorProvider: row.executor_provider, authMode: row.auth_mode, model: row.model };
 }
 
-const AGENT_CONFIG_COLUMNS = "id, user_id, role, executor_provider, auth_mode, model, created_at, updated_at";
+const AGENT_CONFIG_COLUMNS =
+  "id, user_id, profile_id, role, executor_provider, auth_mode, model, created_at, updated_at";
 
 export async function getGlobalAgentConfig(userId: string): Promise<EffectiveAgentConfig | null> {
   const result = await pool.query<UserAgentConfigRow>(
@@ -640,31 +671,6 @@ export async function getGlobalAgentConfig(userId: string): Promise<EffectiveAge
     [userId]
   );
   return result.rows[0] ? toEffectiveAgentConfig(result.rows[0]) : null;
-}
-
-export async function getRoleAgentConfigOverride(
-  userId: string,
-  role: ConfigurableAgentRole
-): Promise<EffectiveAgentConfig | null> {
-  const result = await pool.query<UserAgentConfigRow>(
-    `select ${AGENT_CONFIG_COLUMNS}
-     from user_agent_config
-     where user_id = $1 and role = $2`,
-    [userId, role]
-  );
-  return result.rows[0] ? toEffectiveAgentConfig(result.rows[0]) : null;
-}
-
-/**
- * Regla 2 de FEATURE-016 (sin el flag de CLI, resuelto antes de llamar a esta función):
- * override de rol -> global -> default (claude + api_key, sin modelo).
- */
-export async function resolveAgentConfig(userId: string, role: ConfigurableAgentRole): Promise<EffectiveAgentConfig> {
-  const override = await getRoleAgentConfigOverride(userId, role);
-  if (override) return override;
-  const global = await getGlobalAgentConfig(userId);
-  if (global) return global;
-  return DEFAULT_AGENT_CONFIG;
 }
 
 export async function setGlobalAgentConfig(userId: string, config: EffectiveAgentConfig): Promise<EffectiveAgentConfig> {
@@ -682,27 +688,161 @@ export async function setGlobalAgentConfig(userId: string, config: EffectiveAgen
   return toEffectiveAgentConfig(result.rows[0]);
 }
 
-export async function setRoleAgentConfigOverride(
+// FEATURE-041, Regla 5.10: hasta 3 perfiles nombrados por cuenta. El límite se valida en el
+// servicio de aplicación (countAgentConfigProfiles), no acá ni en la base.
+
+export async function listAgentConfigProfiles(userId: string): Promise<AgentConfigProfileRow[]> {
+  const result = await pool.query<AgentConfigProfileRow>(
+    "select id, user_id, name, created_at, updated_at from agent_config_profiles where user_id = $1 order by created_at",
+    [userId]
+  );
+  return result.rows;
+}
+
+export async function countAgentConfigProfiles(userId: string): Promise<number> {
+  const result = await pool.query<{ count: string }>(
+    "select count(*)::text as count from agent_config_profiles where user_id = $1",
+    [userId]
+  );
+  return Number(result.rows[0].count);
+}
+
+export async function getAgentConfigProfileById(
+  profileId: string,
+  userId: string
+): Promise<AgentConfigProfileRow | null> {
+  const result = await pool.query<AgentConfigProfileRow>(
+    "select id, user_id, name, created_at, updated_at from agent_config_profiles where id = $1 and user_id = $2",
+    [profileId, userId]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function createAgentConfigProfile(userId: string, name: string): Promise<AgentConfigProfileRow> {
+  const result = await pool.query<AgentConfigProfileRow>(
+    `insert into agent_config_profiles (user_id, name)
+     values ($1, $2)
+     returning id, user_id, name, created_at, updated_at`,
+    [userId, name]
+  );
+  return result.rows[0];
+}
+
+export async function renameAgentConfigProfile(
+  profileId: string,
   userId: string,
+  name: string
+): Promise<AgentConfigProfileRow | null> {
+  const result = await pool.query<AgentConfigProfileRow>(
+    `update agent_config_profiles
+     set name = $3, updated_at = now()
+     where id = $1 and user_id = $2
+     returning id, user_id, name, created_at, updated_at`,
+    [profileId, userId, name]
+  );
+  return result.rows[0] ?? null;
+}
+
+// ON DELETE CASCADE (user_agent_config.profile_id) y ON DELETE SET NULL (projects.agent_config_
+// profile_id) hacen el resto -- ningún proyecto que tuviera este perfil queda bloqueado, cae
+// automáticamente a Global (Regla 5.10, Escenario 21).
+export async function deleteAgentConfigProfile(profileId: string, userId: string): Promise<void> {
+  await pool.query("delete from agent_config_profiles where id = $1 and user_id = $2", [profileId, userId]);
+}
+
+export async function getProfileAgentConfigOverride(
+  userId: string,
+  profileId: string,
+  role: ConfigurableAgentRole
+): Promise<EffectiveAgentConfig | null> {
+  const result = await pool.query<UserAgentConfigRow>(
+    `select ${AGENT_CONFIG_COLUMNS}
+     from user_agent_config
+     where user_id = $1 and profile_id = $2 and role = $3`,
+    [userId, profileId, role]
+  );
+  return result.rows[0] ? toEffectiveAgentConfig(result.rows[0]) : null;
+}
+
+export async function listProfileAgentConfigOverrides(
+  userId: string,
+  profileId: string
+): Promise<Partial<Record<ConfigurableAgentRole, EffectiveAgentConfig>>> {
+  const result = await pool.query<UserAgentConfigRow>(
+    `select ${AGENT_CONFIG_COLUMNS}
+     from user_agent_config
+     where user_id = $1 and profile_id = $2`,
+    [userId, profileId]
+  );
+  const overrides: Partial<Record<ConfigurableAgentRole, EffectiveAgentConfig>> = {};
+  for (const row of result.rows) {
+    if (row.role) overrides[row.role] = toEffectiveAgentConfig(row);
+  }
+  return overrides;
+}
+
+export async function setProfileAgentConfigOverride(
+  userId: string,
+  profileId: string,
   role: ConfigurableAgentRole,
   config: EffectiveAgentConfig
 ): Promise<EffectiveAgentConfig> {
   const result = await pool.query<UserAgentConfigRow>(
-    `insert into user_agent_config (user_id, role, executor_provider, auth_mode, model)
-     values ($1, $2, $3, $4, $5)
-     on conflict (user_id, role) where role is not null
+    `insert into user_agent_config (user_id, profile_id, role, executor_provider, auth_mode, model)
+     values ($1, $2, $3, $4, $5, $6)
+     on conflict (user_id, profile_id, role) where role is not null and profile_id is not null
      do update set executor_provider = excluded.executor_provider,
                    auth_mode = excluded.auth_mode,
                    model = excluded.model,
                    updated_at = now()
      returning ${AGENT_CONFIG_COLUMNS}`,
-    [userId, role, config.executorProvider, config.authMode, config.model]
+    [userId, profileId, role, config.executorProvider, config.authMode, config.model]
   );
   return toEffectiveAgentConfig(result.rows[0]);
 }
 
-export async function deleteRoleAgentConfigOverride(userId: string, role: ConfigurableAgentRole): Promise<void> {
-  await pool.query("delete from user_agent_config where user_id = $1 and role = $2", [userId, role]);
+export async function deleteProfileAgentConfigOverride(
+  userId: string,
+  profileId: string,
+  role: ConfigurableAgentRole
+): Promise<void> {
+  await pool.query("delete from user_agent_config where user_id = $1 and profile_id = $2 and role = $3", [
+    userId,
+    profileId,
+    role,
+  ]);
+}
+
+/**
+ * FEATURE-041, Regla 5.10: override del perfil seleccionado por el proyecto para ese rol -> Global
+ * de la cuenta -> default del sistema. `profileId` es `null` cuando el proyecto usa Global
+ * directamente (nunca eligió un perfil, o el que tenía fue borrado -- Escenario 21).
+ * `getProfileAgentConfigOverride` filtra por `user_id` además de `profile_id`: si por algún error
+ * llegara un `profileId` de otra cuenta, no matchea ninguna fila y cae a Global igual (Regla 5.7).
+ */
+export async function resolveAgentConfig(
+  userId: string,
+  role: ConfigurableAgentRole,
+  profileId: string | null
+): Promise<EffectiveAgentConfig> {
+  if (profileId) {
+    const override = await getProfileAgentConfigOverride(userId, profileId, role);
+    if (override) return override;
+  }
+  const global = await getGlobalAgentConfig(userId);
+  if (global) return global;
+  return DEFAULT_AGENT_CONFIG;
+}
+
+// Helper interno para call sites que ya tienen un projectId de confianza (contexto de ejecución de
+// pipeline, no input directo del usuario) y solo necesitan el profileId para resolveAgentConfig --
+// evita traer el ProjectRow completo solo para leer una columna.
+export async function getProjectAgentConfigProfileId(projectId: string): Promise<string | null> {
+  const result = await pool.query<{ agent_config_profile_id: string | null }>(
+    "select agent_config_profile_id from projects where id = $1",
+    [projectId]
+  );
+  return result.rows[0]?.agent_config_profile_id ?? null;
 }
 
 // FEATURE-025-Parte-1, sección 7.2: CRUD crudo de credenciales de IA -- cifrado/descifrado y
@@ -893,6 +1033,21 @@ export async function findUserByHandle(handle: string): Promise<UserRow | null> 
   return result.rows[0] ?? null;
 }
 
+/**
+ * FEATURE-041: login por email o por handle en un solo lookup. Necesario porque las cuentas
+ * legacy (creadas por `seed:user`, ej. "asdru") tienen `handle` distinto de `email` -- no se
+ * migró el handle existente al email para no romper el login ya establecido (ver migración 0024)
+ * -- mientras que las cuentas self-service nuevas SÍ tienen `handle = email normalizado`. La
+ * pantalla de login solo pide "Email" (Scope: "No se introduce username"), así que tiene que
+ * funcionar para ambos casos con el mismo campo.
+ */
+export async function findUserByHandleOrEmail(normalizedIdentifier: string): Promise<UserRow | null> {
+  const result = await pool.query<UserRow>("select * from users where handle = $1 or lower(email) = $1", [
+    normalizedIdentifier,
+  ]);
+  return result.rows[0] ?? null;
+}
+
 export async function findUserById(userId: string): Promise<UserRow | null> {
   const result = await pool.query<UserRow>("select * from users where id = $1", [userId]);
   return result.rows[0] ?? null;
@@ -907,6 +1062,124 @@ export async function upsertUserPassword(handle: string, passwordHash: string): 
     [handle, passwordHash]
   );
   return result.rows[0];
+}
+
+// FEATURE-041: registro público self-service. `email` es el valor mostrado al usuario tal cual lo
+// escribió; `handle` es el mismo valor normalizado (minúsculas, sin destruir el original -- Regla
+// 5.4) y sigue siendo la clave de login real (findUserByHandle, sin tocar). Nace en
+// `pending_verification` (default de la columna); nunca se crea ya verificada.
+export class DuplicateAccountError extends Error {}
+
+export async function createSelfServiceAccount(params: {
+  email: string;
+  normalizedHandle: string;
+  passwordHash: string;
+}): Promise<UserRow> {
+  try {
+    const result = await pool.query<UserRow>(
+      `insert into users (handle, email, password_hash)
+       values ($1, $2, $3)
+       returning *`,
+      [params.normalizedHandle, params.email, params.passwordHash]
+    );
+    return result.rows[0];
+  } catch (err) {
+    if (isUniqueConstraintViolation(err)) {
+      throw new DuplicateAccountError(`Ya existe una cuenta con el email "${params.email}".`);
+    }
+    throw err;
+  }
+}
+
+// FEATURE-041, Scope "Administración de cuentas": creadas por un administrador, sin contraseña
+// temporal (`password_hash` queda null hasta que la propia persona activa la cuenta -- Regla 5.6,
+// "la contraseña nunca se registra ni se devuelve", ni siquiera una generada por el sistema).
+export async function createAccountByAdmin(email: string, normalizedHandle: string): Promise<UserRow> {
+  try {
+    const result = await pool.query<UserRow>(
+      `insert into users (handle, email)
+       values ($1, $2)
+       returning *`,
+      [normalizedHandle, email]
+    );
+    return result.rows[0];
+  } catch (err) {
+    if (isUniqueConstraintViolation(err)) {
+      throw new DuplicateAccountError(`Ya existe una cuenta con el email "${email}".`);
+    }
+    throw err;
+  }
+}
+
+export async function setUserDisplayName(userId: string, displayName: string): Promise<UserRow | null> {
+  const result = await pool.query<UserRow>(
+    "update users set display_name = $2 where id = $1 returning *",
+    [userId, displayName]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function markUserEmailVerified(userId: string): Promise<UserRow | null> {
+  const result = await pool.query<UserRow>(
+    `update users
+     set email_verified_at = now(), status = case when status = 'pending_verification' then 'active' else status end
+     where id = $1
+     returning *`,
+    [userId]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function setUserPasswordHash(userId: string, passwordHash: string): Promise<void> {
+  await pool.query("update users set password_hash = $2 where id = $1", [userId, passwordHash]);
+}
+
+/**
+ * FEATURE-041, Regla 5.8/Escenario 13: nunca modifica una cuenta con `is_protected_superadmin`.
+ * El chequeo vive acá (no solo en el servicio) para que ningún call site futuro pueda saltearlo
+ * por error -- ownership/protección se garantiza en la capa de datos, no solo en la de negocio.
+ */
+export async function setUserRole(userId: string, role: AccountRole): Promise<UserRow | null> {
+  const result = await pool.query<UserRow>(
+    "update users set role = $2 where id = $1 and is_protected_superadmin = false returning *",
+    [userId, role]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function setUserStatus(userId: string, status: AccountStatus): Promise<UserRow | null> {
+  const result = await pool.query<UserRow>(
+    "update users set status = $2 where id = $1 and is_protected_superadmin = false returning *",
+    [userId, status]
+  );
+  return result.rows[0] ?? null;
+}
+
+// FEATURE-041, Regla 5.9: informativa, actualizada por un evento de autenticación exitoso
+// claramente definido (login web) -- nunca por cada request.
+export async function touchUserLastLogin(userId: string): Promise<void> {
+  await pool.query("update users set last_login_at = now() where id = $1", [userId]);
+}
+
+export interface AccountListEntry {
+  id: string;
+  email: string | null;
+  display_name: string | null;
+  role: AccountRole;
+  status: AccountStatus;
+  created_at: string;
+  email_verified_at: string | null;
+  last_login_at: string | null;
+  is_protected_superadmin: boolean;
+}
+
+export async function listAccountsForAdmin(): Promise<AccountListEntry[]> {
+  const result = await pool.query<AccountListEntry>(
+    `select id, email, display_name, role, status, created_at, email_verified_at, last_login_at, is_protected_superadmin
+     from users
+     order by created_at asc`
+  );
+  return result.rows;
 }
 
 export async function getProjectForUser(userId: string, projectId?: string): Promise<ProjectRow | null> {
@@ -1025,6 +1298,33 @@ export async function setProjectRepository(params: {
     }
     throw err;
   }
+}
+
+/**
+ * FEATURE-041, Regla 5.7: `profileId` debe pertenecer al mismo owner del proyecto -- nunca se
+ * acepta un profileId de otra cuenta aunque el cliente lo envíe. `profileId = null` selecciona
+ * Global explícitamente (sección "Perfiles personalizados": Global es una opción real del
+ * selector, no la ausencia de selección). Devuelve `null` si el proyecto no es del usuario, o si
+ * `profileId` no es `null` y no pertenece a ese mismo usuario -- en ambos casos, ninguna fila se
+ * actualiza (ownership checkeado en la misma condición del UPDATE, no en dos pasos separados).
+ */
+export async function setProjectAgentConfigProfile(params: {
+  projectId: string;
+  ownerId: string;
+  profileId: string | null;
+}): Promise<ProjectRow | null> {
+  const result = await pool.query<ProjectRow>(
+    `update projects
+     set agent_config_profile_id = $3, updated_at = now()
+     where id = $1
+       and owner_id = $2
+       and ($3::uuid is null or exists (
+         select 1 from agent_config_profiles where id = $3 and user_id = $2
+       ))
+     returning *`,
+    [params.projectId, params.ownerId, params.profileId]
+  );
+  return result.rows[0] ?? null;
 }
 
 // Regla C.6/B.6: preferencia de navegación -- nunca sustituye al projectId explícito de cada
@@ -1184,6 +1484,82 @@ export async function getSessionById(sessionId: string): Promise<SessionRow | nu
 
 export async function revokeSession(sessionId: string): Promise<void> {
   await pool.query("update sessions set revoked_at = now() where id = $1 and revoked_at is null", [sessionId]);
+}
+
+// FEATURE-041, Scope "Contraseña y sesiones": revocar todas las sesiones al cambiar contraseña,
+// recuperar contraseña o suspender una cuenta.
+export async function revokeAllSessionsForUser(userId: string): Promise<void> {
+  await pool.query("update sessions set revoked_at = now() where user_id = $1 and revoked_at is null", [userId]);
+}
+
+// FEATURE-041, Regla 5.5: tokens de un solo uso para verificación de email, recuperación de
+// contraseña y activación de cuentas creadas por un administrador -- aleatorios, hash únicamente
+// (nunca texto plano), expiración, uso único, revocables por reenvío.
+export type AccountTokenPurpose = "email_verification" | "password_reset" | "account_activation";
+
+export interface AccountTokenRow {
+  id: string;
+  user_id: string;
+  token_hash: string;
+  purpose: AccountTokenPurpose;
+  created_at: string;
+  expires_at: string;
+  used_at: string | null;
+  revoked_at: string | null;
+}
+
+// Un reenvío invalida el token anterior (Regla 5.5) -- revocar y crear son atómicos en el
+// servicio de auth (accountTokens.ts), no acá: esta función es intencionalmente de un solo paso.
+export async function revokeUnusedAccountTokens(userId: string, purpose: AccountTokenPurpose): Promise<void> {
+  await pool.query(
+    "update account_tokens set revoked_at = now() where user_id = $1 and purpose = $2 and used_at is null and revoked_at is null",
+    [userId, purpose]
+  );
+}
+
+export async function createAccountToken(params: {
+  userId: string;
+  tokenHash: string;
+  purpose: AccountTokenPurpose;
+  expiresAt: Date;
+}): Promise<AccountTokenRow> {
+  const result = await pool.query<AccountTokenRow>(
+    `insert into account_tokens (user_id, token_hash, purpose, expires_at)
+     values ($1, $2, $3, $4)
+     returning *`,
+    [params.userId, params.tokenHash, params.purpose, params.expiresAt.toISOString()]
+  );
+  return result.rows[0];
+}
+
+export async function findValidAccountTokenByHash(
+  tokenHash: string,
+  purpose: AccountTokenPurpose
+): Promise<AccountTokenRow | null> {
+  const result = await pool.query<AccountTokenRow>(
+    `select * from account_tokens
+     where token_hash = $1 and purpose = $2
+       and used_at is null and revoked_at is null and expires_at > now()`,
+    [tokenHash, purpose]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Consumo atómico: solo la primera llamada concurrente que llegue gana (Validation Evidence:
+ * "pruebas de concurrencia para uso único de tokens"). El `where` repite las mismas condiciones de
+ * vigencia que `findValidAccountTokenByHash` -- una carrera entre validar y consumir no puede
+ * reactivar un token ya vencido/usado/revocado entretanto.
+ */
+export async function consumeAccountToken(tokenId: string): Promise<AccountTokenRow | null> {
+  const result = await pool.query<AccountTokenRow>(
+    `update account_tokens
+     set used_at = now()
+     where id = $1 and used_at is null and revoked_at is null and expires_at > now()
+     returning *`,
+    [tokenId]
+  );
+  return result.rows[0] ?? null;
 }
 
 // FEATURE-026: conexión GitHub por usuario (migrations/0015_user_git_connections.sql).
