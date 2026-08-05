@@ -1,11 +1,28 @@
 import { apiUrl } from "../lib/api";
 
+interface ErrorBody {
+  error?: string;
+  message?: string;
+  violations?: { message: string }[];
+}
+
+function describeErrorBody(body: unknown, status: number): string {
+  const record = body as ErrorBody | null;
+  if (Array.isArray(record?.violations) && record.violations.length > 0) {
+    return record.violations.map((v) => v.message).join(" ");
+  }
+  if (typeof record?.message === "string" && record.message.length > 0) return record.message;
+  return `HTTP ${status}`;
+}
+
 export class AuthApiError extends Error {
   status: number;
+  code: string | null;
   body: unknown;
   constructor(status: number, body: unknown) {
-    super(typeof (body as { message?: string })?.message === "string" ? (body as { message: string }).message : `HTTP ${status}`);
+    super(describeErrorBody(body, status));
     this.status = status;
+    this.code = (body as ErrorBody | null)?.error ?? null;
     this.body = body;
   }
 }

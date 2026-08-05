@@ -175,11 +175,11 @@ export function createApp(config: ServerConfig): express.Express {
         return;
       }
       if (login.kind === "not_verified") {
-        res.status(403).json({ error: "account_not_verified" });
+        res.status(403).json({ error: "account_not_verified", message: "Tu cuenta todavía no verificó el email." });
         return;
       }
       if (login.kind === "suspended") {
-        res.status(403).json({ error: "account_suspended" });
+        res.status(403).json({ error: "account_suspended", message: "Tu cuenta está suspendida." });
         return;
       }
 
@@ -239,11 +239,11 @@ export function createApp(config: ServerConfig): express.Express {
       res.status(200).json({ ok: true });
     } catch (err) {
       if (err instanceof WeakPasswordError) {
-        res.status(400).json({ error: "weak_password", violations: err.violations });
+        res.status(400).json({ error: "weak_password", message: err.message, violations: err.violations });
         return;
       }
       if (err instanceof PasswordConfirmationMismatchError) {
-        res.status(400).json({ error: "password_confirmation_mismatch" });
+        res.status(400).json({ error: "password_confirmation_mismatch", message: err.message });
         return;
       }
       next(err);
@@ -269,7 +269,7 @@ export function createApp(config: ServerConfig): express.Express {
       res.status(200).json({ ok: true });
     } catch (err) {
       if (err instanceof InvalidOrExpiredTokenError) {
-        res.status(400).json({ error: "invalid_or_expired_token" });
+        res.status(400).json({ error: "invalid_or_expired_token", message: err.message });
         return;
       }
       next(err);
@@ -339,15 +339,15 @@ export function createApp(config: ServerConfig): express.Express {
       res.status(200).json({ ok: true });
     } catch (err) {
       if (err instanceof InvalidOrExpiredTokenError) {
-        res.status(400).json({ error: "invalid_or_expired_token" });
+        res.status(400).json({ error: "invalid_or_expired_token", message: err.message });
         return;
       }
       if (err instanceof WeakPasswordError) {
-        res.status(400).json({ error: "weak_password", violations: err.violations });
+        res.status(400).json({ error: "weak_password", message: err.message, violations: err.violations });
         return;
       }
       if (err instanceof PasswordConfirmationMismatchError) {
-        res.status(400).json({ error: "password_confirmation_mismatch" });
+        res.status(400).json({ error: "password_confirmation_mismatch", message: err.message });
         return;
       }
       next(err);
@@ -373,15 +373,15 @@ export function createApp(config: ServerConfig): express.Express {
       res.status(200).json({ ok: true });
     } catch (err) {
       if (err instanceof InvalidOrExpiredTokenError) {
-        res.status(400).json({ error: "invalid_or_expired_token" });
+        res.status(400).json({ error: "invalid_or_expired_token", message: err.message });
         return;
       }
       if (err instanceof WeakPasswordError) {
-        res.status(400).json({ error: "weak_password", violations: err.violations });
+        res.status(400).json({ error: "weak_password", message: err.message, violations: err.violations });
         return;
       }
       if (err instanceof PasswordConfirmationMismatchError) {
-        res.status(400).json({ error: "password_confirmation_mismatch" });
+        res.status(400).json({ error: "password_confirmation_mismatch", message: err.message });
         return;
       }
       next(err);
@@ -399,7 +399,7 @@ export function createApp(config: ServerConfig): express.Express {
       res.status(200).json({ user: publicUser(user) });
     } catch (err) {
       if (err instanceof InvalidDisplayNameError) {
-        res.status(400).json({ error: "invalid_display_name" });
+        res.status(400).json({ error: "invalid_display_name", message: err.message });
         return;
       }
       next(err);
@@ -422,15 +422,15 @@ export function createApp(config: ServerConfig): express.Express {
       res.status(200).json({ ok: true });
     } catch (err) {
       if (err instanceof InvalidOrExpiredTokenError) {
-        res.status(400).json({ error: "invalid_current_password" });
+        res.status(400).json({ error: "invalid_current_password", message: err.message });
         return;
       }
       if (err instanceof WeakPasswordError) {
-        res.status(400).json({ error: "weak_password", violations: err.violations });
+        res.status(400).json({ error: "weak_password", message: err.message, violations: err.violations });
         return;
       }
       if (err instanceof PasswordConfirmationMismatchError) {
-        res.status(400).json({ error: "password_confirmation_mismatch" });
+        res.status(400).json({ error: "password_confirmation_mismatch", message: err.message });
         return;
       }
       next(err);
@@ -443,7 +443,7 @@ export function createApp(config: ServerConfig): express.Express {
   // CannotActOnTargetError/TargetNotFoundError a sus status HTTP.
   function handleAdminServiceError(err: unknown, res: express.Response, next: express.NextFunction): void {
     if (err instanceof InsufficientRoleError) {
-      res.status(403).json({ error: "insufficient_role" });
+      res.status(403).json({ error: "insufficient_role", message: err.message });
       return;
     }
     if (err instanceof CannotActOnSelfError) {
@@ -1540,11 +1540,11 @@ async function requireSession(req: AuthenticatedRequest, res: express.Response, 
     // Defensa en profundidad: suspender ya revoca todas las sesiones (Regla 5.5), esto cubre el
     // resto de casos borde (ej. sesión ya validada en el instante exacto de la suspensión).
     if (auth.user.status === "suspended") {
-      res.status(403).json({ error: "account_suspended" });
+      res.status(403).json({ error: "account_suspended", message: "Tu cuenta está suspendida." });
       return;
     }
     if (!auth.user.display_name && !isOnboardingExemptPath(req.path)) {
-      res.status(403).json({ error: "onboarding_required" });
+      res.status(403).json({ error: "onboarding_required", message: "Elegí un nombre visible para continuar." });
       return;
     }
     req.user = auth.user;
