@@ -12,7 +12,7 @@ import { sendPasswordResetEmail, sendVerificationEmail } from "../email/accountE
 import {
   createSelfServiceAccount,
   DuplicateAccountError,
-  findUserByNormalizedHandle,
+  findUserByHandleOrEmail,
   findUserById,
   markUserEmailVerified,
   revokeAllSessionsForUser,
@@ -82,7 +82,7 @@ export async function resendVerificationEmail(
   email: string,
   emailClient: EmailClient = defaultEmailClient()
 ): Promise<void> {
-  const user = await findUserByNormalizedHandle(normalizeEmail(email));
+  const user = await findUserByHandleOrEmail(normalizeEmail(email));
   if (!user || user.status !== "pending_verification" || !user.email) return;
   const { rawToken } = await issueAccountToken(user.id, "email_verification");
   await sendVerificationEmail(emailClient, { to: user.email, rawToken });
@@ -93,7 +93,7 @@ export async function requestPasswordReset(
   email: string,
   emailClient: EmailClient = defaultEmailClient()
 ): Promise<void> {
-  const user = await findUserByNormalizedHandle(normalizeEmail(email));
+  const user = await findUserByHandleOrEmail(normalizeEmail(email));
   if (!user || !user.email) return;
   const { rawToken } = await issueAccountToken(user.id, "password_reset");
   await sendPasswordResetEmail(emailClient, { to: user.email, rawToken });

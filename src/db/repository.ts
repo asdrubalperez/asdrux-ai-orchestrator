@@ -1033,6 +1033,21 @@ export async function findUserByHandle(handle: string): Promise<UserRow | null> 
   return result.rows[0] ?? null;
 }
 
+/**
+ * FEATURE-041: login por email o por handle en un solo lookup. Necesario porque las cuentas
+ * legacy (creadas por `seed:user`, ej. "asdru") tienen `handle` distinto de `email` -- no se
+ * migró el handle existente al email para no romper el login ya establecido (ver migración 0024)
+ * -- mientras que las cuentas self-service nuevas SÍ tienen `handle = email normalizado`. La
+ * pantalla de login solo pide "Email" (Scope: "No se introduce username"), así que tiene que
+ * funcionar para ambos casos con el mismo campo.
+ */
+export async function findUserByHandleOrEmail(normalizedIdentifier: string): Promise<UserRow | null> {
+  const result = await pool.query<UserRow>("select * from users where handle = $1 or lower(email) = $1", [
+    normalizedIdentifier,
+  ]);
+  return result.rows[0] ?? null;
+}
+
 export async function findUserById(userId: string): Promise<UserRow | null> {
   const result = await pool.query<UserRow>("select * from users where id = $1", [userId]);
   return result.rows[0] ?? null;
@@ -1074,10 +1089,6 @@ export async function createSelfServiceAccount(params: {
     }
     throw err;
   }
-}
-
-export async function findUserByNormalizedHandle(normalizedHandle: string): Promise<UserRow | null> {
-  return findUserByHandle(normalizedHandle);
 }
 
 // FEATURE-041, Scope "Administración de cuentas": creadas por un administrador, sin contraseña

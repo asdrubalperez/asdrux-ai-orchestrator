@@ -3,7 +3,7 @@ import { verifyPassword } from "./password.js";
 import { generateRawSessionToken, hashSessionToken, SESSION_TTL_MS } from "./sessionCore.js";
 import {
   createSessionRow,
-  findUserByHandle,
+  findUserByHandleOrEmail,
   findUserById,
   getSessionById,
   revokeSession,
@@ -152,7 +152,7 @@ export async function createWebLoginSession(handle: string, password: string): P
   // como handle -- normalizar acá también, o el login fallaría si el usuario escribe su email con
   // mayúsculas distintas a como lo tipeó en el registro. No afecta cuentas CLI legacy (su handle ya
   // es minúsculas, ej. "asdru").
-  const user = await findUserByHandle(handle.trim().toLowerCase());
+  const user = await findUserByHandleOrEmail(handle.trim().toLowerCase());
   if (!user?.password_hash) return { kind: "invalid_credentials" };
 
   const validPassword = await verifyPassword(password, user.password_hash);
