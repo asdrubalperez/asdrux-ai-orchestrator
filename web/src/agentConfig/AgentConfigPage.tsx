@@ -1,7 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, KeyRound, Loader2, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ExternalLink, KeyRound, Loader2, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
@@ -334,13 +334,15 @@ function ProfilesManager(props: {
   const [newProfileName, setNewProfileName] = React.useState("");
   const [creating, setCreating] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [justCreatedId, setJustCreatedId] = React.useState<string | null>(null);
 
   const create = async () => {
     if (!newProfileName.trim()) return;
     setCreating(true);
     setError(null);
     try {
-      await createAgentConfigProfile(newProfileName.trim());
+      const { profile } = await createAgentConfigProfile(newProfileName.trim());
+      setJustCreatedId(profile.id);
       setNewProfileName("");
       props.onChanged();
     } catch (err) {
@@ -357,7 +359,14 @@ function ProfilesManager(props: {
   return (
     <div className="mt-4 space-y-4">
       {props.profiles.map((profile) => (
-        <ProfileCard key={profile.id} profile={profile} catalog={props.catalog} globalConfig={props.globalConfig} onChanged={props.onChanged} />
+        <ProfileCard
+          key={profile.id}
+          profile={profile}
+          catalog={props.catalog}
+          globalConfig={props.globalConfig}
+          onChanged={props.onChanged}
+          defaultExpanded={profile.id === justCreatedId}
+        />
       ))}
 
       {props.profiles.length < props.maxProfiles ? (
@@ -387,11 +396,14 @@ function ProfileCard(props: {
   catalog: Record<ExecutorProviderName, string[]>;
   globalConfig: EffectiveAgentConfig;
   onChanged: () => void;
+  defaultExpanded?: boolean;
 }) {
+  const [expanded, setExpanded] = React.useState(props.defaultExpanded ?? false);
   const [renaming, setRenaming] = React.useState(false);
   const [name, setName] = React.useState(props.profile.name);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const customizedCount = Object.keys(props.profile.roles).length;
 
   const rename = async () => {
     if (!name.trim()) return;
@@ -434,7 +446,17 @@ function ProfileCard(props: {
             </Button>
           </div>
         ) : (
-          <p className="text-sm font-medium text-zinc-800">{props.profile.name}</p>
+          <button
+            type="button"
+            className="flex items-center gap-2 text-left"
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? <ChevronDown className="h-4 w-4 text-zinc-500" /> : <ChevronRight className="h-4 w-4 text-zinc-500" />}
+            <p className="text-sm font-medium text-zinc-800">{props.profile.name}</p>
+            <span className="text-xs text-zinc-500">
+              {customizedCount === 0 ? "sin agentes personalizados" : `${customizedCount} agente(s) personalizado(s)`}
+            </span>
+          </button>
         )}
         {!renaming ? (
           <div className="flex items-center gap-2">
@@ -448,6 +470,7 @@ function ProfileCard(props: {
         ) : null}
       </div>
       {error ? <p className="mt-2 text-sm text-rose-700">{error}</p> : null}
+      {!expanded ? null : (
       <div className="mt-4 space-y-4 divide-y divide-zinc-100">
         {ALL_ROLES.map((role) => (
           <div key={role} className={role === "intake" ? "" : "pt-4"}>
@@ -468,6 +491,7 @@ function ProfileCard(props: {
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 }
