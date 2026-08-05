@@ -55,7 +55,7 @@ export function DisparoScreen() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inputText }),
+        body: JSON.stringify({ projectId, inputText }),
       });
       if (!response.ok) {
         // FEATURE-025-Parte-3: el body ya trae {error: code, message} accionable para las 4

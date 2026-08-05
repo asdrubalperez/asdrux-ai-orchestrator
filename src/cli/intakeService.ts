@@ -54,9 +54,21 @@ export async function getIntakeFields() {
 export class IntakeMappingProviderUnsupportedError extends Error {}
 export class IntakeMappingAuthModeUnsupportedError extends Error {}
 
-export async function mapIntakeText(params: { userId: string; inputText: string; previousValues?: BusinessCaseValues }) {
+export class IntakeMappingProjectNotFoundError extends Error {}
+
+export async function mapIntakeText(params: {
+  userId: string;
+  projectId: string;
+  inputText: string;
+  previousValues?: BusinessCaseValues;
+}) {
   const fields = await getIntakeFieldDefinitions();
-  const config = await resolveAgentConfig(params.userId, "intake");
+  // Regla 5.7: `projectId` viene del request -- ownership validado acá (no solo Global implícita
+  // si el proyecto no fuera del usuario), antes de resolver a qué perfil/config resuelve el rol
+  // "intake" (Regla 5.10: se lo trata como uno de los 6 agentes configurables).
+  const project = await getProjectByIdForUser(params.projectId, params.userId);
+  if (!project) throw new IntakeMappingProjectNotFoundError(`Proyecto "${params.projectId}" no encontrado.`);
+  const config = await resolveAgentConfig(params.userId, "intake", project.agent_config_profile_id);
   // FEATURE-025-Parte-3, sección 5.17: a diferencia de los 5 roles reales (executorMetadata
   // persistido por fase), el mapeo de intake no crea ningún run/evento -- sin este log no hay
   // ninguna forma de confirmar después de los hechos qué adaptador/modelo/modo de auth resolvió
@@ -425,7 +437,7 @@ export async function startPendingRun(params: { runId: string; userId: string })
     return { kind: "conflict" };
   }
 
-  const agentSelection = await resolveAgentConfig(params.userId, firstPhase);
+  const agentSelection = await resolveAgentConfig(params.userId, firstPhase, project?.agent_config_profile_id ?? null);
   const baseCommitSha = await headSha(worktree);
   await recordRunConfigVersions(run.id);
   await recordRunEvent(run.id, "run_started", {

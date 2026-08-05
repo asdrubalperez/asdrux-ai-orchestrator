@@ -21,11 +21,20 @@ import {
   getReleasePlansByRelease,
   getRunDetailForUser,
   getGlobalAgentConfig,
-  getRoleAgentConfigOverride,
   setGlobalAgentConfig,
-  setRoleAgentConfigOverride,
-  deleteRoleAgentConfigOverride,
+  listAgentConfigProfiles,
+  countAgentConfigProfiles,
+  getAgentConfigProfileById,
+  createAgentConfigProfile,
+  renameAgentConfigProfile,
+  deleteAgentConfigProfile,
+  listProfileAgentConfigOverrides,
+  setProfileAgentConfigOverride,
+  deleteProfileAgentConfigOverride,
+  setProjectAgentConfigProfile,
+  MAX_AGENT_CONFIG_PROFILES_PER_USER,
   isConfigurableAgentRole,
+  type AgentConfigProfileRow,
   type AuthMode,
   type EffectiveAgentConfig,
   type ExecutorProviderName,
@@ -69,6 +78,7 @@ import {
   confirmIntake,
   confirmIntakeForProject,
   IntakeMappingAuthModeUnsupportedError,
+  IntakeMappingProjectNotFoundError,
   IntakeMappingProviderUnsupportedError,
   IntakeProjectNotFoundError,
   listMyCases,
@@ -266,16 +276,21 @@ export function createApp(config: ServerConfig): express.Express {
   // 7.13/7.14 del diseño). Ninguna respuesta de credenciales devuelve el secreto (Regla 5.6.5/5.6.6).
   const ALL_AGENT_ROLES = ["architect", "functional", "planning", "developer", "qa", "intake"] as const;
 
+  // FEATURE-041, Regla 5.10: "Global" es la fila sin perfil (comportamiento sin cambios). Los
+  // overrides por rol ahora viven exclusivamente dentro de perfiles nombrados (hasta 3 por cuenta)
+  // -- ya no existe el override "suelto" por rol sin perfil que existía antes de esta Feature.
+  async function serializeAgentConfigProfile(userId: string, profile: AgentConfigProfileRow) {
+    const roles = await listProfileAgentConfigOverrides(userId, profile.id);
+    return { id: profile.id, name: profile.name, roles };
+  }
+
   app.get("/agent-config", requireSession, async (req: AuthenticatedRequest, res, next) => {
     try {
       const userId = req.user!.id;
       const global = await getGlobalAgentConfig(userId);
-      const roleEntries = await Promise.all(
-        ALL_AGENT_ROLES.map(async (role) => [role, await getRoleAgentConfigOverride(userId, role)] as const)
-      );
-      const roles: Partial<Record<(typeof ALL_AGENT_ROLES)[number], EffectiveAgentConfig | null>> = {};
-      for (const [role, value] of roleEntries) roles[role] = value;
-      res.json({ global, roles, catalog: AGENT_MODEL_CATALOG });
+      const profileRows = await listAgentConfigProfiles(userId);
+      const profiles = await Promise.all(profileRows.map((profile) => serializeAgentConfigProfile(userId, profile)));
+      res.json({ global, profiles, maxProfiles: MAX_AGENT_CONFIG_PROFILES_PER_USER, catalog: AGENT_MODEL_CATALOG });
     } catch (err) {
       next(err);
     }
@@ -296,40 +311,147 @@ export function createApp(config: ServerConfig): express.Express {
     }
   });
 
-  app.put("/agent-config/:role", requireSession, async (req: AuthenticatedRequest, res, next) => {
+  app.post("/agent-config/profiles", requireSession, async (req: AuthenticatedRequest, res, next) => {
     try {
       if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
-      const role = stringParam(req.params.role);
-      if (!role || !isConfigurableAgentRole(role)) {
-        res.status(400).json({ error: "invalid_role" });
+      const userId = req.user!.id;
+      const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+      if (name.length === 0) {
+        res.status(400).json({ error: "invalid_profile_name" });
         return;
       }
-      const body = agentConfigBody(req.body);
-      if (!body) {
-        res.status(400).json({ error: "invalid_agent_config_body" });
+      const existing = await countAgentConfigProfiles(userId);
+      if (existing >= MAX_AGENT_CONFIG_PROFILES_PER_USER) {
+        res.status(409).json({ error: "profile_limit_reached" });
         return;
       }
-      const saved = await setRoleAgentConfigOverride(req.user!.id, role, body);
-      res.json({ config: saved });
+      const profile = await createAgentConfigProfile(userId, name);
+      res.status(201).json({ profile: await serializeAgentConfigProfile(userId, profile) });
     } catch (err) {
       next(err);
     }
   });
 
-  app.delete("/agent-config/:role", requireSession, async (req: AuthenticatedRequest, res, next) => {
+  app.patch("/agent-config/profiles/:profileId", requireSession, async (req: AuthenticatedRequest, res, next) => {
     try {
       if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
-      const role = stringParam(req.params.role);
-      if (!role || !isConfigurableAgentRole(role)) {
-        res.status(400).json({ error: "invalid_role" });
+      const userId = req.user!.id;
+      const profileId = stringParam(req.params.profileId);
+      const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+      if (!profileId || name.length === 0) {
+        res.status(400).json({ error: "invalid_profile_name" });
         return;
       }
-      await deleteRoleAgentConfigOverride(req.user!.id, role);
+      const profile = await renameAgentConfigProfile(profileId, userId, name);
+      if (!profile) {
+        res.status(404).json({ error: "profile_not_found" });
+        return;
+      }
+      res.json({ profile: await serializeAgentConfigProfile(userId, profile) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.delete("/agent-config/profiles/:profileId", requireSession, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+      const profileId = stringParam(req.params.profileId);
+      if (!profileId) {
+        res.status(400).json({ error: "invalid_profile_id" });
+        return;
+      }
+      // ON DELETE CASCADE/SET NULL: los proyectos que tenían este perfil caen a Global
+      // automáticamente (Regla 5.10, Escenario 21) -- ningún paso adicional acá.
+      await deleteAgentConfigProfile(profileId, req.user!.id);
       res.status(200).json({ ok: true });
     } catch (err) {
       next(err);
     }
   });
+
+  app.put(
+    "/agent-config/profiles/:profileId/:role",
+    requireSession,
+    async (req: AuthenticatedRequest, res, next) => {
+      try {
+        if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+        const userId = req.user!.id;
+        const profileId = stringParam(req.params.profileId);
+        const role = stringParam(req.params.role);
+        if (!profileId || !role || !isConfigurableAgentRole(role)) {
+          res.status(400).json({ error: "invalid_role" });
+          return;
+        }
+        const profile = await getAgentConfigProfileById(profileId, userId);
+        if (!profile) {
+          res.status(404).json({ error: "profile_not_found" });
+          return;
+        }
+        const body = agentConfigBody(req.body);
+        if (!body) {
+          res.status(400).json({ error: "invalid_agent_config_body" });
+          return;
+        }
+        const saved = await setProfileAgentConfigOverride(userId, profileId, role, body);
+        res.json({ config: saved });
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  app.delete(
+    "/agent-config/profiles/:profileId/:role",
+    requireSession,
+    async (req: AuthenticatedRequest, res, next) => {
+      try {
+        if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+        const userId = req.user!.id;
+        const profileId = stringParam(req.params.profileId);
+        const role = stringParam(req.params.role);
+        if (!profileId || !role || !isConfigurableAgentRole(role)) {
+          res.status(400).json({ error: "invalid_role" });
+          return;
+        }
+        await deleteProfileAgentConfigOverride(userId, profileId, role);
+        res.status(200).json({ ok: true });
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  // FEATURE-041, Regla 5.7: `profileId` debe pertenecer al mismo owner del proyecto -- ownership
+  // validado en el repositorio (setProjectAgentConfigProfile), nunca solo por confiar en el body.
+  app.put(
+    "/projects/:projectId/agent-config-profile",
+    requireSession,
+    async (req: AuthenticatedRequest, res, next) => {
+      try {
+        if (!requireAllowedOrigin(req, res, config.allowedOrigin)) return;
+        const projectId = stringParam(req.params.projectId);
+        const profileId =
+          req.body?.profileId === null
+            ? null
+            : typeof req.body?.profileId === "string" && req.body.profileId.trim().length > 0
+              ? req.body.profileId
+              : undefined;
+        if (!projectId || profileId === undefined) {
+          res.status(400).json({ error: "invalid_agent_config_profile_body" });
+          return;
+        }
+        const project = await setProjectAgentConfigProfile({ projectId, ownerId: req.user!.id, profileId });
+        if (!project) {
+          res.status(404).json({ error: "project_or_profile_not_found" });
+          return;
+        }
+        res.json({ project });
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
 
   app.get("/agent-credentials", requireSession, async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -612,6 +734,10 @@ export function createApp(config: ServerConfig): express.Express {
       }
       if (err instanceof IntakeMappingError) {
         res.status(intakeMappingErrorStatus(err.code)).json({ error: err.code, message: err.message });
+        return;
+      }
+      if (err instanceof IntakeMappingProjectNotFoundError) {
+        res.status(404).json({ error: "project_not_found" });
         return;
       }
       next(err);
@@ -1083,12 +1209,15 @@ function intakeMappingErrorStatus(code: string): number {
   }
 }
 
-function intakeMapBody(body: unknown): { inputText: string; previousValues?: BusinessCaseValues } | null {
+function intakeMapBody(
+  body: unknown
+): { projectId: string; inputText: string; previousValues?: BusinessCaseValues } | null {
   if (body === null || typeof body !== "object") return null;
   const record = body as Record<string, unknown>;
+  if (typeof record.projectId !== "string" || record.projectId.trim().length === 0) return null;
   if (typeof record.inputText !== "string" || record.inputText.trim().length === 0) return null;
   const previousValues = isBusinessCaseValues(record.previousValues) ? record.previousValues : undefined;
-  return { inputText: record.inputText, previousValues };
+  return { projectId: record.projectId, inputText: record.inputText, previousValues };
 }
 
 function confirmIntakeBody(body: unknown): { businessCase: BusinessCaseValues } | null {
