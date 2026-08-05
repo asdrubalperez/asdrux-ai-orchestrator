@@ -3,7 +3,12 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { pool } from "../db/pool.js";
-import { createAiOAuthConnection, deleteAiOAuthConnection, getAiOAuthConnection } from "../db/repository.js";
+import {
+  createAiOAuthConnection,
+  deleteAiOAuthConnection,
+  getAiOAuthConnection,
+  type UserAiOAuthConnectionRow,
+} from "../db/repository.js";
 import { generateGitCredentialEncryptionKey } from "./gitCredentialEncryption.js";
 import { encryptOAuthSession } from "./aiOAuthSessionEnvelope.js";
 import {
@@ -12,6 +17,37 @@ import {
   materializeOAuthSession,
   resolveOAuthConnection,
 } from "./aiOAuthSessionService.js";
+
+async function snapshotAndClearOAuthConnection(userId: string, provider: "claude" | "codex") {
+  const existing = await getAiOAuthConnection(userId, provider);
+  await pool.query("delete from user_ai_oauth_connections where user_id = $1 and provider = $2", [userId, provider]);
+  return existing;
+}
+
+async function restoreOAuthConnection(userId: string, provider: "claude" | "codex", row: UserAiOAuthConnectionRow | null) {
+  if (!row) return;
+  await pool.query(
+    `insert into user_ai_oauth_connections
+       (id, user_id, provider, encrypted_session, status, session_version, created_at, updated_at, last_validated_at, reauth_required_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     on conflict (user_id, provider) do update set
+       encrypted_session = excluded.encrypted_session, status = excluded.status,
+       session_version = excluded.session_version, last_validated_at = excluded.last_validated_at,
+       reauth_required_at = excluded.reauth_required_at`,
+    [
+      row.id,
+      userId,
+      provider,
+      row.encrypted_session,
+      row.status,
+      row.session_version,
+      row.created_at,
+      row.updated_at,
+      row.last_validated_at,
+      row.reauth_required_at,
+    ]
+  );
+}
 
 // FEATURE-025-Parte-2: valida el ciclo completo de materialización -> collect -> promote (CAS) sin
 // necesitar una cuenta real de Claude/Codex -- el contenido de la sesión es opaco para este
@@ -37,6 +73,11 @@ test("materializeOAuthSession/collectAndPromoteOAuthSession: promueve solo cuand
 
   const originalKey = process.env.AI_CREDENTIAL_ENCRYPTION_KEY;
   process.env.AI_CREDENTIAL_ENCRYPTION_KEY = generateGitCredentialEncryptionKey();
+  // La conexión OAuth de "claude" es de cuenta, compartida con el resto de la app (incluida la
+  // cuenta real en el VPS dev, que puede tener una conexión real de otra Feature validada en vivo
+  // en esta misma sesión) -- se guarda para restaurarla exacta al terminar, en vez de solo borrarla
+  // y dejar la cuenta real degradada.
+  const originalClaudeOAuth = await snapshotAndClearOAuthConnection(userId, "claude");
 
   try {
     // Sin conexión -> not_connected, nunca cae a otra cosa.
@@ -79,6 +120,7 @@ test("materializeOAuthSession/collectAndPromoteOAuthSession: promueve solo cuand
     await cleanupMaterializedOAuthSession(materialized);
   } finally {
     await deleteAiOAuthConnection(userId, "claude").catch(() => {});
+    await restoreOAuthConnection(userId, "claude", originalClaudeOAuth).catch(() => {});
     if (originalKey === undefined) delete process.env.AI_CREDENTIAL_ENCRYPTION_KEY;
     else process.env.AI_CREDENTIAL_ENCRYPTION_KEY = originalKey;
   }

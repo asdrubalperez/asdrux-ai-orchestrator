@@ -267,6 +267,29 @@
   realmente la configuración elegida por el usuario y no solo que "funcionara". Diseño completo y
   resultado de la validación en
   `docs/features/FEATURE-025-Parte-3-Soporte-Codex-y-OAuth-para-el-Asistente-de-Entrada.md`.
+- ✅ FEATURE-041 — Creación y gestión de cuentas de usuario (self-service). Antes no existía ningún
+  flujo de registro real — el único mecanismo era `seed:user` (CLI de administración manual, sin
+  UI), y `users` no tenía columnas de perfil. Alcance completo: registro público, verificación de
+  email, recuperación de contraseña, onboarding de nombre visible obligatorio, jerarquía
+  administrativa de 3 niveles (usuario/admin/superadministrador, con protección técnica del
+  superadmin), visibilidad administrativa de solo lectura sobre proyectos ajenos, y rate limiting
+  en las rutas públicas sensibles. **Ampliación decidida durante el diseño (2026-08-04)**: la
+  revalidación técnica confirmó que `user_agent_config` nunca fue por proyecto (siempre fue de
+  cuenta) — la sección de separación cuenta/proyecto del diseño original asumía lo contrario. Se
+  resolvió con un modelo de **perfiles de configuración de agente nombrados** (hasta 3 por cuenta,
+  Global como opción explícita y preseleccionada), evaluado contra la alternativa de config
+  arbitraria por proyecto (esfuerzo 8/10, descartada por desproporcionada frente a perfiles,
+  esfuerzo 5/10). **Validación E2E real (2026-08-05, VPS productivo + preview de Vercel)**:
+  registro con email real vía Resend, verificación, login por email, onboarding, recuperación y
+  cambio de contraseña, aislamiento entre cuentas, gates de proyecto sin repositorio/sin
+  configuración, selector de perfiles, y jerarquía administrativa, todo probado en vivo por el
+  owner. Tres hallazgos reales corregidos durante la propia validación: (1) el login solo buscaba
+  por `handle`, no por email, dejando inaccesible por email la cuenta legacy del owner pese a que
+  la UI solo pide "Email"; (2) varias respuestas de error de las rutas de cuenta no incluían
+  `message`, mostrando "HTTP 400" genérico en vez del motivo real; (3) los perfiles personalizados
+  quedaban todos desplegados a la vez sin distinción visual, corregido con acordeón por perfil.
+  Diseño completo, revalidación técnica y resultado de la validación en
+  `docs/features/FEATURE-041-Creacion-y-gestion-de-cuentas-de-usuario-self-service.md`.
 
 **🟡 Confirmado**
 - FEATURE-025-Parte-1 — Asistente IA, modelo y credenciales API por agente. Prioridad Alta (próxima
@@ -316,10 +339,6 @@
   reintentar" en ninguno de los dos. Detectado durante la validación de FEATURE-037 (2026-07-31,
   caso `tempo-auto-planner`, primero en el Gate de merge y confirmado de nuevo en el Gate de cierre
   de release). Prioridad por definir.
-- FEATURE-041 — Creación y gestión de cuentas de usuario (self-service). Hoy no existe ningún flujo
-  de registro real — el único mecanismo es `seed:user` (comando CLI de administración manual, sin
-  UI). La tabla `users` no tiene columnas de perfil (correo, nombre, apellido), solo `id`, `handle`,
-  `password_hash`, `created_at`. Prioridad por definir.
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
 - Planning valida la Feature de Functional antes de diseñar el Release Plan — hoy Stage 2 de
@@ -345,7 +364,7 @@
 
 ## Priorización — Matriz Esfuerzo × Impacto
 
-Ponderación de los ítems 🟡 Confirmado (más FEATURE-025-Parte-2/025-Parte-3/026/028/029/032/036/037/038/042/043,
+Ponderación de los ítems 🟡 Confirmado (más FEATURE-025-Parte-2/025-Parte-3/026/028/029/032/036/037/038/041/042/043,
 ya ✅ Ejecutado, dejados aquí como referencia histórica de la corrida de priorización). FEATURE-030 fue
 retirada de esta matriz — su alcance quedó absorbido por FEATURE-042 (ver detalle en la sección de
 abajo).
@@ -364,7 +383,7 @@ Esfuerzo.
 | FEATURE-039 — Regla 11 de Testing Policy (riesgo de contrato externo repetido) no se aplica estructuralmente (nuevo) | Medio | Medio | Alta |
 | FEATURE-040 — Gates de merge/cierre de release sin camino de rechazo con feedback correctivo (nuevo) | Medio | Medio | Alta |
 | FEATURE-027 — Continuidad durable Developer↔QA (P0) | Alto | Alto | Alta |
-| FEATURE-041 — Creación y gestión de cuentas de usuario (self-service) (nuevo) | Alto | Alto | Alta |
+| FEATURE-041 — Creación y gestión de cuentas de usuario (self-service) | Alto | Alto | Alta |
 | FEATURE-042 — Creación, selección y configuración de proyectos (✅ Ejecutado, absorbe FEATURE-030) | Alto | Alto | Alta |
 | FEATURE-026 — Autenticación GitHub por usuario (✅ Ejecutado) | Alto | Medio | Alta |
 | FEATURE-033 — Lifecycle 01-PROJECT-BRIEF-TEMPLATE | Alto | Bajo | Media |

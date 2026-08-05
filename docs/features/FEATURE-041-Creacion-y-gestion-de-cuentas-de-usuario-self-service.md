@@ -5,7 +5,7 @@
 - **Name:** Creación y gestión de cuentas de usuario (self-service)
 - **Type:** Product / Security / Identity
 - **Owner:** Asdru
-- **Status:** Diseño — revalidación técnica DAIA completada (2026-08-04) — Approval Gate abierto
+- **Status:** Cerrada — validada end-to-end en vivo en el VPS (2026-08-05)
 - **Priority:** Alta
 - **Playbook Mode:** Standard
 - **Template:** `docs/playbook/07-FEATURE-TEMPLATE.md` v2.1
@@ -780,9 +780,63 @@ Antes de aprobar se requiere:
    cuatro secciones ahora usan de forma uniforme "se eliminan / no se incorporan". No quedan
    bloqueos arquitectónicos o funcionales identificados por ARIA. Queda pendiente únicamente la
    aprobación humana explícita del owner (punto 5).
-5. aprobación humana explícita del owner — **pendiente**.
+5. ~~aprobación humana explícita del owner~~ **Aprobado 2026-08-05** ("aprobado. avanzar con la
+   imple").
 
-Hasta ese momento queda prohibido implementar FEATURE-041.
+Implementada, desplegada y validada end-to-end en vivo en el VPS el 2026-08-05 (ver sección 11).
 
 Trabajo realizado en la rama `feature/041-cuentas-de-usuario-self-service`, no en `main` — toda
 Feature se trabaja en su propia rama salvo excepción explícita del owner.
+
+---
+
+# 11. Resultado de la validación E2E en vivo (2026-08-05)
+
+Implementación completa (backend + frontend) desplegada en el VPS y validada en vivo por el owner
+directamente en el navegador, contra un preview de Vercel de esta rama apuntando al backend real
+del VPS. Migración `0024` aplicada y verificada contra los datos reales antes de empezar (backup
+previo tomado).
+
+## Flujos validados en vivo
+
+- Registro público con email real (vía Resend) y con un email ya existente (respuesta neutra, sin
+  duplicado, Regla 5.4).
+- Verificación de email (incluido reenvío tras un primer intento fallido).
+- Login con email y con el `handle` legacy de la cuenta del owner.
+- Onboarding de nombre visible: gate correcto (solo módulo de cuenta hasta completar el nombre).
+- Recuperación de contraseña (confirmado por el owner: "funcionó perfecto").
+- Cambio de contraseña autenticado.
+- Aislamiento entre cuentas: la cuenta de prueba no vio ningún dato de la cuenta real (proyectos,
+  credenciales, configuración) y viceversa.
+- Creación de proyecto sin repositorio, gate de "Nuevo caso" deshabilitado hasta configurar uno.
+- Selector de configuración de agentes por proyecto: Global preseleccionada, credenciales en modo
+  lectura, perfiles personalizados (creación, edición por agente, borrado).
+- Jerarquía administrativa (confirmado por el owner, visto pero no mostrado en el chat).
+
+No se validó en esta ronda: ejecución punta a punta de un caso real con la cuenta de prueba (queda
+para una prueba posterior del owner, sin bloquear el cierre de esta Feature).
+
+## Bugs reales encontrados y corregidos durante la validación
+
+1. **Login solo por `handle`, la UI pide "Email"**: la cuenta legacy del owner (`handle="asdru"`,
+   nunca migrado a email por diseño -- ver sección 7) no podía loguearse con su email real, solo
+   con el handle literal, no descubrible desde una UI que solo dice "Email". Corregido:
+   `findUserByHandleOrEmail` reemplaza el lookup exclusivo por handle en login, recuperación de
+   contraseña y reenvío de verificación.
+2. **Respuestas de error sin `message`**: varios endpoints devolvían `{error: code}` sin motivo
+   legible: el frontend mostraba "HTTP 400" genérico en vez del error real (ej. "la contraseña
+   actual no es correcta"). Corregido en todos los endpoints de `/auth/*` y `/account/*`; el
+   cliente además prioriza el detalle de `violations` cuando la causa es una contraseña débil.
+3. **UX de perfiles personalizados sin acordeón**: los perfiles quedaban todos desplegados al
+   mismo tiempo, mezclando visualmente los formularios de un perfil con el siguiente. Corregido
+   con expandir/colapsar por perfil (colapsado por defecto, el recién creado se abre solo).
+
+## Incidente durante la validación (no relacionado con el código de esta Feature)
+
+Al correr la suite completa de tests (`npm test`) contra la base de datos real del VPS para
+validar el código nuevo, dos tests preexistentes de FEATURE-025 (no tocados en esta Feature)
+resultaron tener el mismo supuesto incorrecto que ya se había corregido en los tests nuevos de
+FEATURE-041: asumían que la cuenta de prueba no tenía ninguna conexión OAuth real configurada. Uno
+de ellos borró la conexión OAuth de Claude de la cuenta real sin restaurarla -- reconectada por el
+owner sin pérdida de datos. Backup previo de la base ya existía por precaución. Corrección de esos
+dos archivos de test quedó como tarea aparte, fuera del alcance de esta Feature.
