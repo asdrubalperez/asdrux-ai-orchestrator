@@ -262,20 +262,22 @@ autenticación.
 
 #### Migración de configuración existente
 
-La configuración actual incluye una opción global y configuraciones específicas por rol.
+La configuración actual incluye una fila global (`role IS NULL`) y configuraciones específicas por
+rol.
 
 Durante la migración:
 
-- la combinación global actual pasa a ser la nueva configuración **Global**;
-- las configuraciones específicas por rol existentes dejan de mantenerse como overrides
-  independientes y se consolidan dentro de Global;
+- la fila global actual (`role IS NULL`) pasa a ser la nueva configuración **Global**;
+- las configuraciones específicas por rol existentes **se eliminan**;
+- esos overrides **no se incorporan a Global ni se migran a perfiles personalizados**;
 - no se crea un perfil personalizado artificial;
 - no se reasignan proyectos actuales a perfiles;
 - todos los proyectos existentes quedan usando Global;
 - los perfiles personalizados comienzan vacíos y solo se crean de forma voluntaria por el usuario.
 
-El objetivo es conservar una configuración operativa simple y predecible, evitando trasladar
-automáticamente la complejidad histórica de overrides por rol al nuevo modelo de perfiles.
+Esta pérdida de overrides no es accidental ni silenciosa: constituye una decisión explícita y
+aceptada por el owner para simplificar el modelo y evitar trasladar automáticamente la
+configuración histórica por rol al nuevo sistema de perfiles (ver Riesgo 15).
 
 #### Rate limiting
 
@@ -477,9 +479,10 @@ La implementación deberá determinar el cambio mínimo necesario en:
   `null` representa la selección Global);
 - `resolveAgentConfig` (`src/db/repository.ts:662-668`) pasa a recibir `profileId` además de
   `userId`/`role`, con la nueva precedencia perfil por agente → Global de cuenta → default técnico;
-- migración de la combinación global actual hacia la nueva configuración Global;
-- consolidación de las configuraciones específicas por rol existentes dentro de Global, sin crear
-  un perfil personalizado artificial ni reasignar proyectos a perfiles;
+- migración de la fila global actual (`role IS NULL`) hacia la nueva configuración Global;
+- eliminación de las configuraciones específicas por rol existentes durante la migración -- no se
+  incorporan a Global ni se migran a perfiles, no se crea ningún perfil personalizado artificial ni
+  se reasignan proyectos a perfiles;
 - todos los proyectos existentes quedan usando Global y los perfiles personalizados comienzan
   vacíos, creados únicamente por decisión del usuario.
 
@@ -557,9 +560,9 @@ La migración deberá:
 - definir valores y backfill para filas actuales;
 - convertir de forma explícita la cuenta del owner en superadministrador protegido;
 - no invalidar sesiones existentes salvo que el diseño aprobado lo requiera;
-- migrar la combinación global actual a la nueva configuración Global;
-- consolidar dentro de Global las configuraciones específicas por rol existentes, sin crear perfiles
-  personalizados artificiales;
+- migrar la fila global actual (`role IS NULL`) a la nueva configuración Global;
+- eliminar las configuraciones específicas por rol existentes -- no se incorporan a Global ni se
+  migran a perfiles personalizados, no se crea ningún perfil artificial;
 - dejar todos los proyectos existentes seleccionando Global;
 - validar datos reales antes de endurecer constraints;
 - ser reversible cuando sea razonable o disponer de un procedimiento de rollback documentado.
@@ -688,10 +691,12 @@ La migración deberá:
 
 ### Escenario 23 — Migración de configuración existente
 
-- **Input:** cuenta existente con combinación global y configuraciones específicas por rol.
-- **Expected output:** la combinación resultante queda representada como Global; no se crea un perfil
-  artificial, todos los proyectos existentes usan Global y no aparecen perfiles personalizados
-  hasta que el usuario los cree.
+- **Input:** cuenta existente con una fila global (`role IS NULL`) y configuraciones específicas
+  por rol.
+- **Expected output:** la fila global existente pasa a ser la nueva configuración Global; los
+  overrides por rol se eliminan; no se crea ningún perfil artificial; todos los proyectos
+  existentes quedan usando Global; no aparecen perfiles personalizados hasta que el usuario los
+  cree voluntariamente.
 
 ### Validation Evidence
 
@@ -768,9 +773,13 @@ Antes de aprobar se requiere:
    nombrados (sección 4, Regla 5.10).
 4. revisión final de alcance por ARIA y el owner — **re-revisión DAIA del ajuste de Global/perfiles/
    migración completada 2026-08-04** (Riesgo 15 resuelto con confirmación explícita del owner: los
-   overrides por rol actuales se descartan a propósito al consolidar en Global, sin migrarlos a
-   ningún perfil). Queda pendiente la revisión final de alcance conjunta de ARIA + owner sobre el
-   documento completo.
+   overrides por rol actuales se eliminan durante la migración, no se incorporan a Global ni se
+   migran a ningún perfil). Corrección de consistencia aplicada 2026-08-04 a pedido de ARIA:
+   eliminadas todas las referencias residuales a "consolidar"/"incorporar" los overrides dentro de
+   Global en Scope, Technical Considerations (Cambios esperados y Migración) y Escenario 23 — las
+   cuatro secciones ahora usan de forma uniforme "se eliminan / no se incorporan". No quedan
+   bloqueos arquitectónicos o funcionales identificados por ARIA. Queda pendiente únicamente la
+   aprobación humana explícita del owner (punto 5).
 5. aprobación humana explícita del owner — **pendiente**.
 
 Hasta ese momento queda prohibido implementar FEATURE-041.
