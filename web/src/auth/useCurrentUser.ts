@@ -2,9 +2,16 @@ import { useQuery } from "@tanstack/react-query";
 import { apiUrl } from "../lib/api";
 import { queryClient } from "../lib/queryClient";
 
+export type AccountRole = "user" | "admin" | "superadmin";
+export type AccountStatus = "pending_verification" | "active" | "suspended";
+
 export interface CurrentUser {
   id: string;
   handle: string;
+  email: string | null;
+  displayName: string | null;
+  role: AccountRole;
+  status: AccountStatus;
 }
 
 export function useCurrentUser() {

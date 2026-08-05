@@ -1,5 +1,6 @@
 import { apiUrl } from "../lib/api";
 import type {
+  AgentConfigProfile,
   AgentConfigResponse,
   AgentRole,
   AiCredentialStatus,
@@ -40,15 +41,36 @@ export function setGlobalAgentConfig(config: EffectiveAgentConfig): Promise<{ co
   return request("/agent-config", { method: "PUT", body: JSON.stringify(config) });
 }
 
-export function setRoleAgentConfig(
+export function createAgentConfigProfile(name: string): Promise<{ profile: AgentConfigProfile }> {
+  return request("/agent-config/profiles", { method: "POST", body: JSON.stringify({ name }) });
+}
+
+export function renameAgentConfigProfile(profileId: string, name: string): Promise<{ profile: AgentConfigProfile }> {
+  return request(`/agent-config/profiles/${encodeURIComponent(profileId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export function deleteAgentConfigProfile(profileId: string): Promise<{ ok: true }> {
+  return request(`/agent-config/profiles/${encodeURIComponent(profileId)}`, { method: "DELETE" });
+}
+
+export function setProfileRoleAgentConfig(
+  profileId: string,
   role: AgentRole,
   config: EffectiveAgentConfig
 ): Promise<{ config: EffectiveAgentConfig }> {
-  return request(`/agent-config/${encodeURIComponent(role)}`, { method: "PUT", body: JSON.stringify(config) });
+  return request(`/agent-config/profiles/${encodeURIComponent(profileId)}/${encodeURIComponent(role)}`, {
+    method: "PUT",
+    body: JSON.stringify(config),
+  });
 }
 
-export function clearRoleAgentConfig(role: AgentRole): Promise<{ ok: true }> {
-  return request(`/agent-config/${encodeURIComponent(role)}`, { method: "DELETE" });
+export function clearProfileRoleAgentConfig(profileId: string, role: AgentRole): Promise<{ ok: true }> {
+  return request(`/agent-config/profiles/${encodeURIComponent(profileId)}/${encodeURIComponent(role)}`, {
+    method: "DELETE",
+  });
 }
 
 export function getAiCredentialStatuses(): Promise<{ credentials: AiCredentialStatus[] }> {

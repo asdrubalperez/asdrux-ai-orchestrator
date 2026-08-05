@@ -1049,6 +1049,128 @@ export async function upsertUserPassword(handle: string, passwordHash: string): 
   return result.rows[0];
 }
 
+// FEATURE-041: registro público self-service. `email` es el valor mostrado al usuario tal cual lo
+// escribió; `handle` es el mismo valor normalizado (minúsculas, sin destruir el original -- Regla
+// 5.4) y sigue siendo la clave de login real (findUserByHandle, sin tocar). Nace en
+// `pending_verification` (default de la columna); nunca se crea ya verificada.
+export class DuplicateAccountError extends Error {}
+
+export async function createSelfServiceAccount(params: {
+  email: string;
+  normalizedHandle: string;
+  passwordHash: string;
+}): Promise<UserRow> {
+  try {
+    const result = await pool.query<UserRow>(
+      `insert into users (handle, email, password_hash)
+       values ($1, $2, $3)
+       returning *`,
+      [params.normalizedHandle, params.email, params.passwordHash]
+    );
+    return result.rows[0];
+  } catch (err) {
+    if (isUniqueConstraintViolation(err)) {
+      throw new DuplicateAccountError(`Ya existe una cuenta con el email "${params.email}".`);
+    }
+    throw err;
+  }
+}
+
+export async function findUserByNormalizedHandle(normalizedHandle: string): Promise<UserRow | null> {
+  return findUserByHandle(normalizedHandle);
+}
+
+// FEATURE-041, Scope "Administración de cuentas": creadas por un administrador, sin contraseña
+// temporal (`password_hash` queda null hasta que la propia persona activa la cuenta -- Regla 5.6,
+// "la contraseña nunca se registra ni se devuelve", ni siquiera una generada por el sistema).
+export async function createAccountByAdmin(email: string, normalizedHandle: string): Promise<UserRow> {
+  try {
+    const result = await pool.query<UserRow>(
+      `insert into users (handle, email)
+       values ($1, $2)
+       returning *`,
+      [normalizedHandle, email]
+    );
+    return result.rows[0];
+  } catch (err) {
+    if (isUniqueConstraintViolation(err)) {
+      throw new DuplicateAccountError(`Ya existe una cuenta con el email "${email}".`);
+    }
+    throw err;
+  }
+}
+
+export async function setUserDisplayName(userId: string, displayName: string): Promise<UserRow | null> {
+  const result = await pool.query<UserRow>(
+    "update users set display_name = $2 where id = $1 returning *",
+    [userId, displayName]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function markUserEmailVerified(userId: string): Promise<UserRow | null> {
+  const result = await pool.query<UserRow>(
+    `update users
+     set email_verified_at = now(), status = case when status = 'pending_verification' then 'active' else status end
+     where id = $1
+     returning *`,
+    [userId]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function setUserPasswordHash(userId: string, passwordHash: string): Promise<void> {
+  await pool.query("update users set password_hash = $2 where id = $1", [userId, passwordHash]);
+}
+
+/**
+ * FEATURE-041, Regla 5.8/Escenario 13: nunca modifica una cuenta con `is_protected_superadmin`.
+ * El chequeo vive acá (no solo en el servicio) para que ningún call site futuro pueda saltearlo
+ * por error -- ownership/protección se garantiza en la capa de datos, no solo en la de negocio.
+ */
+export async function setUserRole(userId: string, role: AccountRole): Promise<UserRow | null> {
+  const result = await pool.query<UserRow>(
+    "update users set role = $2 where id = $1 and is_protected_superadmin = false returning *",
+    [userId, role]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function setUserStatus(userId: string, status: AccountStatus): Promise<UserRow | null> {
+  const result = await pool.query<UserRow>(
+    "update users set status = $2 where id = $1 and is_protected_superadmin = false returning *",
+    [userId, status]
+  );
+  return result.rows[0] ?? null;
+}
+
+// FEATURE-041, Regla 5.9: informativa, actualizada por un evento de autenticación exitoso
+// claramente definido (login web) -- nunca por cada request.
+export async function touchUserLastLogin(userId: string): Promise<void> {
+  await pool.query("update users set last_login_at = now() where id = $1", [userId]);
+}
+
+export interface AccountListEntry {
+  id: string;
+  email: string | null;
+  display_name: string | null;
+  role: AccountRole;
+  status: AccountStatus;
+  created_at: string;
+  email_verified_at: string | null;
+  last_login_at: string | null;
+  is_protected_superadmin: boolean;
+}
+
+export async function listAccountsForAdmin(): Promise<AccountListEntry[]> {
+  const result = await pool.query<AccountListEntry>(
+    `select id, email, display_name, role, status, created_at, email_verified_at, last_login_at, is_protected_superadmin
+     from users
+     order by created_at asc`
+  );
+  return result.rows;
+}
+
 export async function getProjectForUser(userId: string, projectId?: string): Promise<ProjectRow | null> {
   const result = projectId
     ? await pool.query<ProjectRow>("select * from projects where id = $1 and owner_id = $2", [projectId, userId])
@@ -1351,6 +1473,82 @@ export async function getSessionById(sessionId: string): Promise<SessionRow | nu
 
 export async function revokeSession(sessionId: string): Promise<void> {
   await pool.query("update sessions set revoked_at = now() where id = $1 and revoked_at is null", [sessionId]);
+}
+
+// FEATURE-041, Scope "Contraseña y sesiones": revocar todas las sesiones al cambiar contraseña,
+// recuperar contraseña o suspender una cuenta.
+export async function revokeAllSessionsForUser(userId: string): Promise<void> {
+  await pool.query("update sessions set revoked_at = now() where user_id = $1 and revoked_at is null", [userId]);
+}
+
+// FEATURE-041, Regla 5.5: tokens de un solo uso para verificación de email, recuperación de
+// contraseña y activación de cuentas creadas por un administrador -- aleatorios, hash únicamente
+// (nunca texto plano), expiración, uso único, revocables por reenvío.
+export type AccountTokenPurpose = "email_verification" | "password_reset" | "account_activation";
+
+export interface AccountTokenRow {
+  id: string;
+  user_id: string;
+  token_hash: string;
+  purpose: AccountTokenPurpose;
+  created_at: string;
+  expires_at: string;
+  used_at: string | null;
+  revoked_at: string | null;
+}
+
+// Un reenvío invalida el token anterior (Regla 5.5) -- revocar y crear son atómicos en el
+// servicio de auth (accountTokens.ts), no acá: esta función es intencionalmente de un solo paso.
+export async function revokeUnusedAccountTokens(userId: string, purpose: AccountTokenPurpose): Promise<void> {
+  await pool.query(
+    "update account_tokens set revoked_at = now() where user_id = $1 and purpose = $2 and used_at is null and revoked_at is null",
+    [userId, purpose]
+  );
+}
+
+export async function createAccountToken(params: {
+  userId: string;
+  tokenHash: string;
+  purpose: AccountTokenPurpose;
+  expiresAt: Date;
+}): Promise<AccountTokenRow> {
+  const result = await pool.query<AccountTokenRow>(
+    `insert into account_tokens (user_id, token_hash, purpose, expires_at)
+     values ($1, $2, $3, $4)
+     returning *`,
+    [params.userId, params.tokenHash, params.purpose, params.expiresAt.toISOString()]
+  );
+  return result.rows[0];
+}
+
+export async function findValidAccountTokenByHash(
+  tokenHash: string,
+  purpose: AccountTokenPurpose
+): Promise<AccountTokenRow | null> {
+  const result = await pool.query<AccountTokenRow>(
+    `select * from account_tokens
+     where token_hash = $1 and purpose = $2
+       and used_at is null and revoked_at is null and expires_at > now()`,
+    [tokenHash, purpose]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Consumo atómico: solo la primera llamada concurrente que llegue gana (Validation Evidence:
+ * "pruebas de concurrencia para uso único de tokens"). El `where` repite las mismas condiciones de
+ * vigencia que `findValidAccountTokenByHash` -- una carrera entre validar y consumir no puede
+ * reactivar un token ya vencido/usado/revocado entretanto.
+ */
+export async function consumeAccountToken(tokenId: string): Promise<AccountTokenRow | null> {
+  const result = await pool.query<AccountTokenRow>(
+    `update account_tokens
+     set used_at = now()
+     where id = $1 and used_at is null and revoked_at is null and expires_at > now()
+     returning *`,
+    [tokenId]
+  );
+  return result.rows[0] ?? null;
 }
 
 // FEATURE-026: conexión GitHub por usuario (migrations/0015_user_git_connections.sql).

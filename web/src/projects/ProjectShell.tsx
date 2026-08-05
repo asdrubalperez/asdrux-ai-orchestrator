@@ -106,22 +106,36 @@ export function ProjectShell(props: { user: CurrentUser; onLogout: () => Promise
               <Settings className="h-4 w-4" />
               Repositorio
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => navigate("/settings/agents")}>
+            <Button
+              variant={location.pathname.includes("/settings/agent-config") ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => navigate(`/projects/${projectId}/settings/agent-config`)}
+            >
               <Bot className="h-4 w-4" />
-              Agentes
+              Config. de agentes
             </Button>
           </div>
-          <Button
-            data-testid="logout-button"
-            variant="outline"
-            size="sm"
-            aria-label="Salir"
-            title={`Salir (${props.user.handle})`}
-            onClick={() => void props.onLogout()}
-          >
-            <LogOut className="h-4 w-4" />
-            {props.user.handle}
-          </Button>
+          <div className="flex items-center gap-2">
+            {props.user.role === "admin" || props.user.role === "superadmin" ? (
+              <Button variant="ghost" size="sm" onClick={() => navigate("/admin/users")}>
+                Administración
+              </Button>
+            ) : null}
+            <Button variant="ghost" size="sm" onClick={() => navigate("/settings/agents")}>
+              Mi cuenta
+            </Button>
+            <Button
+              data-testid="logout-button"
+              variant="outline"
+              size="sm"
+              aria-label="Salir"
+              title={`Salir (${props.user.displayName ?? props.user.handle})`}
+              onClick={() => void props.onLogout()}
+            >
+              <LogOut className="h-4 w-4" />
+              {props.user.displayName ?? props.user.handle}
+            </Button>
+          </div>
         </div>
       </header>
 

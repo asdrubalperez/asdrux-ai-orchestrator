@@ -37,6 +37,10 @@ export interface ProjectSummary {
   repository: ProjectRepositorySummary | null;
   isConfigured: boolean;
   isSelected: boolean;
+  // FEATURE-041, Regla 5.10: null = Global (config de cuenta); si no-null, id de un perfil de la
+  // cuenta del owner. La resolución de si el proyecto puede operar (credencial válida disponible
+  // para lo que esto resuelva) se evalúa al ejecutar, no acá (Escenario 22).
+  agentConfigProfileId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -59,6 +63,7 @@ function toProjectSummary(row: ProjectRow, selectedProjectId: string | null): Pr
     repository,
     isConfigured: repository !== null,
     isSelected: row.id === selectedProjectId,
+    agentConfigProfileId: row.agent_config_profile_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

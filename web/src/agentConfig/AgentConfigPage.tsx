@@ -1,28 +1,34 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, KeyRound, Loader2, ShieldCheck, Trash2 } from "lucide-react";
+import { ExternalLink, KeyRound, Loader2, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
 import { queryClient } from "../lib/queryClient";
+import { useCurrentUser } from "../auth/useCurrentUser";
+import { AuthApiError, changePassword, setDisplayName } from "../auth/api";
 import { ApiError } from "./api";
 import {
   cancelOAuthLogin,
-  clearRoleAgentConfig,
+  createAgentConfigProfile,
+  clearProfileRoleAgentConfig,
+  deleteAgentConfigProfile,
   deleteAiCredential,
   disconnectOAuth,
   getAgentConfig,
   getAiCredentialStatuses,
   getOAuthConnectionStatuses,
   pollCodexLogin,
+  renameAgentConfigProfile,
   setAiCredential,
   setGlobalAgentConfig,
-  setRoleAgentConfig,
+  setProfileRoleAgentConfig,
   startOAuthLogin,
   submitClaudeLoginCode,
 } from "./api";
 import type {
+  AgentConfigProfile,
   AgentRole,
   AiCredentialStatus,
   AuthMode,
@@ -55,11 +61,14 @@ const PROVIDER_LABELS: Record<ExecutorProviderName, string> = {
 
 const DEFAULT_CONFIG: EffectiveAgentConfig = { executorProvider: "claude", authMode: "api_key", model: null };
 
-// FEATURE-025-Parte-1, sección 7.14: pantalla de configuración self-service -- global + override
-// por rol, selector de modelo filtrado por asistente, alta/rotación/eliminación de credenciales
-// propias. Es una configuración de usuario, no de proyecto -- vive fuera de ProjectShell (mismo
-// criterio que /projects, /projects/new).
+// FEATURE-041: módulo de cuenta -- nombre visible, contraseña, credenciales/conexiones de IA,
+// configuración Global y hasta 3 perfiles personalizados. Todo lo que antes vivía repartido entre
+// FEATURE-025-Parte-1 (esta pantalla) y el gate de onboarding converge acá: es exactamente la
+// superficie exenta del gate "cuenta activa sin nombre visible -- solo accede al módulo de cuenta"
+// (Regla 5.2), y el único lugar donde Global/perfiles/credenciales se editan (la config del
+// proyecto solo *selecciona* cuál de estas opciones aplica, ver ProjectAgentConfigSelector).
 export function AgentConfigPage() {
+  const { user, refresh } = useCurrentUser();
   const configQuery = useQuery({ queryKey: ["agent-config"], queryFn: () => getAgentConfig() });
   const credentialsQuery = useQuery({ queryKey: ["agent-credentials"], queryFn: () => getAiCredentialStatuses() });
   const oauthQuery = useQuery({ queryKey: ["ai-oauth-connections"], queryFn: () => getOAuthConnectionStatuses() });
@@ -74,20 +83,34 @@ export function AgentConfigPage() {
     void queryClient.invalidateQueries({ queryKey: ["ai-oauth-connections"] });
   };
 
+  const onboardingPending = !!user && !user.displayName;
+
   return (
     <main className="mx-auto max-w-3xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold">Configuración de agentes</h1>
+          <h1 className="text-lg font-semibold">Mi cuenta</h1>
           <p className="mt-1 text-sm text-zinc-600">
-            Asistente de IA, modelo y modo de autenticación por rol. Cada rol puede tener su propia combinación —
-            sin override, usa la configuración global.
+            Perfil, contraseña, credenciales de IA y las configuraciones de agente disponibles para tus proyectos
+            (Global y hasta {configQuery.data?.maxProfiles ?? 3} perfiles personalizados).
           </p>
         </div>
-        <Link to="/projects" className="text-sm text-zinc-600 underline">
-          Volver a proyectos
-        </Link>
+        {!onboardingPending ? (
+          <Link to="/projects" className="text-sm text-zinc-600 underline">
+            Volver a proyectos
+          </Link>
+        ) : null}
       </div>
+
+      {onboardingPending ? (
+        <section className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+          Elegí un nombre visible para poder acceder al resto de la aplicación.
+        </section>
+      ) : null}
+
+      <ProfileSection displayName={user?.displayName ?? null} email={user?.email ?? null} onSaved={refresh} />
+
+      <PasswordSection />
 
       <section className="rounded-lg border border-zinc-200 bg-white p-5">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Conexiones OAuth (personal)</h2>
@@ -133,8 +156,11 @@ export function AgentConfigPage() {
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-5">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Configuración global</h2>
-        <p className="mt-1 text-xs text-zinc-500">Se aplica a cualquier rol sin override propio.</p>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Configuración Global</h2>
+        <p className="mt-1 text-xs text-zinc-500">
+          Se aplica a los 6 agentes en cualquier proyecto que no tenga un perfil personalizado seleccionado. Siempre
+          existe como opción -- un proyecto nuevo la usa por defecto.
+        </p>
         {configQuery.isLoading ? (
           <Loader2 className="mt-4 h-4 w-4 animate-spin text-zinc-400" />
         ) : (
@@ -152,33 +178,301 @@ export function AgentConfigPage() {
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-5">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Overrides por rol</h2>
-        <div className="mt-4 space-y-5 divide-y divide-zinc-100">
-          {ALL_ROLES.map((role) => (
-            <div key={role} className={role === "architect" ? "" : "pt-5"}>
-              <RoleOverride
-                role={role}
-                override={configQuery.data?.roles[role] ?? null}
-                effectiveFallback={configQuery.data?.global ?? DEFAULT_CONFIG}
-                catalog={configQuery.data?.catalog ?? { claude: [], codex: [] }}
-                onSave={async (config) => {
-                  await setRoleAgentConfig(role, config);
-                  invalidate();
-                }}
-                onClear={async () => {
-                  await clearRoleAgentConfig(role);
-                  invalidate();
-                }}
-              />
-            </div>
-          ))}
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Perfiles personalizados</h2>
+            <p className="mt-1 text-xs text-zinc-500">
+              Cada perfil puede definir una combinación distinta por agente (ej. modelos livianos para proyectos
+              simples, avanzados para proyectos complejos). Un proyecto elige, como máximo, uno.
+            </p>
+          </div>
         </div>
+        {configQuery.isLoading ? (
+          <Loader2 className="mt-4 h-4 w-4 animate-spin text-zinc-400" />
+        ) : (
+          <ProfilesManager
+            profiles={configQuery.data?.profiles ?? []}
+            maxProfiles={configQuery.data?.maxProfiles ?? 3}
+            catalog={configQuery.data?.catalog ?? { claude: [], codex: [] }}
+            globalConfig={configQuery.data?.global ?? DEFAULT_CONFIG}
+            onChanged={invalidate}
+          />
+        )}
       </section>
     </main>
   );
 }
 
-function RoleOverride(props: {
+function ProfileSection(props: { displayName: string | null; email: string | null; onSaved: () => Promise<void> }) {
+  const [editing, setEditing] = React.useState(false);
+  const [name, setName] = React.useState(props.displayName ?? "");
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    setName(props.displayName ?? "");
+  }, [props.displayName]);
+
+  const save = async () => {
+    if (!name.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await setDisplayName(name.trim());
+      await props.onSaved();
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof AuthApiError ? err.message : "No se pudo guardar el nombre.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-5">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Perfil</h2>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-zinc-600">Email</label>
+          <p className="text-sm text-zinc-800">{props.email ?? "-"}</p>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-zinc-600">Nombre visible</label>
+          {editing || !props.displayName ? (
+            <div className="flex items-center gap-2">
+              <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Tu nombre" />
+              <Button size="sm" disabled={saving || !name.trim()} onClick={() => void save()}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar"}
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-zinc-800">{props.displayName}</p>
+              <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                Editar
+              </Button>
+            </div>
+          )}
+          {error ? <p className="text-sm text-rose-700">{error}</p> : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PasswordSection() {
+  const [currentPassword, setCurrentPassword] = React.useState("");
+  const [newPassword, setNewPassword] = React.useState("");
+  const [confirmation, setConfirmation] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    setSuccess(false);
+    try {
+      await changePassword(currentPassword, newPassword, confirmation);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmation("");
+      setSuccess(true);
+    } catch (err) {
+      setError(err instanceof AuthApiError ? err.message : "No se pudo cambiar la contraseña.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-5">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Contraseña</h2>
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <Input
+          type="password"
+          placeholder="Contraseña actual"
+          value={currentPassword}
+          onChange={(event) => setCurrentPassword(event.target.value)}
+        />
+        <Input
+          type="password"
+          placeholder="Contraseña nueva"
+          value={newPassword}
+          onChange={(event) => setNewPassword(event.target.value)}
+        />
+        <Input
+          type="password"
+          placeholder="Confirmar contraseña nueva"
+          value={confirmation}
+          onChange={(event) => setConfirmation(event.target.value)}
+        />
+      </div>
+      <div className="mt-3 flex items-center gap-3">
+        <Button
+          size="sm"
+          disabled={saving || !currentPassword || !newPassword || !confirmation}
+          onClick={() => void save()}
+        >
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          Cambiar contraseña
+        </Button>
+        {success ? <p className="text-sm text-emerald-700">Contraseña actualizada. Vas a tener que volver a iniciar sesión.</p> : null}
+      </div>
+      {error ? <p className="mt-2 text-sm text-rose-700">{error}</p> : null}
+    </section>
+  );
+}
+
+function ProfilesManager(props: {
+  profiles: AgentConfigProfile[];
+  maxProfiles: number;
+  catalog: Record<ExecutorProviderName, string[]>;
+  globalConfig: EffectiveAgentConfig;
+  onChanged: () => void;
+}) {
+  const [newProfileName, setNewProfileName] = React.useState("");
+  const [creating, setCreating] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const create = async () => {
+    if (!newProfileName.trim()) return;
+    setCreating(true);
+    setError(null);
+    try {
+      await createAgentConfigProfile(newProfileName.trim());
+      setNewProfileName("");
+      props.onChanged();
+    } catch (err) {
+      setError(
+        err instanceof ApiError && err.status === 409
+          ? `Ya tenés el máximo de ${props.maxProfiles} perfiles.`
+          : "No se pudo crear el perfil."
+      );
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 space-y-4">
+      {props.profiles.map((profile) => (
+        <ProfileCard key={profile.id} profile={profile} catalog={props.catalog} globalConfig={props.globalConfig} onChanged={props.onChanged} />
+      ))}
+
+      {props.profiles.length < props.maxProfiles ? (
+        <div className="flex items-center gap-2 border-t border-zinc-100 pt-4">
+          <Input
+            placeholder="Nombre del perfil nuevo (ej. Complejidades avanzadas)"
+            value={newProfileName}
+            onChange={(event) => setNewProfileName(event.target.value)}
+          />
+          <Button size="sm" disabled={creating || !newProfileName.trim()} onClick={() => void create()}>
+            {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            Crear perfil
+          </Button>
+        </div>
+      ) : (
+        <p className="border-t border-zinc-100 pt-4 text-xs text-zinc-500">
+          Ya tenés el máximo de {props.maxProfiles} perfiles.
+        </p>
+      )}
+      {error ? <p className="text-sm text-rose-700">{error}</p> : null}
+    </div>
+  );
+}
+
+function ProfileCard(props: {
+  profile: AgentConfigProfile;
+  catalog: Record<ExecutorProviderName, string[]>;
+  globalConfig: EffectiveAgentConfig;
+  onChanged: () => void;
+}) {
+  const [renaming, setRenaming] = React.useState(false);
+  const [name, setName] = React.useState(props.profile.name);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const rename = async () => {
+    if (!name.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await renameAgentConfigProfile(props.profile.id, name.trim());
+      setRenaming(false);
+      props.onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo renombrar el perfil.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteAgentConfigProfile(props.profile.id);
+      props.onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo borrar el perfil.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-md border border-zinc-200 p-4">
+      <div className="flex items-center justify-between">
+        {renaming ? (
+          <div className="flex items-center gap-2">
+            <Input value={name} onChange={(event) => setName(event.target.value)} />
+            <Button size="sm" disabled={busy || !name.trim()} onClick={() => void rename()}>
+              Guardar
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setRenaming(false)}>
+              Cancelar
+            </Button>
+          </div>
+        ) : (
+          <p className="text-sm font-medium text-zinc-800">{props.profile.name}</p>
+        )}
+        {!renaming ? (
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setRenaming(true)}>
+              Renombrar
+            </Button>
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => void remove()}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+      {error ? <p className="mt-2 text-sm text-rose-700">{error}</p> : null}
+      <div className="mt-4 space-y-4 divide-y divide-zinc-100">
+        {ALL_ROLES.map((role) => (
+          <div key={role} className={role === "intake" ? "" : "pt-4"}>
+            <ProfileRoleOverride
+              role={role}
+              override={props.profile.roles[role] ?? null}
+              effectiveFallback={props.globalConfig}
+              catalog={props.catalog}
+              onSave={async (config) => {
+                await setProfileRoleAgentConfig(props.profile.id, role, config);
+                props.onChanged();
+              }}
+              onClear={async () => {
+                await clearProfileRoleAgentConfig(props.profile.id, role);
+                props.onChanged();
+              }}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProfileRoleOverride(props: {
   role: AgentRole;
   override: EffectiveAgentConfig | null;
   effectiveFallback: EffectiveAgentConfig;

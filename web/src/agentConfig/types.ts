@@ -11,9 +11,18 @@ export interface EffectiveAgentConfig {
   model: string | null;
 }
 
+// FEATURE-041, Regla 5.10: un perfil es un contenedor nombrado de hasta 6 overrides de agente.
+// "Global" no es un perfil -- es la config de cuenta sin perfil (`global` en esta respuesta).
+export interface AgentConfigProfile {
+  id: string;
+  name: string;
+  roles: Partial<Record<AgentRole, EffectiveAgentConfig>>;
+}
+
 export interface AgentConfigResponse {
   global: EffectiveAgentConfig | null;
-  roles: Partial<Record<AgentRole, EffectiveAgentConfig | null>>;
+  profiles: AgentConfigProfile[];
+  maxProfiles: number;
   catalog: Record<ExecutorProviderName, string[]>;
 }
 

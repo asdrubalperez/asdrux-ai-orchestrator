@@ -131,6 +131,12 @@ test("resolveAgentConfig: precedencia override-de-perfil > Global > default, inc
   }
   const userId = prerequisite.rows[0].owner_id;
 
+  // El usuario de prueba es una cuenta real (ej. en el VPS dev, "asdru") que puede ya tener una
+  // Global configurada -- se guarda para restaurarla, y se limpia la fila para tener una base
+  // limpia real ("sin ninguna fila") en vez de asumir que la cuenta nunca tuvo una.
+  const preExistingGlobal = await getGlobalAgentConfig(userId);
+  await pool.query("delete from user_agent_config where user_id = $1 and role is null", [userId]);
+
   let profileId: string | undefined;
   try {
     // Sin ninguna fila y sin perfil -> default (claude/api_key, sin modelo).
@@ -168,5 +174,6 @@ test("resolveAgentConfig: precedencia override-de-perfil > Global > default, inc
   } finally {
     if (profileId) await deleteAgentConfigProfile(profileId, userId).catch(() => {});
     await pool.query("delete from user_agent_config where user_id = $1 and role is null", [userId]).catch(() => {});
+    if (preExistingGlobal) await setGlobalAgentConfig(userId, preExistingGlobal).catch(() => {});
   }
 });

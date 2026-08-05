@@ -7,6 +7,8 @@ import {
   findUserById,
   getSessionById,
   revokeSession,
+  touchUserLastLogin,
+  type SessionRow,
   type UserRow,
 } from "../db/repository.js";
 
@@ -136,12 +138,28 @@ export function clientIpForRateLimit(req: Request): string {
   return req.ip || req.socket.remoteAddress || "unknown";
 }
 
-export async function createWebLoginSession(handle: string, password: string) {
-  const user = await findUserByHandle(handle);
-  if (!user?.password_hash) return null;
+export type WebLoginResult =
+  | { kind: "invalid_credentials" }
+  // FEATURE-041, Regla 5.2: cuenta no verificada o suspendida no puede iniciar sesión operativa --
+  // distinguible SOLO después de validar la contraseña (no antes: revelar el estado de la cuenta
+  // a quien no demostró conocer la contraseña reintroduciría enumeración, Regla 5.4).
+  | { kind: "not_verified" }
+  | { kind: "suspended" }
+  | { kind: "ok"; user: UserRow; session: SessionRow; cookieValue: string };
+
+export async function createWebLoginSession(handle: string, password: string): Promise<WebLoginResult> {
+  // FEATURE-041, Regla 5.4: las cuentas self-service guardan su email normalizado (minúsculas)
+  // como handle -- normalizar acá también, o el login fallaría si el usuario escribe su email con
+  // mayúsculas distintas a como lo tipeó en el registro. No afecta cuentas CLI legacy (su handle ya
+  // es minúsculas, ej. "asdru").
+  const user = await findUserByHandle(handle.trim().toLowerCase());
+  if (!user?.password_hash) return { kind: "invalid_credentials" };
 
   const validPassword = await verifyPassword(password, user.password_hash);
-  if (!validPassword) return null;
+  if (!validPassword) return { kind: "invalid_credentials" };
+
+  if (user.status === "suspended") return { kind: "suspended" };
+  if (user.status === "pending_verification") return { kind: "not_verified" };
 
   const rawToken = generateRawSessionToken();
   const expiresAt = new Date(Date.now() + WEB_SESSION_TTL_MS);
@@ -150,8 +168,10 @@ export async function createWebLoginSession(handle: string, password: string) {
     tokenHash: hashSessionToken(rawToken),
     expiresAt,
   });
+  await touchUserLastLogin(user.id);
 
   return {
+    kind: "ok",
     user,
     session,
     cookieValue: buildSessionCookieValue(session.id, rawToken),
