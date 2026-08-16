@@ -267,7 +267,13 @@ function parseValidationCriterion(value: unknown, index: number): ValidationCrit
   };
 }
 
-function extractStructuredValue(
+/**
+ * FEATURE-033: exportada (antes privada de FEATURE-023) para que `projectBriefContracts.ts` la
+ * reutilice sin duplicar el parseo de outputArtifact estructurado/texto plano — es un helper
+ * genérico sin lógica de dominio Feature, candidato real de reuso (segundo consumidor: Project
+ * Brief) según la investigación de convergencia documental.
+ */
+export function extractStructuredValue(
   outputArtifact: unknown,
   tag: string,
   property: string
@@ -327,7 +333,7 @@ function parseJson(value: string, label: string): unknown {
   }
 }
 
-function assertClosedObject(value: Record<string, unknown>, keys: string[], label: string): void {
+export function assertClosedObject(value: Record<string, unknown>, keys: string[], label: string): void {
   const expected = new Set(keys);
   const actual = Object.keys(value);
   if (actual.some((key) => !expected.has(key)) || keys.some((key) => !(key in value))) {
@@ -335,17 +341,17 @@ function assertClosedObject(value: Record<string, unknown>, keys: string[], labe
   }
 }
 
-function objectAt(value: unknown, label: string): Record<string, unknown> {
+export function objectAt(value: unknown, label: string): Record<string, unknown> {
   if (!isRecord(value)) throw new Error(`${label} debe ser un objeto.`);
   return value;
 }
 
-function arrayAt(value: unknown, label: string): unknown[] {
+export function arrayAt(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) throw new Error(`${label} debe ser un array.`);
   return value;
 }
 
-function stringAt(value: unknown, label: string): string {
+export function stringAt(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) throw new Error(`${label} debe ser string no vacío.`);
   return value;
 }
@@ -356,7 +362,7 @@ function stringArrayAt(value: unknown, label: string): string[] {
   return values as string[];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 

@@ -9,11 +9,18 @@ export const RUNBOOK_VERSION_ASSET = "VERSION";
 export const TESTING_POLICY_ASSET = "04-TESTING-POLICY.md";
 /** FEATURE-037: Developer es dueño/consultor directo (05-CODING-STANDARDS.md:6-8). */
 export const CODING_STANDARDS_ASSET = "05-CODING-STANDARDS.md";
+/**
+ * FEATURE-033 (Rule 7/9 de FEATURE-023 Parte 2): Architect es dueño del Project Brief; el template
+ * se incorpora al catálogo obligatorio y hereda la validación previa a persistencia documental que
+ * ya usa Functional para Feature.
+ */
+export const PROJECT_BRIEF_TEMPLATE_ASSET = "01-PROJECT-BRIEF-TEMPLATE.md";
 export const REQUIRED_RUNBOOK_ASSETS = Object.freeze([
   RUNBOOK_VERSION_ASSET,
   FEATURE_TEMPLATE_ASSET,
   TESTING_POLICY_ASSET,
   CODING_STANDARDS_ASSET,
+  PROJECT_BRIEF_TEMPLATE_ASSET,
 ]);
 export const SUPPORTED_RUNBOOK_VERSIONS = Object.freeze(["v1.0"]);
 

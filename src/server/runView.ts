@@ -5,6 +5,7 @@ import {
   type ReleasePlanFeatureEntry,
 } from "../cli/escalation.js";
 import type { FeatureDocumentView } from "../features/lifecycle.js";
+import type { ProjectBriefDocumentView } from "../features/projectBriefLifecycle.js";
 
 export type TimelineNodeId = "user" | "architect" | "functional" | "planning" | "developer" | "qa";
 export type TimelineNodeStatus =
@@ -118,6 +119,8 @@ export interface RunViewModel {
    */
   releaseRoadmap: ReleaseRoadmapView | null;
   featureDocument: FeatureDocumentView | null;
+  /** FEATURE-033: null hasta que Architect complete el Project Brief canónico del proyecto. */
+  projectBriefDocument: ProjectBriefDocumentView | null;
 }
 
 const AGENT_NODES: Array<{ id: Exclude<TimelineNodeId, "user">; label: string }> = [
@@ -132,7 +135,8 @@ const TIMELINE_NODE_ORDER: TimelineNodeId[] = ["user", "architect", "functional"
 export function buildRunViewModel(
   detail: RunDetailViewInput,
   releaseRoadmap: ReleaseRoadmapView | null = null,
-  featureDocument: FeatureDocumentView | null = null
+  featureDocument: FeatureDocumentView | null = null,
+  projectBriefDocument: ProjectBriefDocumentView | null = null
 ): RunViewModel {
   const timeline = buildTimeline(detail.run, detail.events);
   return {
@@ -142,6 +146,7 @@ export function buildRunViewModel(
     escalation: buildEscalationBanner(detail.run, detail.events, detail.artifacts),
     releaseRoadmap,
     featureDocument,
+    projectBriefDocument,
   };
 }
 

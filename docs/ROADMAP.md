@@ -386,7 +386,7 @@ Esfuerzo.
 | FEATURE-041 — Creación y gestión de cuentas de usuario (self-service) | Alto | Alto | Alta |
 | FEATURE-042 — Creación, selección y configuración de proyectos (✅ Ejecutado, absorbe FEATURE-030) | Alto | Alto | Alta |
 | FEATURE-026 — Autenticación GitHub por usuario (✅ Ejecutado) | Alto | Medio | Alta |
-| FEATURE-033 — Lifecycle 01-PROJECT-BRIEF-TEMPLATE | Alto | Bajo | Media |
+| FEATURE-033 — Lifecycle 01-PROJECT-BRIEF-TEMPLATE (✅ Implementada, validada E2E, pendiente de merge) | Alto | Bajo | Alta |
 | FEATURE-034 — Lifecycle 02-ARCHITECTURE-TEMPLATE | Alto | Bajo | Media |
 | FEATURE-035 — Lifecycle 09-RELEASE-PLAN-TEMPLATE | Alto | Bajo | Media |
 | FEATURE-036 — Release activo nominal tras cierre (P1) | Bajo | Medio | Baja |
@@ -1217,13 +1217,20 @@ build, contrato de `COMANDO_TEST` y tests corrieron limpios, QA aprobó, y el ru
 escalamiento de merge. Evidencia real y específica de los tres componentes de la Feature actuando
 correctamente en secuencia sobre un run genuino con Docker y red real.
 
-### 🟡 FEATURE-033 — Lifecycle de `01-PROJECT-BRIEF-TEMPLATE`
+### ✅ FEATURE-033 — Lifecycle de `01-PROJECT-BRIEF-TEMPLATE`
 
-**Estado:** Confirmada; posterior a FEATURE-023 Parte 2, prioridad por definir.
+**Estado:** Implementada y validada E2E en vivo (VPS, 2026-08-16) — pendiente de merge a `main`
+por decisión del owner. Ver `docs/features/FEATURE-033-Lifecycle-canónico-de-Project-Brief-basado-en-el-Runbook.md`,
+sección 12 (Resultado de Validación E2E).
 
-Deberá definir rol creador, roles actualizadores, validación, persistencia DB, ubicación canónica
-en repo, versionado, lectura mediante FEATURE-022 y exposición en UI cuando corresponda. No se
-diseña en detalle en esta actualización.
+Persistencia de dominio propia (sin tabla polimórfica común con Feature/Architecture/Release Plan,
+Opción B / Nivel 2 según `docs/research/FEATURE-033-convergencia-lifecycle-documental-canonico.md`),
+sin revisiones append-only forzadas, ruta canónica ya fijada por FEATURE-023 Parte 2
+(`docs/project/PROJECT-BRIEF.md`, uno por proyecto), lectura vía FEATURE-022 sin cambios, e
+incorporación de `01-PROJECT-BRIEF-TEMPLATE.md` al catálogo obligatorio de `RunbookProvider`.
+Validado con un caso de negocio real de punta a punta (Architect → Project Brief materializado →
+Functional → Planning), sin regresión sobre FEATURE-023. Tres bugs de prompt engineering en
+`architect.txt` encontrados y corregidos durante la validación (detalle en el doc de la Feature).
 
 ### 🟡 FEATURE-034 — Lifecycle de `02-ARCHITECTURE-TEMPLATE`
 

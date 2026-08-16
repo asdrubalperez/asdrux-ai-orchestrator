@@ -8,6 +8,7 @@ import {
   CODING_STANDARDS_ASSET,
   DEFAULT_RUNBOOK_ROOT,
   FEATURE_TEMPLATE_ASSET,
+  PROJECT_BRIEF_TEMPLATE_ASSET,
   REQUIRED_RUNBOOK_ASSETS,
   RunbookProvider,
   RunbookProviderError,
@@ -22,6 +23,7 @@ async function fixture(version = "v1.0") {
   await writeFile(path.join(root, FEATURE_TEMPLATE_ASSET), "template\n", "utf8");
   await writeFile(path.join(root, TESTING_POLICY_ASSET), "testing policy\n", "utf8");
   await writeFile(path.join(root, CODING_STANDARDS_ASSET), "coding standards\n", "utf8");
+  await writeFile(path.join(root, PROJECT_BRIEF_TEMPLATE_ASSET), "project brief template\n", "utf8");
   return root;
 }
 
@@ -88,6 +90,7 @@ test("startup valida sólo el catálogo obligatorio actual", async () => {
     FEATURE_TEMPLATE_ASSET,
     TESTING_POLICY_ASSET,
     CODING_STANDARDS_ASSET,
+    PROJECT_BRIEF_TEMPLATE_ASSET,
   ]);
 });
 

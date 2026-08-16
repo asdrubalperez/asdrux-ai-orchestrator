@@ -10,6 +10,7 @@ import {
   Code,
   Compass,
   Copy,
+  Download,
   FileText,
   Loader2,
   Radio,
@@ -89,6 +90,29 @@ interface RunViewModel {
     complete: boolean;
     reason: "CONTENT_TOO_LARGE" | null;
   } | null;
+  /** FEATURE-033: documento canónico del Project Brief del proyecto, si Architect ya lo produjo. */
+  projectBriefDocument: {
+    projectId: string;
+    templateKey: string;
+    templateVersion: string;
+    path: string;
+    canonicalArtifactId: string;
+    materialized: boolean;
+    markdown: string | null;
+    complete: boolean;
+    reason: "CONTENT_TOO_LARGE" | null;
+  } | null;
+}
+
+/** FEATURE-033: helper puro y reusable — dispara la descarga del Markdown canónico en el navegador. */
+function downloadMarkdown(filename: string, markdown: string) {
+  const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 export function RunDetailPage() {
@@ -106,6 +130,7 @@ export function RunDetailPage() {
       {run ? (
         <>
           <RunOverview run={run} runId={runId} />
+          <ProjectBriefPanel document={run.projectBriefDocument} />
           <FeatureDocumentPanel document={run.featureDocument} />
           {run.escalation.isEscalated ? (
             <EscalationActionBanner run={run} projectId={params.projectId ?? ""} onRefresh={query.refresh} />
@@ -240,6 +265,70 @@ function FeatureDocumentPanel({ document }: { document: RunViewModel["featureDoc
             <Button variant="outline" onClick={() => void copy()} disabled={!document.markdown}>
               <Copy className="h-4 w-4" />
               Copiar
+            </Button>
+            <Button onClick={() => setOpen(false)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </section>
+  );
+}
+
+/**
+ * FEATURE-033: mismo lenguaje visual que `FeatureDocumentPanel` (card + Dialog + Copiar), sin
+ * tocar ese componente ya validado — panel dedicado, no una generalización forzada en este pase.
+ * Agrega "Descargar", ausente hoy en el panel de Feature.
+ */
+function ProjectBriefPanel({ document }: { document: RunViewModel["projectBriefDocument"] }) {
+  const [open, setOpen] = React.useState(false);
+
+  if (!document) return null;
+  const copy = async () => {
+    if (document.markdown) await navigator.clipboard.writeText(document.markdown);
+  };
+  const download = () => {
+    if (document.markdown) downloadMarkdown("PROJECT-BRIEF.md", document.markdown);
+  };
+
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <FileText className="mt-0.5 h-5 w-5 text-zinc-500" />
+          <div>
+            <h2 className="text-sm font-semibold">Project Brief</h2>
+            <p className="mt-1 text-xs text-zinc-500">
+              {document.materialized ? "materializado" : "no materializado"} · {document.path}
+            </p>
+          </div>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+          Ver documento
+        </Button>
+      </div>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Project Brief — Documento canónico</DialogTitle>
+            <DialogDescription>Template: {document.templateKey}@{document.templateVersion}.</DialogDescription>
+          </DialogHeader>
+          {document.markdown ? (
+            <pre className="max-h-[65vh] overflow-auto whitespace-pre-wrap rounded-md border border-zinc-200 bg-zinc-50 p-4 text-xs text-zinc-800">
+              {document.markdown}
+            </pre>
+          ) : (
+            <p className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              El documento supera 64 KiB. El contenido completo no está disponible en esta versión.
+            </p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => void copy()} disabled={!document.markdown}>
+              <Copy className="h-4 w-4" />
+              Copiar
+            </Button>
+            <Button variant="outline" onClick={download} disabled={!document.markdown}>
+              <Download className="h-4 w-4" />
+              Descargar .md
             </Button>
             <Button onClick={() => setOpen(false)}>Cerrar</Button>
           </DialogFooter>
