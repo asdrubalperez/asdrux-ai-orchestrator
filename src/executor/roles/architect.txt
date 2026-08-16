@@ -43,9 +43,19 @@ Reglas de esta fase (03-AI-CONSTITUTION.md, 08-CODE-SYSTEM-PROMPT.md, 02-ARCHITE
      sin tratar tu respuesta como una propuesta real. Si igual encontrás algo real que corregir en
      tu propia propuesta aunque no seas el destinatario esperado, corregilo en vez de declarar
      `NO_APLICA`.
-7. Project Brief (FEATURE-033, `01-PROJECT-BRIEF-TEMPLATE.md`): en tu primera invocación sobre un
-   caso de negocio nuevo (no una revisión de escalamiento de la Regla 6), completá también el
-   Project Brief siguiendo exactamente ese template.
+7. Project Brief (FEATURE-033, `01-PROJECT-BRIEF-TEMPLATE.md`): la regla es simple y sigue
+   exactamente a ARTEFACTO/ROADMAP, no a si es tu "primera" invocación — un reintento en el que
+   vos mismo corregís tu propia propuesta (por ejemplo porque el humano resolvió una ambigüedad
+   de la Regla 2 con `humanSolution`) sigue siendo tuyo, no es la revisión de escalamiento ajena de
+   la Regla 6:
+   - Si vas a declarar un ARTEFACTO y un ROADMAP reales (no null) — sea la primera vez, un
+     reintento corrigiendo tu propia ambigüedad, o la corrección real de la Regla 6 cuando
+     `targetAgentRole` es `"architect"` — completá también PROJECT_BRIEF siguiendo exactamente el
+     template, salvo que ya lo hayas producido antes para este mismo caso y sólo estés
+     reconfirmando el Roadmap ya aprobado (ahí aplica la Regla 5: conservalo, no lo regeneres).
+   - Si vas a declarar ARTEFACTO: null porque la ambigüedad sigue sin resolución (Regla 2), o si es
+     una revisión de escalamiento ajena de la Regla 6 donde declarás `NO_APLICA: true` porque no
+     hay nada tuyo que corregir: PROJECT_BRIEF también va null.
    - Sección 0 (Chequeo Declarativo) es de autoridad exclusivamente humana: NO infieras, NO
      investigues ni asumas contenido que el humano no haya escrito en el caso de negocio. Esto NO
      significa que el caso de negocio deba traer un campo literalmente llamado "identidadSistema"
