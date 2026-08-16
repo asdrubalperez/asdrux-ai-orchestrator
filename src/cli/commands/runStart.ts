@@ -94,7 +94,10 @@ import {
 import { sha256 } from "../../features/document.js";
 import { parseProjectBriefPayload } from "../../features/projectBriefContracts.js";
 import { materializeProjectBriefDocument, persistProjectBrief } from "../../features/projectBriefLifecycle.js";
+import { parseArchitecturePayload } from "../../features/architectureContracts.js";
+import { materializeArchitectureDocument, persistArchitecture } from "../../features/architectureLifecycle.js";
 import {
+  ARCHITECTURE_TEMPLATE_ASSET,
   CODING_STANDARDS_ASSET,
   defaultRunbookProvider,
   FEATURE_TEMPLATE_ASSET,
@@ -450,6 +453,17 @@ export async function executePipelineRun(params: {
               templateAsset: await runbookProvider.readText(PROJECT_BRIEF_TEMPLATE_ASSET),
             }
           : null;
+      // FEATURE-034: mismo criterio que Project Brief -- se persiste recién cuando Architect
+      // declara ESTADO: completed (Roadmap ya aprobado). ARCHITECTURE no trae el Roadmap (Rule 3
+      // del diseño), así que el gate de aprobación (ROADMAP:, extractRoadmapApproval) queda
+      // exactamente igual que antes de esta Feature.
+      const architectArchitecture =
+        invocation.agentRole === "architect" && result.status === "completed" && !isPass
+          ? {
+              payload: parseArchitecturePayload(result.outputArtifact),
+              templateAsset: await runbookProvider.readText(ARCHITECTURE_TEMPLATE_ASSET),
+            }
+          : null;
       const phaseFinishedEventId = await recordRunEvent(
         runId,
         "phase_finished",
@@ -518,6 +532,19 @@ export async function executePipelineRun(params: {
         // naturalmente en el primer commit real del run — mismo criterio que Feature, sin requerir
         // un paso de commit/push dedicado para este documento (fuera de alcance de F033).
         await materializeProjectBriefDocument({ projectId, worktreePath: worktree.worktreePath });
+      }
+
+      if (architectArchitecture) {
+        await persistArchitecture({
+          projectId,
+          runId,
+          phaseFinishedEventId,
+          payload: architectArchitecture.payload,
+          templateAsset: architectArchitecture.templateAsset,
+        });
+        // Mismo criterio que Project Brief: se materializa ya en esta fase para que
+        // docs/architecture/ARCHITECTURE.md viaje en el primer commit real del run.
+        await materializeArchitectureDocument({ projectId, worktreePath: worktree.worktreePath });
       }
 
       previousResult = result;

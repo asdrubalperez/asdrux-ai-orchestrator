@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type {
   DeveloperImplementationPayload,
   DeveloperReadinessPayload,
@@ -7,6 +6,10 @@ import type {
   QaResultPayload,
 } from "./contracts.js";
 import type { RunbookTextAsset } from "../runbook/runbookProvider.js";
+import { normalizeLf, sha256 } from "./canonicalDocument.js";
+
+/** FEATURE-034: re-exportadas desde `canonicalDocument.ts` -- mantiene sin cambios a todo lo que ya importaba estos símbolos desde acá. */
+export { normalizeLf, sha256 };
 
 export const FEATURE_TEMPLATE_KEY = "runbook-feature";
 export const FEATURE_TEMPLATE_VERSION = "v1.0";
@@ -201,14 +204,6 @@ export function asciiSlug(value: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .replace(/-+/g, "-");
-}
-
-export function sha256(value: string | Buffer): string {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-export function normalizeLf(value: string): string {
-  return value.replace(/\r\n?/g, "\n").replace(/\n*$/, "\n");
 }
 
 function bullets(items: string[]): string[] {

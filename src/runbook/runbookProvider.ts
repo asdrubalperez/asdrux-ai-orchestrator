@@ -15,12 +15,19 @@ export const CODING_STANDARDS_ASSET = "05-CODING-STANDARDS.md";
  * ya usa Functional para Feature.
  */
 export const PROJECT_BRIEF_TEMPLATE_ASSET = "01-PROJECT-BRIEF-TEMPLATE.md";
+/**
+ * FEATURE-034 (mismo patrón de FEATURE-033 Rule 7/9 de FEATURE-023 Parte 2): Architect es dueño
+ * de Architecture; el template se incorpora al catálogo obligatorio y hereda la validación previa
+ * a persistencia documental.
+ */
+export const ARCHITECTURE_TEMPLATE_ASSET = "02-ARCHITECTURE-TEMPLATE.md";
 export const REQUIRED_RUNBOOK_ASSETS = Object.freeze([
   RUNBOOK_VERSION_ASSET,
   FEATURE_TEMPLATE_ASSET,
   TESTING_POLICY_ASSET,
   CODING_STANDARDS_ASSET,
   PROJECT_BRIEF_TEMPLATE_ASSET,
+  ARCHITECTURE_TEMPLATE_ASSET,
 ]);
 export const SUPPORTED_RUNBOOK_VERSIONS = Object.freeze(["v1.0"]);
 
