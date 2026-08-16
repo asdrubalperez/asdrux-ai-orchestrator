@@ -6,7 +6,7 @@
 * Type: Arquitectura / Workflow / Persistencia documental / UI
 * Owner: Asdru — Product Owner
 * Implementation Owner: DAIA
-* Status: Diseño aprobado — GO para Development
+* Status: Implementada y validada E2E en vivo (VPS) — pendiente de merge a `main` por decisión del owner
 * Priority: según ROADMAP vigente
 * Playbook Mode: Standard
 * Template de gobernanza: `docs/playbook/07-FEATURE-TEMPLATE.md`
@@ -570,3 +570,55 @@ Nivel recomendado: L3 dirigido. No L4 ni regresión masiva.
 **GO — aprobado para Development**, tras revisión que confirmó la matriz de riesgo exacta contra
 el Runbook y agregó D11/Rule 18 para prevenir en diseño el mismo bug real que F033 encontró en
 producción (Project Brief `null` en un reintento legítimo).
+
+## 11. Resultado de Validación E2E
+
+**Fecha:** 2026-08-16. **Rama:** `feature/FEATURE-034-architecture-lifecycle`. **Entorno:** VPS
+real (`asdru@179.197.79.99`, servicio `ai-orchestrator.service`, Postgres real vía Docker), caso
+de negocio real corrido por el owner a través del frontend en Vercel.
+
+### Qué se validó
+
+Con un caso de negocio real, el flujo corrió de punta a punta sin necesidad de iterar sobre bugs
+de prompt (a diferencia de F033) — la Rule 18 agregada en la revisión de diseño previno en el
+primer intento el bug que en F033 recién se encontró en producción:
+
+1. Architect declaró `ARCHITECTURE` junto con `ROADMAP` en la propuesta inicial escalada
+   (verificado antes de aprobar, como pedía el plan de prueba).
+2. El owner aprobó el Roadmap; Architect reingresó con `ESTADO: completed`, conservando el mismo
+   `ARCHITECTURE` ya propuesto (Rule 18/Scenario 3).
+3. `persistArchitecture` se disparó correctamente; §0 del documento canónico coincide exactamente
+   con el Roadmap aprobado por el humano (Scenario 4), sin una segunda copia divergente del
+   modelo (Scenario 5).
+4. El documento quedó materializado en `docs/architecture/ARCHITECTURE.md`; contenido íntegro (5
+   secciones, tabla de riesgos con severidad correctamente derivada — Medio+Alto→Alta, Bajo+Medio→Baja,
+   confirmando la matriz también en producción, no sólo en tests).
+5. El panel "Architecture" apareció en el Run Detail junto a Project Brief, con
+   Ver/Copiar/Descargar funcionando.
+6. El pipeline continuó **sin regresión** a través de Functional, Planning, Developer y QA hasta
+   el gate de aprobación de merge (Modo Manual) — evidencia más profunda que la validación de
+   F033, que no había llegado tan lejos en el pipeline.
+7. Project Brief (F033) siguió funcionando sin cambios (Scenario 17), visible en el mismo Run
+   Detail junto a Architecture y Feature.
+
+El owner decidió no aprobar el merge de esta corrida de prueba (no aportaba evidencia adicional
+relevante para el alcance de F034) — la validación se dio por completa en el paso 6.
+
+### Bug encontrado y corregido durante la validación en vivo
+
+Uno solo, cosmético — la infraestructura documental funcionó correctamente desde el primer
+intento gracias a Rule 18/D11 haber sido incorporadas en el diseño antes de implementar:
+
+1. **Inconsistencia de texto entre paneles.** El botón del panel de Feature decía "Ver documento
+   de Feature" (texto original de FEATURE-023, previo a que existieran otros paneles de
+   documento), mientras Project Brief y Architecture dicen sólo "Ver documento" — el título de la
+   card ya identifica de qué documento se trata. **Fix:** unificado a "Ver documento" en los tres
+   paneles. Sin tests que dependieran del texto anterior.
+
+### Conclusión
+
+FEATURE-034 queda validada end-to-end contra infraestructura real, con evidencia de pipeline
+completo (incluido Developer/QA) y sin regresión sobre FEATURE-023/FEATURE-033. La regla agregada
+en la revisión de diseño (Rule 18/D11) demostró su valor: el bug que en F033 recién se detectó en
+producción no se repitió acá porque ya estaba prevenido en el diseño. Pendiente de decisión del
+owner sobre el merge a `main`.
