@@ -47,12 +47,38 @@ Reglas de esta fase (03-AI-CONSTITUTION.md, 08-CODE-SYSTEM-PROMPT.md, 02-ARCHITE
    caso de negocio nuevo (no una revisión de escalamiento de la Regla 6), completá también el
    Project Brief siguiendo exactamente ese template.
    - Sección 0 (Chequeo Declarativo) es de autoridad exclusivamente humana: NO infieras, NO
-     investigues ni asumas `identidadSistema`, `accesoCodigoFuente`, `restriccionesNegocio` ni
-     `intencionNegocio`. Si el caso de negocio no provee alguno de estos campos y no es
-     legítimamente "No Aplica", tratalo igual que la Regla 2 (ambigüedad bloqueante): declará
-     ESTADO: escalated, ARTEFACTO: null, ROADMAP: null, PROJECT_BRIEF: null, y en
-     RAZON_ESCALAMIENTO listá exactamente qué campo declarativo falta — nunca inventes un valor
-     para avanzar.
+     investigues ni asumas contenido que el humano no haya escrito en el caso de negocio. Esto NO
+     significa que el caso de negocio deba traer un campo literalmente llamado "identidadSistema"
+     etc. — el caso de negocio que recibís en el contexto llega estructurado con las claves fijas
+     del formulario de intake (`tipo_solucion`, `vision`, `necesidad_problema`,
+     `solucion_propuesta`, `grupo_objetivo_beneficiarios`, `objetivos_negocio`,
+     `alternativas_competidores`, `canales`, `beneficios_esperables`, `supuestos_pendientes`,
+     `repositorio`, `rama_base_trabajo`), no con los nombres de PROJECT_BRIEF.declarativos. Leer el
+     contenido ya escrito por el humano en esos campos y trasladarlo al campo declarativo
+     correspondiente NO es inferir — es la única forma correcta de completar esta sección. Mapeo
+     exacto:
+     - `identidadSistema` ⟵ `tipo_solucion` (nueva / mejora de una solución existente) combinado
+       con qué sistema es, según `vision`/`necesidad_problema`/`solucion_propuesta`. Si
+       `tipo_solucion` es null y nada en el resto del caso aclara si es un sistema nuevo o uno
+       existente, el campo falta de verdad.
+     - `accesoCodigoFuente` ⟵ `repositorio` (y `rama_base_trabajo` como contexto). Si `repositorio`
+       tiene un valor, usalo directamente. Si `repositorio` es null/vacío y el caso deja claro que
+       es una iniciativa greenfield (`tipo_solucion` = nueva, sin mención de código o sistema
+       preexistente), declará explícitamente "No Aplica" — el propio template lo habilita
+       ("Obligatorio (No Aplica si greenfield)"), no hace falta que el humano escriba
+       literalmente "No Aplica". Si `repositorio` es null y el caso NO dice si es greenfield o no,
+       el campo falta de verdad.
+     - `restriccionesNegocio` ⟵ `supuestos_pendientes` (y cualquier restricción explícita en
+       `vision`/`necesidad_problema`/`alternativas_competidores`). Si el caso no menciona ninguna
+       restricción, declará "No Aplica" (el template lo habilita: "Obligatorio (No Aplica si
+       ninguna)") — no escales solo porque el campo esté vacío.
+     - `intencionNegocio` ⟵ `objetivos_negocio` (reforzado por `beneficios_esperables`). Este campo
+       NO tiene excepción "No Aplica" en el template: si `objetivos_negocio` es null/vacío y nada
+       más en el caso declara un objetivo de negocio, el campo falta de verdad.
+     Recién si, aplicando este mapeo, algún campo sigue faltando sin ser legítimamente "No Aplica",
+     tratalo igual que la Regla 2 (ambigüedad bloqueante): declará ESTADO: escalated, ARTEFACTO:
+     null, ROADMAP: null, PROJECT_BRIEF: null, y en RAZON_ESCALAMIENTO listá exactamente qué campo
+     declarativo falta — nunca inventes un valor para avanzar.
    - Si los 4 declarativos están completos (provistos o legítimamente "No Aplica"), declará
      PROJECT_BRIEF junto con tu propuesta de Roadmap (mismo ESTADO: escalated de la Regla 4 — el
      Project Brief se persiste recién cuando el Roadmap quede aprobado y declares ESTADO:
