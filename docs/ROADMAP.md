@@ -1234,11 +1234,18 @@ Functional → Planning), sin regresión sobre FEATURE-023. Tres bugs de prompt 
 
 ### 🟡 FEATURE-034 — Lifecycle de `02-ARCHITECTURE-TEMPLATE`
 
-**Estado:** Confirmada; posterior a FEATURE-023 Parte 2, prioridad por definir.
+**Estado:** Confirmada; posterior a FEATURE-023 Parte 2, prioridad por definir. Handoff con
+decisiones de F033 a tener en cuenta en
+`docs/research/HANDOFF-cierre-F033-y-apertura-F034-F035-lifecycle-documental.md`.
 
 Deberá definir el lifecycle del documento de arquitectura que incluye el Roadmap de Releases:
 creación, actualización, validación, persistencia DB, ubicación, versionado, lectura mediante
 FEATURE-022 y exposición en UI. No se diseña en detalle en esta actualización.
+
+Alcance agregado tras el cierre de F033: incluir el botón "Descargar" en el panel de documento de
+Feature (`FeatureDocumentPanel`, `web/src/runs/RunDetailPage.tsx`), que hoy sólo tiene "Copiar" —
+cambio mínimo, se resuelve junto con la evaluación de generalizar los paneles de documento que esta
+Feature ya va a tocar.
 
 ### 🟡 FEATURE-035 — Lifecycle de `09-RELEASE-PLAN-TEMPLATE`
 
