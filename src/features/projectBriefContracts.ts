@@ -15,6 +15,13 @@ import {
  * Regla 2 existente de architect.txt — este contrato nunca representa un Project Brief con
  * declarativos inventados.
  */
+/**
+ * Wording de referencia tal como aparece en `01-PROJECT-BRIEF-TEMPLATE.md` §2 — se le pasa
+ * literalmente a Architect en `architect.txt` para que la copie, pero el parser NO exige
+ * coincidencia exacta de texto (ver `parseProjectBriefPayload`): distintos modelos/proveedores
+ * parafrasean aunque se les dé el texto exacto, y esa redacción no es dato funcional — sólo importa
+ * que haya exactamente 8 ítems, sin duplicados, cada uno con un estado válido del template.
+ */
 export const EVALUACION_PRELIMINAR_ITEMS = Object.freeze([
   "Reutiliza componentes o servicios ya existentes en el proyecto",
   "Introduce integraciones nuevas con sistemas externos",
@@ -25,6 +32,7 @@ export const EVALUACION_PRELIMINAR_ITEMS = Object.freeze([
   "Impacta procesos críticos / alta disponibilidad requerida",
   "Expone algo nuevo a Internet / superficie de ataque nueva",
 ]);
+export const EVALUACION_PRELIMINAR_ITEM_COUNT = EVALUACION_PRELIMINAR_ITEMS.length;
 
 export const EVALUACION_ESTADOS = ["Sí", "No", "Parcial", "No Aplica"] as const;
 export type EvaluacionEstado = (typeof EVALUACION_ESTADOS)[number];
@@ -91,16 +99,14 @@ export function parseProjectBriefPayload(outputArtifact: unknown): ProjectBriefP
   const evaluacionPreliminar = arrayAt(value.evaluacionPreliminar, "PROJECT_BRIEF.evaluacionPreliminar").map(
     (item, index) => parseEvaluacionItem(item, index)
   );
-  const declaredItems = new Set(evaluacionPreliminar.map((item) => item.item));
-  if (declaredItems.size !== EVALUACION_PRELIMINAR_ITEMS.length) {
+  if (evaluacionPreliminar.length !== EVALUACION_PRELIMINAR_ITEM_COUNT) {
     throw new Error(
-      `PROJECT_BRIEF.evaluacionPreliminar debe declarar exactamente los ${EVALUACION_PRELIMINAR_ITEMS.length} ítems del template, sin duplicados.`
+      `PROJECT_BRIEF.evaluacionPreliminar debe declarar exactamente ${EVALUACION_PRELIMINAR_ITEM_COUNT} ítems (uno por cada fila fija del template).`
     );
   }
-  for (const required of EVALUACION_PRELIMINAR_ITEMS) {
-    if (!declaredItems.has(required)) {
-      throw new Error(`PROJECT_BRIEF.evaluacionPreliminar falta el ítem requerido: "${required}".`);
-    }
+  const declaredItems = new Set(evaluacionPreliminar.map((item) => item.item.trim().toLowerCase()));
+  if (declaredItems.size !== EVALUACION_PRELIMINAR_ITEM_COUNT) {
+    throw new Error("PROJECT_BRIEF.evaluacionPreliminar tiene ítems duplicados.");
   }
 
   if (!COMPLEJIDAD_NIVELES.includes(value.complejidadTecnica as ComplejidadNivel)) {

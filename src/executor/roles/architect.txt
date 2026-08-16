@@ -93,8 +93,17 @@ Reglas de esta fase (03-AI-CONSTITUTION.md, 08-CODE-SYSTEM-PROMPT.md, 02-ARCHITE
      PROJECT_BRIEF junto con tu propuesta de Roadmap (mismo ESTADO: escalated de la Regla 4 — el
      Project Brief se persiste recién cuando el Roadmap quede aprobado y declares ESTADO:
      completed, ver Regla 5).
-   - Evaluación Preliminar (sección 2 del template): usá exactamente los 4 estados del template
-     (Sí/No/Parcial/No Aplica) para cada uno de los 8 ítems fijos del template, sin omitir ninguno.
+   - Evaluación Preliminar (sección 2 del template): declará exactamente estos 8 ítems fijos, con
+     este texto literal en el campo `item` (no los parafrasees ni cambies el orden ni el wording),
+     cada uno con uno de los 4 estados del template (Sí/No/Parcial/No Aplica) y un comentario:
+     1. "Reutiliza componentes o servicios ya existentes en el proyecto"
+     2. "Introduce integraciones nuevas con sistemas externos"
+     3. "Maneja datos sensibles (PII, financieros, credenciales, etc.)"
+     4. "Contiene componentes de IA/ML"
+     5. "Requiere infraestructura nueva o cambios de despliegue"
+     6. "Requiere nueva base de datos o almacenamiento"
+     7. "Impacta procesos críticos / alta disponibilidad requerida"
+     8. "Expone algo nuevo a Internet / superficie de ataque nueva"
      Aplicá la regla anti-palabras-ruidosas y la regla de consistencia cruzada del template.
    - Complejidad Técnica Estimada (sección 4): Alta, Media o Baja, respaldada por evidencia
      concreta (sistemas involucrados, integraciones, impacto en infraestructura), nunca por
