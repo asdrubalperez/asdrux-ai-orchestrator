@@ -387,7 +387,7 @@ Esfuerzo.
 | FEATURE-042 — Creación, selección y configuración de proyectos (✅ Ejecutado, absorbe FEATURE-030) | Alto | Alto | Alta |
 | FEATURE-026 — Autenticación GitHub por usuario (✅ Ejecutado) | Alto | Medio | Alta |
 | FEATURE-033 — Lifecycle 01-PROJECT-BRIEF-TEMPLATE (✅ Implementada, validada E2E, pendiente de merge) | Alto | Bajo | Alta |
-| FEATURE-034 — Lifecycle 02-ARCHITECTURE-TEMPLATE | Alto | Bajo | Media |
+| FEATURE-034 — Lifecycle 02-ARCHITECTURE-TEMPLATE (✅ Implementada, validada E2E, pendiente de merge) | Alto | Bajo | Alta |
 | FEATURE-035 — Lifecycle 09-RELEASE-PLAN-TEMPLATE | Alto | Bajo | Media |
 | FEATURE-036 — Release activo nominal tras cierre (P1) | Bajo | Medio | Baja |
 | FEATURE-029 — Contrato build output / COMANDO_TEST (P1) | Bajo | Bajo | Baja |
@@ -1232,20 +1232,23 @@ Validado con un caso de negocio real de punta a punta (Architect → Project Bri
 Functional → Planning), sin regresión sobre FEATURE-023. Tres bugs de prompt engineering en
 `architect.txt` encontrados y corregidos durante la validación (detalle en el doc de la Feature).
 
-### 🟡 FEATURE-034 — Lifecycle de `02-ARCHITECTURE-TEMPLATE`
+### ✅ FEATURE-034 — Lifecycle de `02-ARCHITECTURE-TEMPLATE`
 
-**Estado:** Confirmada; posterior a FEATURE-023 Parte 2, prioridad por definir. Handoff con
-decisiones de F033 a tener en cuenta en
-`docs/research/HANDOFF-cierre-F033-y-apertura-F034-F035-lifecycle-documental.md`.
+**Estado:** Implementada y validada E2E en vivo (VPS, 2026-08-16) — pendiente de merge a `main`
+por decisión del owner. Ver
+`docs/features/FEATURE-034-Lifecycle-canónico-de-Architecture-basado-en-el-Runbook.md`, sección 11
+(Resultado de Validación E2E).
 
-Deberá definir el lifecycle del documento de arquitectura que incluye el Roadmap de Releases:
-creación, actualización, validación, persistencia DB, ubicación, versionado, lectura mediante
-FEATURE-022 y exposición en UI. No se diseña en detalle en esta actualización.
+Lifecycle del documento de arquitectura (persistencia propia, sin `architecture_revisions` en v1),
+con el Roadmap de Releases compuesto en el renderer desde `project_config_versions.release_roadmap`
+ya aprobado — el circuito de aprobación existente (`extractRoadmapApproval`,
+`classifyGateEscalation`) no se tocó. Se extrajeron `sha256`/`normalizeLf` a un módulo neutral
+(`canonicalDocument.ts`) ahora que hay 3 consumidores reales. Validado con pipeline completo real
+hasta el gate de aprobación de merge (Developer/QA incluidos), sin regresión sobre
+FEATURE-023/FEATURE-033.
 
-Alcance agregado tras el cierre de F033: incluir el botón "Descargar" en el panel de documento de
-Feature (`FeatureDocumentPanel`, `web/src/runs/RunDetailPage.tsx`), que hoy sólo tiene "Copiar" —
-cambio mínimo, se resuelve junto con la evaluación de generalizar los paneles de documento que esta
-Feature ya va a tocar.
+Incluyó el botón "Descargar" en el panel de documento de Feature (`FeatureDocumentPanel`,
+`web/src/runs/RunDetailPage.tsx`), agregado tras el cierre de F033.
 
 ### 🟡 FEATURE-035 — Lifecycle de `09-RELEASE-PLAN-TEMPLATE`
 
