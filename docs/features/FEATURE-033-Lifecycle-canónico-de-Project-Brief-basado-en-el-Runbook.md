@@ -6,7 +6,7 @@
 * Type: Arquitectura / Workflow / Persistencia documental / UI
 * Owner: Asdru — Product Owner
 * Implementation Owner: DAIA
-* Status: Diseño propuesto — pendiente de Approval Gate
+* Status: Implementada y validada E2E en vivo (VPS) — pendiente de merge a `main` por decisión del owner
 * Priority: A confirmar/mantener según ROADMAP vigente
 * Playbook Mode: Standard
 * Template de gobernanza: `docs/playbook/07-FEATURE-TEMPLATE.md`
@@ -725,3 +725,77 @@ F033 incorpora `01-PROJECT-BRIEF-TEMPLATE.md` al catálogo obligatorio de `Runbo
 ### Estado
 
 **GO — aprobado para Development**, tras revisión y ajuste de scope (incorporación al catálogo obligatorio del Runbook, sección 4.14 / Rule 16 / Risk R8 / Scenario 15).
+
+## 12. Resultado de Validación E2E
+
+**Fecha:** 2026-08-16. **Rama:** `feature/FEATURE-033-project-brief-lifecycle`. **Entorno:** VPS
+real (`asdru@179.197.79.99`, servicio `ai-orchestrator.service`, Postgres real vía Docker), casos
+de negocio reales corridos por el owner a través del frontend en Vercel.
+
+### Qué se validó
+
+Con un caso de negocio real (módulo de cálculo de propinas, greenfield, TypeScript), el flujo
+completo corrió de punta a punta:
+
+1. Architect declaró `PROJECT_BRIEF` junto con `ARTEFACTO`/`ROADMAP` en la propuesta escalada.
+2. El owner aprobó el Roadmap; Architect reingresó, declaró `ESTADO: completed` conservando el
+   mismo Project Brief, y se disparó `persistProjectBrief` (Scenario 1).
+3. El documento quedó materializado en `docs/project/PROJECT-BRIEF.md` con contenido idéntico al
+   canónico (Scenario 8), verificado por archivo descargado.
+4. El panel "Project Brief" apareció en el Run Detail con Ver/Copiar/Descargar funcionando
+   (Scenarios 9, 10, 11).
+5. El pipeline continuó sin regresión a través de Functional (generó su propia Feature vía
+   FEATURE-023) y Planning, sin que el panel ni el lifecycle de Feature se vieran afectados
+   (Scenario 13).
+6. Verificación directa en DB (`project_briefs`, `artifacts.kind = 'project_brief_document'`)
+   confirmó persistencia real, no sólo apariencia en UI.
+
+No se llegó a ejecutar Developer/QA en esta corrida (el owner dio por validado el objetivo antes
+de eso, tras confirmar que los releases del proyecto de prueba ya estaban completos) — fuera de
+alcance de F033 de todas formas (F033 no depende de Developer/QA).
+
+### Bugs encontrados y corregidos durante la validación en vivo
+
+Los tres fueron bugs de *prompt engineering* en `src/executor/roles/architect.txt` (Regla 7),
+no de la infraestructura de persistencia/UI, que funcionó correctamente desde el primer intento:
+
+1. **Gate declarativo sobre-escalaba siempre.** La Regla 7 original le pedía a Architect resolver
+   `identidadSistema`/`accesoCodigoFuente`/`restriccionesNegocio`/`intencionNegocio` sin decirle
+   que el caso de negocio llega con las claves reales del formulario de intake
+   (`tipo_solucion`, `vision`, `repositorio`, `objetivos_negocio`, etc.), no con esos nombres.
+   Escalaba pidiendo los 4 campos aunque estuvieran completos. **Fix:** mapeo explícito campo a
+   campo agregado a la Regla 7, incluyendo cuándo "No Aplica" es una lectura legítima (greenfield,
+   sin restricciones) en vez de una escalación.
+2. **`PROJECT_BRIEF` quedaba `null` en un reintento legítimo.** Al resolver una ambigüedad de
+   Regla 2 con `humanSolution`, el reintento-en-el-mismo-run se interpretó como "no es mi primera
+   invocación" y quedó excluido de la Regla 7, pese a que el modelo sí declaraba
+   `ARTEFACTO`/`ROADMAP` reales — el Roadmap llegó a la aprobación humana sin Project Brief
+   adjunto. **Fix:** la regla ahora sigue exactamente a si `ARTEFACTO`/`ROADMAP` son reales o
+   `null`, no a un concepto ambiguo de "primera invocación".
+3. **Validación de `evaluacionPreliminar` exigía texto literal que Architect no tenía cómo copiar.**
+   El parser (`projectBriefContracts.ts`) exigía que los 8 ítems de la Evaluación Preliminar
+   coincidieran palabra por palabra con el texto que se había copiado del template al parser, pero
+   `architect.txt` no le daba a Architect ese texto exacto — el modelo generaba su propia
+   redacción equivalente y el run fallaba con `run_error`. **Fix:** se le dio a Architect el texto
+   literal de los 8 ítems en el prompt (para que tienda a copiarlo), y el parser se relajó para
+   exigir sólo cardinalidad (8 ítems), estados válidos y ausencia de duplicados — el wording del
+   ítem no es dato funcional.
+
+Los tres commits de fix están en la misma rama, cada uno con su propio mensaje describiendo el
+hallazgo. Ningún fix tocó `features`/`feature_revisions` ni el comportamiento ya validado de
+FEATURE-023.
+
+### Hallazgos fuera de alcance, anotados aparte (no bloquean esta Feature)
+
+* El panel de documento de Feature (`FeatureDocumentPanel`) no tiene botón "Descargar", sólo
+  "Copiar" — a diferencia del panel nuevo de Project Brief. Anotado como tarea de seguimiento
+  (paridad de UI), deliberadamente no resuelto acá para no tocar el panel de Feature ya validado.
+* `accesoCodigoFuente` salió "No Aplica" en ambas corridas pese a que la segunda tenía un
+  repositorio real configurado a nivel de proyecto — no es un contrato roto (No Aplica sigue
+  siendo una respuesta legítima), pero no usa el dato disponible al máximo. Menor, sin ticket
+  abierto todavía.
+
+### Conclusión
+
+FEATURE-033 queda validada end-to-end contra infraestructura real, sin regresión sobre
+FEATURE-023. Pendiente de decisión del owner sobre el merge a `main`.
