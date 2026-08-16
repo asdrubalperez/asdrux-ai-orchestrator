@@ -257,7 +257,7 @@ function FeatureDocumentPanel({ document }: { document: RunViewModel["featureDoc
           </div>
         </div>
         <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-          Ver documento de Feature
+          Ver documento
         </Button>
       </div>
       <Dialog open={open} onOpenChange={setOpen}>
