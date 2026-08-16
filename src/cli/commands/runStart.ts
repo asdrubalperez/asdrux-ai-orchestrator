@@ -92,10 +92,13 @@ import {
   recordFeaturePush,
 } from "../../features/lifecycle.js";
 import { sha256 } from "../../features/document.js";
+import { parseProjectBriefPayload } from "../../features/projectBriefContracts.js";
+import { materializeProjectBriefDocument, persistProjectBrief } from "../../features/projectBriefLifecycle.js";
 import {
   CODING_STANDARDS_ASSET,
   defaultRunbookProvider,
   FEATURE_TEMPLATE_ASSET,
+  PROJECT_BRIEF_TEMPLATE_ASSET,
   TESTING_POLICY_ASSET,
   type RunbookProvider,
   type RunbookTextAsset,
@@ -437,6 +440,16 @@ export async function executePipelineRun(params: {
               templateAsset: await runbookProvider.readText(FEATURE_TEMPLATE_ASSET),
             }
           : null;
+      // FEATURE-033: Project Brief se persiste recién cuando Architect declara ESTADO: completed
+      // (Roadmap ya aprobado, Regla 5 de architect.txt) — no en la propuesta inicial escalada
+      // (Regla 4), que sólo pide aprobación humana del roadmap todavía.
+      const architectProjectBrief =
+        invocation.agentRole === "architect" && result.status === "completed" && !isPass
+          ? {
+              payload: parseProjectBriefPayload(result.outputArtifact),
+              templateAsset: await runbookProvider.readText(PROJECT_BRIEF_TEMPLATE_ASSET),
+            }
+          : null;
       const phaseFinishedEventId = await recordRunEvent(
         runId,
         "phase_finished",
@@ -490,6 +503,21 @@ export async function executePipelineRun(params: {
           payload: functionalBatch.payload,
           templateAsset: functionalBatch.templateAsset,
         });
+      }
+
+      if (architectProjectBrief) {
+        await persistProjectBrief({
+          projectId,
+          runId,
+          phaseFinishedEventId,
+          payload: architectProjectBrief.payload,
+          templateAsset: architectProjectBrief.templateAsset,
+        });
+        // Se materializa ya en esta fase (aunque Architect en sí mismo sea read-only) para que
+        // docs/project/PROJECT-BRIEF.md quede en el worktree antes de Functional/Developer, y viaje
+        // naturalmente en el primer commit real del run — mismo criterio que Feature, sin requerir
+        // un paso de commit/push dedicado para este documento (fuera de alcance de F033).
+        await materializeProjectBriefDocument({ projectId, worktreePath: worktree.worktreePath });
       }
 
       previousResult = result;
