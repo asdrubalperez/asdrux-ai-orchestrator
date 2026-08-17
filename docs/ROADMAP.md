@@ -66,6 +66,7 @@
 - Capa de UI — Historial/admin
 - Notificación Slack/webhook complementaria
 - Limpieza de persistencia de código versionado
+- Copy del modal de escalamiento no distingue Gate de ambigüedad real
 
 ---
 
@@ -1382,6 +1383,19 @@ Evaluada en la misma sesión que "Run en curso" como alternativa de monitoreo �
 primera opción porque, a esfuerzo comparable, una UI mínima de solo lectura daba más valor y era
 reusable hacia la Capa de UI completa. Queda como complemento futuro si hace falta alertas push
 (fase completada/fallida) fuera de cuando alguien está mirando la UI activamente.
+
+### ⚪ Copy del modal de escalamiento no distingue Gate de ambigüedad real
+Detectado en revisión de Roadmap (2026-08-17). Un único modal genérico
+(`EscalationResponseDialog`, `web/src/runs/RunDetailPage.tsx`) atiende **todo** tipo de
+escalamiento — tanto ambigüedades reales de un rol como los Approval Gates
+(`classifyGateEscalation`: aprobación de Roadmap, aprobación de merge, cierre de release) — con
+pregunta y botones hardcodeados sin importar el motivo: *"¿Deseas que el agente continúe con
+indicaciones tuyas?"* con botones **No**/**Sí**.
+
+Para una ambigüedad real el copy encaja ("Sí, continuá con esto" / "No, abortar"). Para un Gate no
+representa la decisión real que se está tomando — aprobar un Roadmap o autorizar un merge no es
+"continuar con indicaciones", es aprobar o rechazar. El modal no distingue por `motive` ni por si
+el escalamiento es un Gate para adaptar pregunta/etiquetas de botones.
 
 ### ✅ FEATURE-024 (antes FEATURE-023, antes FEATURE-022, antes FEATURE-021, antes FEATURE-019, antes FEATURE-018, antes FEATURE-017,
 antes FEATURE-014) — Milestone 2 — Validación end-to-end con caso de negocio real
