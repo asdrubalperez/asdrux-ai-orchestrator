@@ -43,6 +43,34 @@ type Contribution =
   | { purpose: "qa-result"; sectionKey: "qa_result"; operation: "record_qa_result"; content: QaResultPayload }
   | { purpose: "developer-readiness"; sectionKey: "developer_readiness"; operation: "record_readiness"; content: DeveloperReadinessPayload };
 
+/**
+ * Fix (2026-08-17), hallazgo en vivo: cuando el reingreso cross-pipeline a Architect (por una
+ * ambigüedad de Regla 2 que Architect mismo resuelve) termina con Architect declarando
+ * ESTADO: completed y una propuesta fresca, la fase Functional que sigue recibe esa propuesta por
+ * el camino NORMAL (functionalArtifact), no por el camino de reingreso con
+ * `escalationReason`/`targetAgentRole` -- así que la Regla 5 de functional.txt ("declará solo lo
+ * que estás corrigiendo") nunca se activa, y la Regla 4 ("primera invocación, batch completo")
+ * hace que Functional redeclare TODAS las Features del release, incluidas las que ya fueron
+ * activadas e implementadas en un run anterior de este mismo release -- disparando el guard de
+ * `persistFunctionalFeatureBatch` ("FEATURE-001 ya fue activada") en un loop, porque Functional no
+ * tenía ninguna forma de saber que esas Features ya existían. Mismo patrón que
+ * `existingRoadmapApproval`/`existingTestingPolicyConfig` para Architect: se le da a Functional la
+ * lista de Features ya activadas para el release actual como dato explícito, en vez de esperar que
+ * lo infiera de la conversación.
+ */
+export async function getActivatedFeatureIdentities(
+  projectId: string,
+  releaseKey: string
+): Promise<Array<{ sourceKey: string; name: string }>> {
+  const result = await pool.query<{ source_key: string; name: string }>(
+    `select source_key, name from features
+     where project_id = $1 and release_key = $2 and activated_at is not null
+     order by created_at asc`,
+    [projectId, releaseKey]
+  );
+  return result.rows.map((row) => ({ sourceKey: row.source_key, name: row.name }));
+}
+
 export async function persistFunctionalFeatureBatch(params: {
   projectId: string;
   runId: string;

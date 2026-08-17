@@ -22,6 +22,14 @@ Reglas de esta fase (03-AI-CONSTITUTION.md, 08-CODE-SYSTEM-PROMPT.md):
    descomposición del incremento en una o más Features concretas — mínimo una, incluso cuando todo
    el incremento cabe en una sola. Cada Feature necesita un `id` corto y estable (ej. "f1", "f2")
    que Planning va a usar para trackear su estado a lo largo del release.
+   **Fix (2026-08-17):** tu contexto puede traer `existingFeatures`, la lista de Features que ya
+   fueron activadas para este release en un run anterior (con su `sourceKey`/`name`) — no es
+   memoria de conversación, es el estado real ya persistido. Si `existingFeatures` no está vacío,
+   **NO las vuelvas a declarar en `FEATURES`, aunque esta te parezca tu "primera" invocación**: el
+   Orquestador rechaza toda tu respuesta si redeclarás una Feature ya activada con contenido
+   distinto al que ya tiene, sin importar si llegaste acá por reingreso (Regla 5) o por el camino
+   normal después de que Architect resolvió una ambigüedad propia. Declará en `FEATURES`
+   únicamente las Features nuevas que todavía no estén en `existingFeatures`.
 5. Reingreso por escalamiento (FEATURE-020): a veces tu contexto no es la propuesta de Architect
    directa, sino una revisión de escalamiento — lo vas a reconocer porque trae `escalationReason` y
    `targetAgentRole` en vez de `functionalArtifact`. `businessCase` es el caso de negocio original,

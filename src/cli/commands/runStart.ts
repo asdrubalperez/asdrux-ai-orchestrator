@@ -84,6 +84,7 @@ import {
   materializeActiveFeatureDocument,
   getApprovalModeForRun,
   getActiveFeatureForRun,
+  getActivatedFeatureIdentities,
   FeatureLifecycleEscalationError,
   persistActiveFeatureContribution,
   persistFunctionalFeatureBatch,
@@ -412,7 +413,9 @@ export async function executePipelineRun(params: {
           ? await withRoleContext(projectId, runId, baseContext)
           : phase.agentRole === "architect"
             ? await withArchitectRoleContext(projectId, baseContext)
-            : baseContext;
+            : phase.agentRole === "functional"
+              ? await withFunctionalRoleContext(projectId, baseContext)
+              : baseContext;
       const roleInstructions = await readRole(phase.agentRole);
       const selection = await resolveSelection(phase.agentRole);
       const { executor, finalizeAuth } = await buildExecutor(selection, worktree.worktreePath, runId, userId);
@@ -1101,6 +1104,29 @@ async function withArchitectRoleContext(projectId: string, incomingContext: unkn
   if (roadmapApproval) extra.existingRoadmapApproval = roadmapApproval.value;
   if (Object.keys(extra).length === 0) return incomingContext;
   return { ...(incomingContext as Record<string, unknown>), ...extra };
+}
+
+/**
+ * Fix (2026-08-17), hallazgo en vivo: cuando el reingreso cross-pipeline a Architect resuelve una
+ * ambigüedad de Regla 2 y Architect declara ESTADO: completed con una propuesta fresca, Functional
+ * recibe esa propuesta por el camino NORMAL (`functionalArtifact`), no por el de reingreso con
+ * `escalationReason`/`targetAgentRole` -- así que su Regla 4 ("primera invocación, batch completo")
+ * lo hace redeclarar TODAS las Features del release, incluidas las que ya fueron activadas e
+ * implementadas en un run anterior de este mismo release, disparando el guard de
+ * `persistFunctionalFeatureBatch` en loop. Mismo criterio que `existingRoadmapApproval` para
+ * Architect: se le da a Functional la lista de Features ya activadas para el release actual como
+ * dato explícito (`existingFeatures`), en vez de esperar que lo infiera de la conversación.
+ */
+async function withFunctionalRoleContext(projectId: string, incomingContext: unknown): Promise<unknown> {
+  if (incomingContext === null || typeof incomingContext !== "object") {
+    return incomingContext;
+  }
+  const roadmap = await getCurrentProjectConfig(projectId, "release_roadmap");
+  const activeRelease = activeReleaseFromRoadmap(roadmap?.value);
+  if (!activeRelease) return incomingContext;
+  const existingFeatures = await getActivatedFeatureIdentities(projectId, activeRelease.id);
+  if (existingFeatures.length === 0) return incomingContext;
+  return { ...(incomingContext as Record<string, unknown>), existingFeatures };
 }
 
 /**
