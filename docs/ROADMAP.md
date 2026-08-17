@@ -7,367 +7,64 @@
 - Milestone 1 — Pipeline completo Claude Code (FEATURE-001 a 006)
 - Spike Codex — walking skeleton, invocación única read-only (FEATURE-007)
 - Construcción de `CodexExecutor` de producción — paridad con Claude Code
-- Feature 10 — `users`, `projects` y login del CLI: tablas `users`/`projects` creadas, migración
-  de `runs.owner_id`/`project_id` (19/19 backfilleados), comandos `login`/`logout`/`seed:user` con
-  `bcryptjs`, sesión local de 30 días
-- FEATURE-011 — Configuración vigente por proyecto: migración
-  `0004_project_config_versions.sql`, tabla dedicada versionada, funciones de repositorio
-  (`getCurrentProjectConfig`, `getCurrentProjectConfigs`, `setProjectConfig`,
-  `getProjectConfigHistory`) e integración en `runStart.ts`
-- FEATURE-012 — Persistencia de contexto/hallazgos en escalamiento: migración
-  `0005_escalation_context_persistence.sql`, `runs.originated_from_run_id`, estado `retrying`,
-  comando `run:respond`, worktree hijo ramificado desde la rama del padre y validación E2E real
-  documentada en `docs/features/FEATURE-012-implementation-results.md`. **Matiz (2026-07-29)**:
-  persiste el contexto de continuación, pero no unifica un único contrato de reentrada — conviven
-  `EscalationContext` (retry en el lugar) y `ReentryContext` (reingreso vía run hijo o cruce de
-  pipeline), con campos distintos. Ver Lecciones Aprendidas en
-  `docs/features/lecciones-aprendidas/`.
-- Feature 09 — Runbook para el Orquestador AI automático: 12 archivos en `docs/runbook/`, v1.0,
-  marcador `[PENDIENTE-DB-PROJECTS]` reemplazado por la referencia real a
-  `project_config_versions` (FEATURE-011), pasada de consistencia cruzada completa
-- Evolución del Playbook: declaración de rama/checkout de origen movida de Stage 6 a Stage 3 en
-  `06-DELIVERY-WORKFLOW.md` (v1.2), Lessons Learned de Feature 10
-- FEATURE-013 — Capa de UI "Run en curso": 013A backend read-only + UI/SSE, 013B sesiones web,
-  013C respuesta a escalamiento desde modal, con validación real en navegador/VPS y documentos de
-  diseño/resultados en `docs/features/`
-- FEATURE-014 — Autenticación unificada CLI + Web: tabla `sessions`, hash SHA-256 y revocación
-  server-side compartidos, TTL único de 48 horas y validación real en VPS; resultados en
-  `docs/features/FEATURE-014-implementation-results.md`
-- FEATURE-015 — Egress y aislamiento de credenciales OAuth: 015A y 015B ✅ Ejecutadas,
-  aceptadas con tests, evidencia real en VPS y revisión conjunta Architect + owner. Las 10
-  combinaciones rol/proveedor usan catálogos cerrados sin tools nativas. Diseños y resultados en
-  `docs/features/FEATURE-015-egress-aislamiento-oauth-parte-015a-arquitectura-holder-worker.md` y
-  `docs/features/FEATURE-015B-Wiring-real-por-rol-y-por-proveedor.md`.
-- FEATURE-016 — Modo de autenticación por cuenta personal (OAuth) para Executors: tabla
-  `user_agent_config` (global + override por rol), `authMode` (`api_key`/`cli_session`) en ambos
-  Executors, flag de CLI `--auth-mode` y resolución de precedencia en `runStart.ts`. Aprobada por
-  el owner, verificada independientemente por el Architect y mergeada a `main` (commits `133509d`
-  implementación, `fa42d0e` merge). Diseño y evidencia en
-  `docs/features/FEATURE-016-auth-oauth-executors.md`.
-- FEATURE-017 — Capa de UI — Disparo (intake de caso de negocio asistido por IA): estado nuevo
-  `sin_iniciar` en `runs`, mapeo directo al proveedor sin tools, clonado real y aislado del repo
-  del caso de negocio, cancelación real reusando el escalamiento de FEATURE-013C, timeouts finales
-  por rol. Aprobada por el owner, validada técnicamente por el DAIA y mergeada a `main` (commit
-  `eed5e88` implementación principal, `14693c8` merge). Diseño y evidencia en
-  `docs/features/FEATURE-017-Capa-de-UI-Disparo-intake-de-caso-de-negocio-asistido-por-IA.md`.
+- Feature 10 — `users`, `projects` y login del CLI
+- FEATURE-011 — Configuración vigente por proyecto
+- FEATURE-012 — Persistencia de contexto/hallazgos en el circuito de escalamiento
+- Feature 09 — Runbook para el Orquestador AI automático
+- Evolución del Playbook
+- FEATURE-013 — Capa de UI "Run en curso"
+- FEATURE-014 — Autenticación unificada CLI + Web
+- FEATURE-015 — Egress y aislamiento de credenciales OAuth (015A + 015B)
+- FEATURE-016 — Modo de autenticación por cuenta personal (OAuth) para Executors
+- FEATURE-017 — Capa de UI — Disparo (intake de caso de negocio asistido por IA)
 - FEATURE-018 (antes FEATURE-017, antes FEATURE-015) — Wiring real del ciclo Roadmap de Releases
-  (Architect) + Release Plan (Planning): Architect declara siempre un Roadmap de Releases (mínimo
-  un release MVP) y escala para aprobación humana reusando el mecanismo de escalamiento existente
-  (atomicidad real vía `client` compartido en `setProjectConfig`); Planning recibe el release activo
-  como contexto y escala si no hay ninguno aprobado; `ReleasePlanPanel` conectado a datos reales;
-  6 documentos de gobernanza del Runbook actualizados. Aprobada por el owner tras 3 rondas de
-  validación técnica del DAIA y verificación independiente del Architect, mergeada a `main` (commit
-  `458c159` implementación, `411f73d` merge). **Alcance final, ajustado durante el
-  cierre**: no incluye el disparo automático de "release completo → Architect propone el
-  siguiente" (Functional Goal original de la Feature) — se descubrió que el motor de pipeline no
-  tiene hoy ningún concepto de "Feature" como dato rastreable ni de múltiples Features ejecutándose
-  en secuencia dentro de un release, lo cual excede el alcance de wiring de esta Feature. Ver
-  Lecciones Aprendidas más abajo y FEATURE-019/021. Diseño y evidencia en
-  `docs/features/FEATURE-018-Wiring-real-del-ciclo-Roadmap-de-Releases-(Architect)-+-Release-Plan-(Planning).md`.
-- FEATURE-019 — Modelo de circuitos anidados para el ciclo de releases: Architect gobierna el
-  avance entre releases del Roadmap, Planning gobierna la iteración de Features dentro del release
-  activo (Developer siempre vuelve a Planning al terminar una Feature, en vez de autogobernarse).
-  Implementada y mergeada (commits `2c85221`, `f361a96`). Validación end-to-end incompleta —
-  encontró un bug crítico preexistente de pérdida de contexto en reintentos de escalamiento, que
-  bloqueó seguir probando y derivó en FEATURE-020. Ver Lecciones Aprendidas en
-  `docs/features/FEATURE-019-*.md`.
-- FEATURE-020 — Rediseño de cómo se arma el contexto entre roles: lectura de artefactos
-  persistidos por referencia (DB) en vez de acumulación en el contexto que viaja entre fases.
-  Implementada y mergeada (commit `9d066a8`, más fix de `ramaBaseTrabajoFromBusinessCase` y ajuste
-  de texto). Validación end-to-end real: Circuito 1/2/3 funcionaron de punta a punta (incluida la
-  primera aprobación de merge en Modo Manual) — encontró un problema real y distinto en el paso de
-  build de QA (no relacionado con el diseño de esta Feature), que derivó en FEATURE-021 (ver
-  abajo). Ver Lecciones Aprendidas en `docs/features/FEATURE-020-*.md`.
-- FEATURE-021 — Build determinístico garantizado por el Orquestador entre Developer y QA:
-  build obligatorio separado del test, fallos devueltos a Developer, agotamiento explícito y
-  rechazo de operadores de shell en `COMANDO_TEST`. Implementada y cubierta por pruebas; el
-  contrato pendiente entre output compilado y ruta de test queda separado en FEATURE-029.
-- FEATURE-022 — Lectura universal de artifacts por todos los roles: todos los roles pueden
-  descubrir y leer bajo demanda cualquier artifact del proyecto del run actual mediante
-  `artifact_list` y `artifact_read`, con aislamiento por proyecto, acceso read-only y sin
-  acumulación automática de contexto. Implementada, validada técnicamente y mergeada a `main`
-  (`4e4f209`). Validación funcional punta a punta completada junto con FEATURE-023 Parte 1 y
-  Parte 2 mediante prueba E2E real del owner (2026-07-29, caso de negocio real), después del
-  bloque correctivo de runtime de circuitos — ver Lecciones Aprendidas en
-  `docs/features/lecciones-aprendidas/`. Ver
-  `docs/features/FEATURE-022-Lectura-universal-de-artifacts-por-todos-los-roles.md` y
-  `docs/features/FEATURE-022-implementation-results.md`.
-- FEATURE-023 — Parte 1 — Lifecycle canónico de Features basado en
-  `docs/runbook/07-FEATURE-TEMPLATE.md`: implementación y validación automatizada completas.
-  E2E real completado por el owner el 2026-07-29 (caso de negocio real), después de resolver
-  FEATURE-023 Parte 2 y el bloque correctivo de runtime de circuitos.
-- FEATURE-023 — Parte 2 — Distribución, versionado y disponibilidad del Runbook en runtime:
-  implementada. Validada por evidencia empírica real en la prueba E2E conjunta del 2026-07-29 —
-  el Approval Gate de diseño formal nunca se cerró explícitamente (ver
-  `docs/research/FEATURE-023-revision-tecnica-y-validacion.md`, bloqueos B1-B10 sin resolución
-  documentada), pero el comportamiento quedó validado contra un caso real. Queda como deuda
-  documental cerrar formalmente ese Gate o registrar por qué se considera superado por la
-  evidencia.
+  (Architect) + Release Plan (Planning)
+- FEATURE-019 — Modelo de circuitos anidados para el ciclo de releases
+- FEATURE-020 — Rediseño de cómo se arma el contexto entre roles (lectura por referencia desde DB)
+- FEATURE-021 — Build determinístico garantizado por el Orquestador entre Developer y QA
+- FEATURE-022 — Lectura universal de artifacts por todos los roles
+- FEATURE-023 — Parte 1 — Lifecycle canónico de Features basado en el Runbook
+- FEATURE-023 — Parte 2 — Distribución, versionado y disponibilidad del Runbook en runtime
 - FEATURE-024 (antes FEATURE-023, antes FEATURE-022, antes FEATURE-021, antes FEATURE-019, antes
   FEATURE-018, antes FEATURE-017, antes FEATURE-014) — Milestone 2 — Validación end-to-end con
-  caso de negocio real: ejecutada mediante prueba de usuario real (2026-07-29, proyecto
-  `tempo-auto-planner`), sin necesidad de una Feature de producto nueva. Validó de punta a punta
-  el circuito completo (merge de Feature → run hijo → Planning → Gate de cierre → proyecto
-  cerrado). Ver Lecciones Aprendidas en `docs/features/lecciones-aprendidas/`.
-- FEATURE-031 — Mapping confiable de `tipo_solucion` y simplificación de `canales`: reglas de
-  clasificación explícitas (negación, distinción entre solución objeto de la iniciativa y
-  soluciones de terceros/sistemas relacionados, ambigüedad → vacío) inyectadas al prompt del
-  mapper, más validación de dominio en código para `tipo_solucion` (`nueva`/`mejora_existente`/
-  vacío, sin importar lo que devuelva el modelo). `canales` pasa de `field_type = list` a
-  `textarea` — sin lógica de compatibilidad histórica: se confirmó contra la base real que ningún
-  caso persistido tiene `canales` como array antes de implementar, evitando esa parte del alcance
-  original propuesto por el diseño. Validada por el owner en VPS (2026-07-30) además de la suite
-  automatizada. Diseño original de ARIA (AI Product Architect).
-- FEATURE-029 — Contrato determinístico entre build output y `COMANDO_TEST`: prevalidación entre
-  el build y la invocación de QA (`src/testing/testCommandContract.ts`), soporta script de
-  `package.json` y `node --test` con rutas explícitas. Validada con 13 tests automatizados
-  (unitarios + integración del loop); dos intentos de validación E2E real (2026-07-30) no
-  reprodujeron el escenario — ver detalle abajo sobre por qué. Diseño original de ARIA (AI Product
-  Architect), con una corrección aplicada antes de implementar (el mensaje de error no debe
-  sugerirle a Developer tocar `COMANDO_TEST` — Regla 4 de `developer.txt` se lo prohíbe
-  explícitamente).
-- FEATURE-032 — Instalación determinística de dependencias antes del build: nuevo
-  `DependencyInstaller` (`src/testing/dependencyInstaller.ts`) corre entre Developer y
-  `BuildExecutor`, con acceso a red y caché npm escribible explícita; `npm ci` con lockfile,
-  `npm install` sin él; nuevo motivo `dependencyInstallationFailureReason`, primero en la cadena de
-  exclusión mutua del loop. Ampliación aprobada antes de implementar: timeouts configurables para
-  los tres pasos del loop (`BUILD_TIMEOUT_MS`, `TEST_TIMEOUT_MS`, `DEPENDENCY_INSTALL_TIMEOUT_MS`).
-  Validada con suite automatizada (5 tests unitarios + 1 de integración) y con una prueba E2E real
-  en VPS (2026-07-30, proyecto `pruebas-ia`) que ejercitó tanto el camino de fallo (un
-  `package.json` con BOM inválido, correctamente atribuido a instalación y no a build) como el
-  camino exitoso (instalación real de `typescript` vía `npm ci`, build con `tsc` real, y un fallo
-  de build genuino y distinto — `TS2307`— correctamente atribuido por separado), hasta la
-  aprobación de QA y el escalamiento de merge. Diseño original de ARIA (AI Product Architect).
-- FEATURE-036 — Release activo nominal tras cierre de proyecto sin release siguiente:
-  `activeReleaseId` pasa de `string` a `string | null`; el validador de `RoadmapApprovalPayload`
-  exige el invariante cruzado (ID no nulo ⇒ exactamente un release `Activo` con ese ID; `null` ⇒
-  cero releases `Activo`); `activeReleaseFromRoadmap` filtra también por estado; el cierre del
-  último release (sin siguiente pendiente) persiste `activeReleaseId: null` en vez de dejarlo
-  apuntando al release recién completado; `runView.ts`/`ReleasePlanPanel.tsx` muestran "Sin release
-  activo" sin usar el último release como fallback. Validada con 14 tests automatizados y con E2E
-  real en VPS (2026-07-30/31, proyecto `pruebas-ia`, Roadmap de dos releases): primer intento
-  reprodujo el bug original (Orquestador apuntando por error a otra rama sin el fix), repetido en la
-  rama correcta confirmó el cierre correcto de punta a punta. Incluye una corrección aparte
-  descubierta durante esa misma validación (`getReleasePlansByRelease` mezclaba historial de ciclos
-  de prueba no relacionados — acotado ahora por `root_run_id`). Diseño original de ARIA (AI Product
-  Architect), aprobado con una corrección de orden (revisar datos reales antes de endurecer el
-  validador — 0 roadmaps vigentes inconsistentes encontrados). Detectó además dos hallazgos
-  separados del ciclo de vida del Release Plan: Features de un release anterior reapareciendo en el
-  siguiente (scope de FEATURE-028) y el último Feature de un release nunca marcado `Completada`
-  (FEATURE-038, ver abajo).
-- FEATURE-038 — Persistencia del estado final del Release Plan al cerrar un release:
-  `persistReleasePlanIfDeclared` solo actuaba con `status = completed`, así que el `RELEASE_PLAN`
-  final que Planning declaraba correctamente al cerrar (`RELEASE_COMPLETO`, `status = escalated`)
-  nunca se persistía — la última Feature quedaba `"En curso"` para siempre pese a la aprobación de
-  QA. Nueva función pura `validateFinalReleasePlanTransition` valida el cierre contra el Release
-  Plan vigente de entrada (mismo objeto que ya vio Planning, sin relectura de la base — sin ventana
-  de carrera); cierre inconsistente escala con `FeatureLifecycleEscalationError`, nunca error
-  genérico. Validada con 16 tests automatizados y con E2E real en VPS (2026-07-31, proyecto
-  `pruebas-ia`): consulta directa a `project_config_versions` confirmó el `RELEASE_PLAN` final
-  persistido con la Feature `"Completada"` segundos antes de la respuesta humana al Gate, tanto para
-  el cierre de un release intermedio como del último release del proyecto. Diseño original de ARIA
-  (AI Product Architect), Discovery cerrado junto con FEATURE-028 (que absorbe el otro síntoma —
-  Features de un release anterior reapareciendo en el siguiente).
-- FEATURE-028 — Release Plan asociado inequívocamente al Release activo: `withRoleContext` armaba
-  `activeRelease`/`releasePlan` de fuentes independientes sin verificar que pertenecieran al mismo
-  release. Nueva consulta `getReleasePlanAssociationCandidate` (reutiliza el CTE `current_epoch` de
-  `getReleasePlansByRelease`, FEATURE-036) resuelve el `activeReleaseId`/`root_run_id` pinneados en
-  el run que escribió el `release_plan` vigente; nueva función pura
-  `resolveReleasePlanForActiveRelease` exige coincidencia de release **y** de ciclo de negocio —
-  `releasePlan: null` cuando no coincide, sin borrar ni alterar el historial. No se agregó
-  `releaseId` al contrato de Planning. Validada con 7 tests automatizados y con E2E real en VPS
-  (2026-07-31, mismo caso de propinas que en un intento anterior había disparado la contaminación
-  cruzada): la propia bitácora de Planning confirmó textualmente *"Es la primera invocación para el
-  release r2 (releasePlan viene null...)"*, sin ningún rastro de Features del release anterior.
-  Diseño original de ARIA (AI Product Architect), Discovery cerrado junto con FEATURE-038.
-- FEATURE-037 — Entrega gobernada de reglas del Runbook a Planning, Developer y QA: en cada
-  invocación relevante, Planning recibe `governance.testingPolicy` (`04-TESTING-POLICY.md`, del
-  cual es dueño/consultor directo) para traducirlo al Test Plan de la Feature; Developer recibe
-  `governance.codingStandards` (`05-CODING-STANDARDS.md`, del cual es dueño/consultor directo) en
-  cada intento incluido el turno de readiness; QA solo recibe el Test Plan vigente, sin ninguno de
-  los dos documentos completos — evita múltiples fuentes normativas simultáneas. Entrega fresca sin
-  caché entre invocaciones; `TESTING_POLICY_ASSET`/`CODING_STANDARDS_ASSET` agregados a
-  `REQUIRED_RUNBOOK_ASSETS` (fallo cerrado si faltan); namespace `governance` protegido contra
-  sobrescritura por contexto no confiable; auditoría por evento con solo metadata (rol, path,
-  versión, hash). Validada con 20 tests automatizados y con E2E real en VPS (2026-07-31, caso real
-  de `tempo-auto-planner` con integración externa): el evento `runbook_governance_delivered` se
-  registró en cada invocación de Planning y Developer a lo largo de tres Features, confirmando
-  entrega fresca y consistente. Diseño original de ARIA (AI Product Architect), aprobado con dos
-  correcciones de redacción (la entrada original del Roadmap era ambigua, no decía literalmente lo
-  que el diseño corregía; el patrón de `runbookProvider.readText` para Functional no es precedente
-  de inyección pre-invocación — FEATURE-037 introduce ese patrón).
-- FEATURE-026 — Autenticación GitHub por usuario para operaciones Git: nueva entidad
-  `user_git_connections` (token cifrado con AES-256-GCM — primer mecanismo de cifrado reversible
-  del proyecto; el precedente de FEATURE-016 solo persistía una preferencia de modo, nunca
-  credenciales reales) más flujo OAuth completo (`state` de un solo uso persistido en
-  `oauth_states`, callback, listado de repositorios accesibles vía API de GitHub). `worktree.ts`
-  gana un parámetro `gitAuth` opcional en `cloneRunRepository`/`pushRunBranch` para autenticar con
-  la conexión del owner en vez de la clave SSH compartida del host, y pasa a un entorno de proceso
-  por allowlist (reutiliza el patrón de `runtimeEnvironment()` de `isolated-tools`) en vez de
-  heredar `process.env` completo. Incremento deliberadamente parcial: no incluía UI de conexión,
-  listado/selección de repositorio en el intake, validación o creación de ramas, ni cambio de
-  cuenta con análisis de impacto — completado por FEATURE-042 (✅ Ejecutado, ver esa entrada), que
-  también absorbió el cableado real de `gitAuth` en el arranque/push de runs.
-  **Validación E2E real (2026-08-01/02, infraestructura productiva real:
-  `aio.asdru.space`/`api.aio.asdru.space`, Caddy con HTTPS automático, `systemd`)**: flujo OAuth
-  completo probado con la cuenta real del owner — `GET /auth/github/status` devolvió
-  `{"status":"connected","externalLogin":"asdrubalperez","scopes":["repo"]}` tras completar la
-  autorización real contra GitHub, sin intervención manual de datos. Diseño original de ARIA (AI
-  Product Architect), con varias rondas de revisión técnica contra el código real (incluida
-  verificación contra documentación oficial de GitHub para el ciclo de vida del token) antes de
-  aprobar. Diseño completo en
-  `docs/features/FEATURE-026-Autenticación-Github-por-Usuario-para-Operaciones-Git.md`.
-- FEATURE-042 — Creación, selección y configuración de proyectos ("Mis proyectos"). Prioridad P1.
-  **Absorbe el alcance completo de FEATURE-030** (retirada como Feature independiente). Gate de
-  entrada real: el usuario selecciona o crea un proyecto antes de que el intake se habilite; el
-  repositorio es configuración canónica del proyecto (campos directos en `projects`, sin entidad
-  `Repository` separada) con gate de validación/creación de rama (Git Data API de GitHub, sin clon
-  local) antes de confirmar un caso de negocio. Backend + frontend completos (React Router, "Mis
-  proyectos", alta/edición de proyecto, configuración de repositorio, casos por proyecto).
-  **Validación E2E real (2026-08-01/02, Vercel + VPS productivos)**: el owner probó el flujo
-  completo con su cuenta real de GitHub — conexión OAuth, listado y selección de repositorio,
-  creación de caso con rama nueva (gate de confirmación "Volver a editar"/"Confirmar y crear caso")
-  y con rama existente, y creación de un segundo proyecto sobre el mismo repositorio. Cinco fallos
-  reales encontrados y corregidos durante la propia validación (CORS no reflejaba previews de
-  Vercel ni permitía `PATCH`/`PUT`, el botón "Nuevo caso" no respetaba el gate de repositorio
-  configurado, el callback de OAuth devolvía JSON crudo en vez de redirigir, la sugerencia de rama
-  usaba el primer campo del intake en vez de uno descriptivo, y un `alert()` nativo duplicaba el
-  aviso de creación de rama ya mostrado en el nuevo paso de confirmación). Diseño completo en
-  `docs/features/FEATURE-042-propuesta-de-alcance-revisado-absorbe-FEATURE-030.md`.
-- FEATURE-043 — Separar la configuración de ejecución (repositorio, rama) del caso de negocio en el
-  intake. Prioridad Baja. `repositorio` (campo fantasma desde F042: se seguía pidiendo al mapeo por
-  IA y descartando antes de persistir, sin efecto real) se retiró de `intake_field_definitions`. La
-  rama base pasa a persistirse en `runs.base_branch_name`, separada de `business_case` (JSON
-  descriptivo) y de `branch_name` (rama efectiva del worktree — dos conceptos distintos). El modal
-  de revisión quedó dividido en "Caso de negocio"/"Ejecución", con el repositorio del proyecto en
-  solo lectura. **Validación E2E real (2026-08-02)**: el owner creó un caso y ejecutó el run de
-  punta a punta; la rama sugerida se derivó del contenido real del caso
-  (`feature/modulo-interno-de-calculo-de-propinas-...`), no de un default fijo. Dos hallazgos reales
-  no cubiertos por el diseño original, encontrados y corregidos durante la implementación/validación:
-  (1) el CLI `run:start --case` nunca persiste `business_case` en la DB — requirió una cadena de
-  precedencia de tres niveles en vez de reemplazar directamente el fallback en memoria; (2) la
-  descripción del campo `rama_base_trabajo` en la DB (desde FEATURE-017, nunca actualizada) le
-  instruía literalmente a la IA "default main si no se indica" — el modelo cumplía al pie de la
-  letra, anulando en la práctica la sugerencia automática basada en contenido que es el propósito
-  central de esta Feature. Diseño completo (Functional Rules, Scope, 10 escenarios de validación,
-  Approval Gate) y resultado de implementación en
-  `docs/features/FEATURE-043-Separar-configuración-de-ejecución-del-caso-de-negocio.md`.
-- ✅ FEATURE-025-Parte-3 — Soporte Codex/OAuth para el Asistente de Entrada (mapeo de intake).
-  Cierra el corte explícito dejado por Parte 1: el mapeo (`mapBusinessCase.ts`) ahora soporta las 4
-  combinaciones (Claude/Codex × api_key/cli_session), no solo Claude + API key. Decisión de
-  arquitectura híbrida (sección 3.1 del diseño): API key sigue siendo HTTP directo sin Docker; OAuth
-  reutiliza el holder Docker de los roles reales (misma imagen y flags de seguridad de
-  `ClaudeCodeExecutor`/`CodexExecutor`), sin worker, sin MCP, sin tools — el mapeo de intake no
-  necesita ejecutar tools, así que no necesita la mitad "worker" del par holder/worker.
-  **Validación E2E real (2026-08-03, VPS productivo)**: las 4 combinaciones probadas en vivo por el
-  owner contra `/intake/map` funcionaron correctamente en el primer intento, incluida Codex + OAuth
-  (protocolo JSON-RPC `app-server` nunca antes ejercitado contra una cuenta real). Se agregó logging
-  de observabilidad (`provider`/`model`/`authMode` resueltos y `resultado=ok|error`) en
-  `mapIntakeText` durante la propia validación, necesario para confirmar que el mapeo usaba
-  realmente la configuración elegida por el usuario y no solo que "funcionara". Diseño completo y
-  resultado de la validación en
-  `docs/features/FEATURE-025-Parte-3-Soporte-Codex-y-OAuth-para-el-Asistente-de-Entrada.md`.
-- ✅ FEATURE-033 — Lifecycle canónico de `01-PROJECT-BRIEF-TEMPLATE`: persistencia de dominio propia,
-  ruta canónica `docs/project/PROJECT-BRIEF.md` (uno por proyecto). Implementada, validada E2E en
-  vivo y **mergeada a `main`** (commit `6bce083`). Detalle en la sección "Detalle" más abajo.
-- ✅ FEATURE-034 — Lifecycle canónico de `02-ARCHITECTURE-TEMPLATE`: Roadmap compuesto en el
-  renderer desde el ya aprobado, sin tocar el circuito de aprobación existente. Implementada,
-  validada E2E en vivo y **mergeada a `main`** (commit `cb4c492`). Detalle más abajo.
-- ✅ FEATURE-035 — Lifecycle canónico de `09-RELEASE-PLAN-TEMPLATE`: persistencia por release,
-  acumulación incremental del Test Plan por Feature entre invocaciones sucesivas de Planning.
-  Implementada, validada E2E (con hallazgos reales resueltos después por FEATURE-044, ver esa
-  entrada) y **mergeada a `main`** (commit `43798b2`). Detalle más abajo.
-- ✅ FEATURE-044 — Correcciones de runtime del ciclo Roadmap/Testing Policy/Release Plan: 10 fixes
-  reales encontrados al validar por primera vez un release de dos Features de punta a punta
-  (persistencia de Testing Policy, no re-escalar Roadmap ya aprobado, Functional no redeclara
-  Features ya activadas, condición de carrera en la auto-navegación al run hijo, extracción de JSON
-  truncada, indicador de SSE falso, entre otros). Cierra los dos hallazgos que habían quedado
-  pendientes al validar FEATURE-035 (`task_81cd46a5`, `task_ddde9489`). Implementada, validada E2E
-  y **mergeada a `main`**. Ver
-  `docs/features/FEATURE-044-Correcciones-de-runtime-del-ciclo-Roadmap-Testing-Policy-Release-Plan.md`.
-- ✅ FEATURE-025-Parte-1 — Asistente IA, modelo y credenciales API por agente: selección de
-  proveedor por rol con UI real (`web/src/agentConfig/AgentConfigPage.tsx`), selección de modelo por
-  rol (`user_agent_config.model`, `agentModelCatalog.ts`), credenciales/API token cifradas por
-  agente (`user_ai_provider_credentials`, `aiCredentialService.ts`, mismo patrón de cifrado
-  AES-256-GCM que `user_git_connections` de FEATURE-026), y el mapeo de intake gana un sexto rol
-  configurable (`"intake"`) con el mismo mecanismo de resolución que los 5 roles reales. Corta
-  explícitamente si resuelve a Codex o a `cli_session` (cerrado por FEATURE-025-Parte-3, ✅
-  Ejecutada). **Implementada y mergeada a `main`** (commit `140e599`, 2026-08-02, 261/261 tests
-  backend+frontend) — **pendiente de validación E2E real en VPS** (código integrado, comportamiento
-  real todavía no ejercitado end-to-end; no confundir con "no implementada"). Diseño en
-  `docs/features/FEATURE-025-Parte-1-Asistente-Modelo-y-Credenciales-API-por-Agente.md`.
-- ✅ FEATURE-041 — Creación y gestión de cuentas de usuario (self-service). Antes no existía ningún
-  flujo de registro real — el único mecanismo era `seed:user` (CLI de administración manual, sin
-  UI), y `users` no tenía columnas de perfil. Alcance completo: registro público, verificación de
-  email, recuperación de contraseña, onboarding de nombre visible obligatorio, jerarquía
-  administrativa de 3 niveles (usuario/admin/superadministrador, con protección técnica del
-  superadmin), visibilidad administrativa de solo lectura sobre proyectos ajenos, y rate limiting
-  en las rutas públicas sensibles. **Ampliación decidida durante el diseño (2026-08-04)**: la
-  revalidación técnica confirmó que `user_agent_config` nunca fue por proyecto (siempre fue de
-  cuenta) — la sección de separación cuenta/proyecto del diseño original asumía lo contrario. Se
-  resolvió con un modelo de **perfiles de configuración de agente nombrados** (hasta 3 por cuenta,
-  Global como opción explícita y preseleccionada), evaluado contra la alternativa de config
-  arbitraria por proyecto (esfuerzo 8/10, descartada por desproporcionada frente a perfiles,
-  esfuerzo 5/10). **Validación E2E real (2026-08-05, VPS productivo + preview de Vercel)**:
-  registro con email real vía Resend, verificación, login por email, onboarding, recuperación y
-  cambio de contraseña, aislamiento entre cuentas, gates de proyecto sin repositorio/sin
-  configuración, selector de perfiles, y jerarquía administrativa, todo probado en vivo por el
-  owner. Tres hallazgos reales corregidos durante la propia validación: (1) el login solo buscaba
-  por `handle`, no por email, dejando inaccesible por email la cuenta legacy del owner pese a que
-  la UI solo pide "Email"; (2) varias respuestas de error de las rutas de cuenta no incluían
-  `message`, mostrando "HTTP 400" genérico en vez del motivo real; (3) los perfiles personalizados
-  quedaban todos desplegados a la vez sin distinción visual, corregido con acordeón por perfil.
-  Diseño completo, revalidación técnica y resultado de la validación en
-  `docs/features/FEATURE-041-Creacion-y-gestion-de-cuentas-de-usuario-self-service.md`.
+  caso de negocio real
+- FEATURE-031 — Mapping confiable de `tipo_solucion` y simplificación de `canales`
+- FEATURE-029 — Contrato determinístico entre build output y `COMANDO_TEST`
+- FEATURE-032 — Instalación determinística de dependencias antes del build
+- FEATURE-036 — Release activo nominal tras cierre de proyecto sin release siguiente
+- FEATURE-038 — Persistencia del estado final del Release Plan al cerrar un release
+- FEATURE-028 — Release Plan asociado inequívocamente al Release activo
+- FEATURE-037 — Entrega gobernada de reglas del Runbook a Planning, Developer y QA
+- FEATURE-026 — Autenticación GitHub por usuario para operaciones Git
+- FEATURE-042 — Creación, selección y configuración de proyectos ("Mis proyectos")
+- FEATURE-043 — Separar la configuración de ejecución (repositorio, rama) del caso de negocio
+- ✅ FEATURE-025-Parte-3 — Soporte Codex/OAuth para el Asistente de Entrada (mapeo de intake)
+- ✅ FEATURE-033 — Lifecycle canónico de `01-PROJECT-BRIEF-TEMPLATE`
+- ✅ FEATURE-034 — Lifecycle canónico de `02-ARCHITECTURE-TEMPLATE`
+- ✅ FEATURE-035 — Lifecycle canónico de `09-RELEASE-PLAN-TEMPLATE`
+- ✅ FEATURE-044 — Correcciones de runtime del ciclo Roadmap/Testing Policy/Release Plan
+- ✅ FEATURE-025-Parte-1 — Asistente IA, modelo y credenciales API por agente
+- ✅ FEATURE-025-Parte-2 — OAuth personal por proveedor de IA (Claude/Codex)
+- ✅ FEATURE-041 — Creación y gestión de cuentas de usuario (self-service)
 
 **🟡 Confirmado**
-- ✅ FEATURE-025-Parte-2 — OAuth personal por proveedor de IA (Claude/Codex). Implementada y
-  validada end-to-end en el VPS con cuentas reales de Claude y Codex (circuito completo Architect→
-  Functional→Planning→Developer↔QA→merge→cierre de release→continuación al release siguiente). El
-  spike técnico confirmó que ambos CLIs exponen un flujo de login delegable por usuario. Detalle
-  completo de la implementación y de los bugs encontrados/corregidos durante la validación en la
-  sección detallada más abajo y en
-  `docs/features/FEATURE-025-Parte-2-OAuth-Personal-por-Proveedor-de-IA.md`. Contexto de la
-  priorización y la división en
-  `docs/research/HANDOFF-FEATURE-025-priorizacion-y-division-en-dos-partes.md`.
 - FEATURE-027 — Continuidad durable del loop Developer ↔ QA. Prioridad P0.
-- FEATURE-039 — La Regla 11 de `04-TESTING-POLICY.md` ("Riesgo de Contrato Externo No Resuelto
-  Escala, No Se Re-anota") no se aplica estructuralmente — nada en el runtime detecta que el mismo
-  riesgo de contrato externo se repite entre Features y fuerza un escalamiento; queda enteramente a
-  criterio del LLM en cada turno. Detectado en la validación E2E de FEATURE-037 (2026-07-31, caso
-  real de `tempo-auto-planner`): el mismo riesgo (endpoint/campo real de Tempo para autorización,
-  diferido a "validación experimental") se repitió sin resolución entre `f1` y `f3`, y QA lo aceptó
-  como "known risk" ambas veces sin escalar. Prioridad por definir.
-- FEATURE-040 — Los Gates de gobernanza que no son ambigüedad/Roadmap (aprobación de merge,
-  cierre de release sin release siguiente) son binarios: cualquier respuesta no-abort los ejecuta
-  incondicionalmente, sin reinyectar el texto de la respuesta humana a ningún rol para pedir una
-  corrección — a diferencia de las escalaciones genéricas, que sí se reinyectan vía el mecanismo de
-  reingreso. En `respondMergeApproval` el texto al menos queda guardado como metadata de auditoría;
-  en el cierre de release sin release siguiente (`respondService.ts:190`, evento `project_closed`)
-  ni siquiera eso — el texto no se persiste en ningún lado. No hay forma de "rechazar con feedback y
-  reintentar" en ninguno de los dos. Detectado durante la validación de FEATURE-037 (2026-07-31,
-  caso `tempo-auto-planner`, primero en el Gate de merge y confirmado de nuevo en el Gate de cierre
-  de release). Prioridad por definir.
+- FEATURE-039 — Regla 11 de Testing Policy (riesgo de contrato externo repetido) no se aplica
+  estructuralmente. Prioridad por definir.
+- FEATURE-040 — Gates de gobernanza binarios (merge, cierre de release), sin camino de rechazo con
+  feedback correctivo. Prioridad por definir.
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
-- Planning valida la Feature de Functional antes de diseñar el Release Plan — hoy Stage 2 de
-  `docs/runbook/06-DELIVERY-WORKFLOW.md` dice que Planning "parte de los 3 escenarios que Functional
-  entregó — no los redefine desde cero", sin un paso explícito de análisis/validación de lo que
-  Functional entregó antes de diseñar el cómo. Propuesta a explorar en Discovery aparte: que
-  Planning analice y valide activamente la Feature de Functional (ambigüedades, dependencias entre
-  Features del release, huecos) antes de diseñar el Release Plan. Complementa (no reemplaza) al
-  ítem "Escalamiento optimizado sin reinicio completo".
+- Planning valida la Feature de Functional antes de diseñar el Release Plan
 - Approval Model por Release
 - Concurrencia de runs simultáneos
 - Limpieza automática de worktrees/branches vencidos
 - `PreToolUse` hooks como defensa en profundidad (QA)
 - Creación real de PR vía API de GitHub / merge automático
 - Deployment Strategy y separación dev/staging/prod
-- Capa de UI — Historial/admin (listado de runs, sin diseñar)
-- Notificación Slack/webhook complementaria a la UI de monitoreo (post FEATURE-013, si hace falta
-  alertas fuera de cuando se está mirando activamente)
-- Limpieza de persistencia de codigo versionado: `artifacts.commit_ref` existe en schema pero no se
-  puebla nunca; los commits reales quedan hoy solo en `run_events`.
+- Capa de UI — Historial/admin
+- Notificación Slack/webhook complementaria
+- Limpieza de persistencia de código versionado
 
 ---
 
@@ -393,7 +90,7 @@ Esfuerzo.
 | FEATURE-039 — Regla 11 de Testing Policy (riesgo de contrato externo repetido) no se aplica estructuralmente (nuevo) | Medio | Medio | Alta |
 | FEATURE-040 — Gates de merge/cierre de release sin camino de rechazo con feedback correctivo (nuevo) | Medio | Medio | Alta |
 | FEATURE-027 — Continuidad durable Developer↔QA (P0) | Alto | Alto | Alta |
-| FEATURE-041 — Creación y gestión de cuentas de usuario (self-service) | Alto | Alto | Alta |
+| FEATURE-041 — Creación y gestión de cuentas de usuario (self-service) (✅ Ejecutado) | Alto | Alto | Alta |
 | FEATURE-042 — Creación, selección y configuración de proyectos (✅ Ejecutado, absorbe FEATURE-030) | Alto | Alto | Alta |
 | FEATURE-026 — Autenticación GitHub por usuario (✅ Ejecutado) | Alto | Medio | Alta |
 | FEATURE-033 — Lifecycle 01-PROJECT-BRIEF-TEMPLATE (✅ Ejecutado, mergeado a main) | Alto | Bajo | Alta |
@@ -792,6 +489,10 @@ creadas; `runs.owner_id`/`project_id` migrados a FK real, 19/19 filas backfillea
 El diseño de la tabla `projects` (y su relación con `runs`/`artifacts`) se hace recién con el
 resultado de la investigación de Codex, no antes.
 
+### ✅ Evolución del Playbook
+Lessons Learned de esta Feature: la declaración de rama/checkout de origen se movió de Stage 6 a
+Stage 3 en `06-DELIVERY-WORKFLOW.md` (bump a v1.2).
+
 ### ✅ FEATURE-012 — Persistencia de contexto/hallazgos en el circuito de escalamiento
 Implementada y mergeada en `main`. El circuito de escalamiento de `06-DELIVERY-WORKFLOW.md`
 (Stage 3) ya distingue reintento interno de escalamiento terminal mediante el estado `retrying`,
@@ -803,6 +504,11 @@ Implementación principal: migración `0005_escalation_context_persistence.sql`,
 `src/db/repository.ts`, `src/cli/commands/runStart.ts`, `src/cli/commands/runRespond.ts` y
 `src/isolation/worktree.ts`. Validación E2E real con Postgres, Codex CLI y worktrees reales
 documentada en `docs/features/FEATURE-012-implementation-results.md`.
+
+**Matiz (2026-07-29)**: persiste el contexto de continuación, pero no unifica un único contrato de
+reentrada — conviven `EscalationContext` (retry en el lugar) y `ReentryContext` (reingreso vía run
+hijo o cruce de pipeline), con campos distintos. Ver Lecciones Aprendidas en
+`docs/features/lecciones-aprendidas/`.
 
 ### ✅ Construcción de `CodexExecutor` de producción — paridad con Claude Code
 Cerrado en FEATURE-008 (ver `docs/features/FEATURE-008-implementation-results.md`). Se replicó
@@ -916,6 +622,24 @@ del owner — no ejecutado en esta sesión por ser destructivo sobre el VPS.
 
 Diseño completo (con el spike técnico y su resultado en la sección 7.1) en
 `docs/features/FEATURE-025-Parte-2-OAuth-Personal-por-Proveedor-de-IA.md`.
+
+### ✅ FEATURE-025-Parte-3 — Soporte Codex/OAuth para el Asistente de Entrada (mapeo de intake)
+
+Cierra el corte explícito dejado por Parte 1: el mapeo (`mapBusinessCase.ts`) ahora soporta las 4
+combinaciones (Claude/Codex × api_key/cli_session), no solo Claude + API key. Decisión de
+arquitectura híbrida (sección 3.1 del diseño): API key sigue siendo HTTP directo sin Docker; OAuth
+reutiliza el holder Docker de los roles reales (misma imagen y flags de seguridad de
+`ClaudeCodeExecutor`/`CodexExecutor`), sin worker, sin MCP, sin tools — el mapeo de intake no
+necesita ejecutar tools, así que no necesita la mitad "worker" del par holder/worker.
+
+**Validación E2E real (2026-08-03, VPS productivo)**: las 4 combinaciones probadas en vivo por el
+owner contra `/intake/map` funcionaron correctamente en el primer intento, incluida Codex + OAuth
+(protocolo JSON-RPC `app-server` nunca antes ejercitado contra una cuenta real). Se agregó logging
+de observabilidad (`provider`/`model`/`authMode` resueltos y `resultado=ok|error`) en
+`mapIntakeText` durante la propia validación, necesario para confirmar que el mapeo usaba
+realmente la configuración elegida por el usuario y no solo que "funcionara". Diseño completo y
+resultado de la validación en
+`docs/features/FEATURE-025-Parte-3-Soporte-Codex-y-OAuth-para-el-Asistente-de-Entrada.md`.
 
 ### ✅ FEATURE-026 — Autenticación GitHub por usuario para operaciones Git
 
@@ -1069,6 +793,38 @@ porcentaje del caso de negocio), la sección "Ejecución" separada con `asdrubal
 solo lectura, y la rama sugerida `feature/modulo-interno-de-calculo-de-propinas-para-un-sistema-de-fac`
 derivada del contenido real del caso. El owner creó el caso y ejecutó el run de punta a punta sin
 errores.
+
+### ✅ FEATURE-041 — Creación y gestión de cuentas de usuario (self-service)
+
+**Estado:** Implementada, validada E2E real (2026-08-05, VPS productivo + preview de Vercel) y
+mergeada a `main`. Diseño completo, revalidación técnica y resultado de la validación en
+`docs/features/FEATURE-041-Creacion-y-gestion-de-cuentas-de-usuario-self-service.md`.
+
+Antes no existía ningún flujo de registro real — el único mecanismo era `seed:user` (CLI de
+administración manual, sin UI), y `users` no tenía columnas de perfil. Alcance completo: registro
+público, verificación de email, recuperación de contraseña, onboarding de nombre visible
+obligatorio, jerarquía administrativa de 3 niveles (usuario/admin/superadministrador, con
+protección técnica del superadmin), visibilidad administrativa de solo lectura sobre proyectos
+ajenos, y rate limiting en las rutas públicas sensibles.
+
+**Ampliación decidida durante el diseño (2026-08-04)**: la revalidación técnica confirmó que
+`user_agent_config` nunca fue por proyecto (siempre fue de cuenta) — la sección de separación
+cuenta/proyecto del diseño original asumía lo contrario. Se resolvió con un modelo de **perfiles de
+configuración de agente nombrados** (hasta 3 por cuenta, Global como opción explícita y
+preseleccionada), evaluado contra la alternativa de config arbitraria por proyecto (esfuerzo 8/10,
+descartada por desproporcionada frente a perfiles, esfuerzo 5/10).
+
+**Validación E2E real (2026-08-05, VPS productivo + preview de Vercel)**: registro con email real
+vía Resend, verificación, login por email, onboarding, recuperación y cambio de contraseña,
+aislamiento entre cuentas, gates de proyecto sin repositorio/sin configuración, selector de
+perfiles, y jerarquía administrativa, todo probado en vivo por el owner. Tres hallazgos reales
+corregidos durante la propia validación:
+1. El login solo buscaba por `handle`, no por email, dejando inaccesible por email la cuenta
+   legacy del owner pese a que la UI solo pide "Email".
+2. Varias respuestas de error de las rutas de cuenta no incluían `message`, mostrando "HTTP 400"
+   genérico en vez del motivo real.
+3. Los perfiles personalizados quedaban todos desplegados a la vez sin distinción visual,
+   corregido con acordeón por perfil.
 
 ### 🟡 FEATURE-027 — Continuidad durable del loop Developer ↔ QA
 
@@ -1464,6 +1220,42 @@ base antes de correr en la rama correcta, confirmando que el primer intento efec
 ejercitado el mecanismo. Ver FEATURE-039/040 para el hallazgo adicional detectado durante esta misma
 validación (la entrega funciona, pero el cumplimiento de reglas específicas de la política —
 Regla 11 — no está garantizado estructuralmente).
+
+### 🟡 FEATURE-039 — Regla 11 de Testing Policy (riesgo de contrato externo repetido) no se aplica estructuralmente
+La Regla 11 de `04-TESTING-POLICY.md` ("Riesgo de Contrato Externo No Resuelto Escala, No Se
+Re-anota") no se aplica estructuralmente — nada en el runtime detecta que el mismo riesgo de
+contrato externo se repite entre Features y fuerza un escalamiento; queda enteramente a criterio
+del LLM en cada turno.
+
+Detectado en la validación E2E de FEATURE-037 (2026-07-31, caso real de `tempo-auto-planner`): el
+mismo riesgo (endpoint/campo real de Tempo para autorización, diferido a "validación experimental")
+se repitió sin resolución entre `f1` y `f3`, y QA lo aceptó como "known risk" ambas veces sin
+escalar. Prioridad por definir.
+
+### 🟡 FEATURE-040 — Gates de gobernanza binarios, sin camino de rechazo con feedback correctivo
+Los Gates de gobernanza que no son ambigüedad/Roadmap (aprobación de merge, cierre de release sin
+release siguiente) son binarios: cualquier respuesta no-abort los ejecuta incondicionalmente, sin
+reinyectar el texto de la respuesta humana a ningún rol para pedir una corrección — a diferencia de
+las escalaciones genéricas, que sí se reinyectan vía el mecanismo de reingreso. En
+`respondMergeApproval` el texto al menos queda guardado como metadata de auditoría; en el cierre de
+release sin release siguiente (`respondService.ts:190`, evento `project_closed`) ni siquiera eso —
+el texto no se persiste en ningún lado. No hay forma de "rechazar con feedback y reintentar" en
+ninguno de los dos.
+
+Detectado durante la validación de FEATURE-037 (2026-07-31, caso `tempo-auto-planner`, primero en
+el Gate de merge y confirmado de nuevo en el Gate de cierre de release). Prioridad por definir.
+
+### ⚪ Planning valida la Feature de Functional antes de diseñar el Release Plan
+Hoy Stage 2 de `docs/runbook/06-DELIVERY-WORKFLOW.md` dice que Planning "parte de los 3 escenarios
+que Functional entregó — no los redefine desde cero", sin un paso explícito de análisis/validación
+de lo que Functional entregó antes de diseñar el cómo. Propuesta a explorar en Discovery aparte:
+que Planning analice y valide activamente la Feature de Functional (ambigüedades, dependencias
+entre Features del release, huecos) antes de diseñar el Release Plan. Complementa (no reemplaza) al
+ítem "Escalamiento optimizado sin reinicio completo".
+
+### ⚪ Limpieza de persistencia de código versionado
+`artifacts.commit_ref` existe en el schema pero no se puebla nunca; los commits reales quedan hoy
+solo en `run_events`.
 
 ### ⚪ Approval Model por Release
 Feature 09 (`06-DELIVERY-WORKFLOW.md`, Stage 6) ya diseñó la v1: Modo Manual (default — automático
