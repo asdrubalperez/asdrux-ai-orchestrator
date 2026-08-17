@@ -1045,13 +1045,31 @@ async function withRoleContext(projectId: string, runId: string, incomingContext
  * `existingTestingPolicyConfig` le permite distinguir (architect.txt, Regla 9) si el producto ya
  * tiene una Testing Policy configurada (debe conservarla, declarando `TESTING_POLICY_CONFIG: null`)
  * o si todavía no existe ninguna (debe completarla junto con `ROADMAP`).
+ *
+ * `existingRoadmapApproval` (fix del mismo día, hallazgo en vivo): la Regla 5 original ("si tu
+ * contexto indica explícitamente que el roadmap ya fue aprobado") sólo daba esa señal cuando
+ * Architect respondía DIRECTAMENTE a la aprobación de su propio roadmap (`respondService.ts`,
+ * `buildRoadmapApprovalHumanSolution`) -- en cualquier otro camino de reingreso (por ejemplo,
+ * corrigiendo su propia propuesta tras resolver una ambigüedad de Regla 2 que Functional había
+ * escalado) Architect no tenía forma de saber que este proyecto ya tenía un Roadmap aprobado, y
+ * volvía a escalar pidiendo su re-aprobación aunque la estructura de releases fuera la misma --
+ * mismo síntoma que el bug que motivó `existingTestingPolicyConfig`, con una causa distinta y más
+ * amplia. Se entrega siempre que exista, sin importar el camino de invocación (Regla 4 ahora
+ * decide en base a este dato, no a inferencia de la conversación).
  */
 async function withArchitectRoleContext(projectId: string, incomingContext: unknown): Promise<unknown> {
-  const testingPolicyConfig = await getCurrentProjectConfig(projectId, "testing_policy_config");
-  if (!testingPolicyConfig || incomingContext === null || typeof incomingContext !== "object") {
+  if (incomingContext === null || typeof incomingContext !== "object") {
     return incomingContext;
   }
-  return { ...(incomingContext as Record<string, unknown>), existingTestingPolicyConfig: testingPolicyConfig.value };
+  const [testingPolicyConfig, roadmapApproval] = await Promise.all([
+    getCurrentProjectConfig(projectId, "testing_policy_config"),
+    getCurrentProjectConfig(projectId, "release_roadmap"),
+  ]);
+  const extra: Record<string, unknown> = {};
+  if (testingPolicyConfig) extra.existingTestingPolicyConfig = testingPolicyConfig.value;
+  if (roadmapApproval) extra.existingRoadmapApproval = roadmapApproval.value;
+  if (Object.keys(extra).length === 0) return incomingContext;
+  return { ...(incomingContext as Record<string, unknown>), ...extra };
 }
 
 /**

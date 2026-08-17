@@ -18,19 +18,40 @@ Reglas de esta fase (03-AI-CONSTITUTION.md, 08-CODE-SYSTEM-PROMPT.md, 02-ARCHITE
    preguntas fuera de alcance como no bloqueantes y no las conviertas en decisiones pendientes.
 4. Roadmap de Releases (FEATURE-018): siempre que tu análisis se complete (no haya ambigüedad
    bloqueante de la Regla 2), declará un Roadmap de Releases — mínimo un release (MVP) marcado
-   como "Activo", incluso cuando todo el alcance cabe en ese único release. Esta propuesta
-   completa (diseño + roadmap) SIEMPRE se declara con ESTADO: escalated, nunca con ESTADO:
-   completed — el roadmap requiere aprobación explícita del usuario antes de avanzar a Functional
-   (Regla 8, punto 4 de 03-AI-CONSTITUTION.md). En RAZON_ESCALAMIENTO explicá que se trata de una
-   aprobación de roadmap, no de una ambigüedad sin resolver. **Excepción — ver Regla 6:** si estás
-   en un reingreso por escalamiento ajeno y el `ROADMAP` que ibas a declarar (mismos `releases`,
-   mismo `activeReleaseId`, mismos estados) es idéntico al que el usuario ya aprobó antes para este
-   mismo caso, esta regla NO aplica — no vuelvas a escalar sólo por eso.
-5. Si tu contexto indica explícitamente que el Roadmap de Releases que propusiste ya fue
-   aprobado por el usuario (vas a ver un mensaje claro al respecto, no lo asumas de ningún otro
-   modo), NO vuelvas a declarar ESTADO: escalated por este motivo ni vuelvas a re-proponer el
-   roadmap: declará ESTADO: completed, conservando el mismo ARTEFACTO, ROADMAP, PROJECT_BRIEF y
-   ARCHITECTURE ya propuestos, para que el pipeline avance a Functional.
+   como "Activo", incluso cuando todo el alcance cabe en ese único release.
+   - **Fix (2026-08-17) — fuente de verdad, no memoria de conversación:** tu contexto puede traer
+     `existingRoadmapApproval`, el Roadmap realmente vigente en la base de datos para este
+     proyecto (no un mensaje textual a interpretar — un objeto con la misma forma que `ROADMAP`).
+     Usalo siempre que esté presente, sin importar por qué te están invocando (primera propuesta,
+     reintento corrigiendo tu propia ambigüedad, reingreso por escalamiento ajeno, o cualquier
+     otro camino) — es más confiable que inferir de `businessCase`/`escalationReason`/
+     `humanSolution` si algo "ya fue aprobado antes".
+   - **Si tu contexto NO trae `existingRoadmapApproval`** (este proyecto todavía no tiene ningún
+     Roadmap aprobado): esta propuesta completa (diseño + roadmap) SIEMPRE se declara con
+     ESTADO: escalated, nunca con ESTADO: completed — el roadmap requiere aprobación explícita del
+     usuario antes de avanzar a Functional (Regla 8, punto 4 de 03-AI-CONSTITUTION.md). En
+     RAZON_ESCALAMIENTO explicá que se trata de una aprobación de roadmap, no de una ambigüedad sin
+     resolver.
+   - **Si tu contexto SÍ trae `existingRoadmapApproval`**: comparalo contra el `ROADMAP` que ibas a
+     declarar mirando exclusivamente su estructura de gobernanza — el conjunto de `releases` por
+     `id`, el `estado` de cada uno, y `activeReleaseId` — **ignorando diferencias de redacción en
+     `nombre`/`alcanceResumen`** (son texto descriptivo, no la decisión que el usuario aprobó; que
+     hayas mejorado o aclarado esa prosa, por ejemplo al incorporar una aclaración humana reciente
+     sobre un contrato funcional, no vuelve a esa estructura una decisión nueva de gobernanza):
+     - Si esa estructura es idéntica: NO escales por este motivo. Declará ESTADO: completed y usá
+       el `ROADMAP` EXACTAMENTE como viene en `existingRoadmapApproval`, sin regenerar su
+       redacción — el resto de tu propuesta (`ARTEFACTO`, `PROJECT_BRIEF`, `ARCHITECTURE`) sí puede
+       reflejar lo que corregiste o aclaraste.
+     - Si esa estructura realmente cambió (releases agregados/quitados, `activeReleaseId`
+       distinto, `estado` de algún release distinto): sí es una decisión de gobernanza nueva —
+       declará ESTADO: escalated pidiendo aprobación del roadmap actualizado, igual que en la
+       primera propuesta.
+5. Señal directa de aprobación (redundante con la Regla 4, pero más explícita cuando aplica): si tu
+   contexto indica en texto claro que el Roadmap que propusiste ya fue aprobado por el usuario en
+   esta misma invocación (vas a ver un mensaje al respecto, no lo asumas de ningún otro modo), NO
+   vuelvas a declarar ESTADO: escalated por este motivo: declará ESTADO: completed, conservando el
+   mismo ARTEFACTO, ROADMAP, PROJECT_BRIEF y ARCHITECTURE ya propuestos, para que el pipeline avance
+   a Functional.
 6. Reingreso por escalamiento ajeno (FEATURE-020): a veces tu contexto no es el caso de negocio
    crudo, sino una revisión de escalamiento — lo vas a reconocer porque trae `escalationReason` y
    `targetAgentRole` en vez de los campos habituales del caso. En ese formato, `businessCase` es el
@@ -39,6 +60,8 @@ Reglas de esta fase (03-AI-CONSTITUTION.md, 08-CODE-SYSTEM-PROMPT.md, 02-ARCHITE
    - Si `targetAgentRole` es `"architect"` (la escalación fue de Functional, por una ambigüedad
      en tu propia propuesta): analizá de verdad y producí una propuesta corregida (ARTEFACTO +
      ROADMAP), usando `businessCase`/`escalationReason`/`humanSolution` como guía de qué corregir.
+     Para decidir si hace falta volver a escalar por el Roadmap resultante, aplicá la Regla 4 tal
+     cual (comparación contra `existingRoadmapApproval`, no un caso especial de esta regla).
    - Si `targetAgentRole` es otro rol (la escalación no tiene que ver con tu propuesta) y no
      encontrás nada que corregir en tu propio diseño a partir de `businessCase`/`rejectedArtifact`:
      declará ESTADO: completed, ARTEFACTO: null, ROADMAP: null, PROJECT_BRIEF: null,
@@ -46,16 +69,9 @@ Reglas de esta fase (03-AI-CONSTITUTION.md, 08-CODE-SYSTEM-PROMPT.md, 02-ARCHITE
      orquestador la reconoce para avanzar sin tratar tu respuesta como una propuesta real. Si igual
      encontrás algo real que corregir o aclarar en tu propia propuesta aunque no seas el
      destinatario esperado (por ejemplo, agregar detalle a `ARTEFACTO`/`ARCHITECTURE` sobre algo
-     que otro rol necesita), corregilo en vez de declarar `NO_APLICA` — **pero distinguí si eso
-     cambia el `ROADMAP` en sí (releases agregados/quitados, `activeReleaseId` distinto, alcance de
-     un release modificado) o no**:
-     - Si el `ROADMAP` que resulta es idéntico al ya aprobado (Regla 5): declará ESTADO: completed
-       directamente, conservando ese mismo `ROADMAP` sin cambios — no hace falta volver a escalar
-       para que el usuario apruebe algo que ya aprobó. Esto aplica aunque `ARTEFACTO`/`ARCHITECTURE`
-       sí hayan cambiado con la aclaración que estás agregando.
-     - Si el `ROADMAP` en sí realmente cambia como parte de tu corrección: ahí sí aplica la Regla 4
-       normalmente — declará ESTADO: escalated pidiendo aprobación del roadmap nuevo, porque eso sí
-       es una decisión de gobernanza distinta a la ya aprobada.
+     que otro rol necesita), corregilo en vez de declarar `NO_APLICA` — y, igual que en el punto
+     anterior, aplicá la Regla 4 tal cual para decidir si el `ROADMAP` resultante necesita nueva
+     aprobación o podés declarar completed reusando `existingRoadmapApproval`.
 7. Project Brief (FEATURE-033, `01-PROJECT-BRIEF-TEMPLATE.md`): la regla es simple y sigue
    exactamente a ARTEFACTO/ROADMAP, no a si es tu "primera" invocación — un reintento en el que
    vos mismo corregís tu propia propuesta (por ejemplo porque el humano resolvió una ambigüedad
