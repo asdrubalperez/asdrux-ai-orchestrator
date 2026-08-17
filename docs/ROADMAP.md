@@ -267,6 +267,24 @@
   realmente la configuración elegida por el usuario y no solo que "funcionara". Diseño completo y
   resultado de la validación en
   `docs/features/FEATURE-025-Parte-3-Soporte-Codex-y-OAuth-para-el-Asistente-de-Entrada.md`.
+- ✅ FEATURE-033 — Lifecycle canónico de `01-PROJECT-BRIEF-TEMPLATE`: persistencia de dominio propia,
+  ruta canónica `docs/project/PROJECT-BRIEF.md` (uno por proyecto). Implementada, validada E2E en
+  vivo y **mergeada a `main`** (commit `6bce083`). Detalle en la sección "Detalle" más abajo.
+- ✅ FEATURE-034 — Lifecycle canónico de `02-ARCHITECTURE-TEMPLATE`: Roadmap compuesto en el
+  renderer desde el ya aprobado, sin tocar el circuito de aprobación existente. Implementada,
+  validada E2E en vivo y **mergeada a `main`** (commit `cb4c492`). Detalle más abajo.
+- ✅ FEATURE-035 — Lifecycle canónico de `09-RELEASE-PLAN-TEMPLATE`: persistencia por release,
+  acumulación incremental del Test Plan por Feature entre invocaciones sucesivas de Planning.
+  Implementada, validada E2E (con hallazgos reales resueltos después por FEATURE-044, ver esa
+  entrada) y **mergeada a `main`** (commit `43798b2`). Detalle más abajo.
+- ✅ FEATURE-044 — Correcciones de runtime del ciclo Roadmap/Testing Policy/Release Plan: 10 fixes
+  reales encontrados al validar por primera vez un release de dos Features de punta a punta
+  (persistencia de Testing Policy, no re-escalar Roadmap ya aprobado, Functional no redeclara
+  Features ya activadas, condición de carrera en la auto-navegación al run hijo, extracción de JSON
+  truncada, indicador de SSE falso, entre otros). Cierra los dos hallazgos que habían quedado
+  pendientes al validar FEATURE-035 (`task_81cd46a5`, `task_ddde9489`). Implementada, validada E2E
+  y **mergeada a `main`**. Ver
+  `docs/features/FEATURE-044-Correcciones-de-runtime-del-ciclo-Roadmap-Testing-Policy-Release-Plan.md`.
 - ✅ FEATURE-041 — Creación y gestión de cuentas de usuario (self-service). Antes no existía ningún
   flujo de registro real — el único mecanismo era `seed:user` (CLI de administración manual, sin
   UI), y `users` no tenía columnas de perfil. Alcance completo: registro público, verificación de
@@ -319,9 +337,6 @@
   priorización y la división en
   `docs/research/HANDOFF-FEATURE-025-priorizacion-y-division-en-dos-partes.md`.
 - FEATURE-027 — Continuidad durable del loop Developer ↔ QA. Prioridad P0.
-- FEATURE-033 — Lifecycle canónico de `01-PROJECT-BRIEF-TEMPLATE`.
-- FEATURE-034 — Lifecycle canónico de `02-ARCHITECTURE-TEMPLATE`.
-- FEATURE-035 — Lifecycle canónico de `09-RELEASE-PLAN-TEMPLATE`.
 - FEATURE-039 — La Regla 11 de `04-TESTING-POLICY.md` ("Riesgo de Contrato Externo No Resuelto
   Escala, No Se Re-anota") no se aplica estructuralmente — nada en el runtime detecta que el mismo
   riesgo de contrato externo se repite entre Features y fuerza un escalamiento; queda enteramente a
@@ -364,8 +379,9 @@
 
 ## Priorización — Matriz Esfuerzo × Impacto
 
-Ponderación de los ítems 🟡 Confirmado (más FEATURE-025-Parte-2/025-Parte-3/026/028/029/032/036/037/038/041/042/043,
-ya ✅ Ejecutado, dejados aquí como referencia histórica de la corrida de priorización). FEATURE-030 fue
+Ponderación de los ítems 🟡 Confirmado (más FEATURE-025-Parte-2/025-Parte-3/026/028/029/032/
+033/034/035/036/037/038/041/042/043/044, ya ✅ Ejecutado, dejados aquí como referencia histórica de
+la corrida de priorización). FEATURE-030 fue
 retirada de esta matriz — su alcance quedó absorbido por FEATURE-042 (ver detalle en la sección de
 abajo).
 Ordenada por Ponderación (Alta → Media → Baja) y, dentro de cada nivel, por Impacto y luego por
@@ -386,9 +402,10 @@ Esfuerzo.
 | FEATURE-041 — Creación y gestión de cuentas de usuario (self-service) | Alto | Alto | Alta |
 | FEATURE-042 — Creación, selección y configuración de proyectos (✅ Ejecutado, absorbe FEATURE-030) | Alto | Alto | Alta |
 | FEATURE-026 — Autenticación GitHub por usuario (✅ Ejecutado) | Alto | Medio | Alta |
-| FEATURE-033 — Lifecycle 01-PROJECT-BRIEF-TEMPLATE (✅ Implementada, validada E2E, pendiente de merge) | Alto | Bajo | Alta |
-| FEATURE-034 — Lifecycle 02-ARCHITECTURE-TEMPLATE (✅ Implementada, validada E2E, pendiente de merge) | Alto | Bajo | Alta |
-| FEATURE-035 — Lifecycle 09-RELEASE-PLAN-TEMPLATE (✅ Implementada, validada E2E parcialmente, pendiente de merge) | Alto | Bajo | Media |
+| FEATURE-033 — Lifecycle 01-PROJECT-BRIEF-TEMPLATE (✅ Ejecutado, mergeado a main) | Alto | Bajo | Alta |
+| FEATURE-034 — Lifecycle 02-ARCHITECTURE-TEMPLATE (✅ Ejecutado, mergeado a main) | Alto | Bajo | Alta |
+| FEATURE-035 — Lifecycle 09-RELEASE-PLAN-TEMPLATE (✅ Ejecutado, mergeado a main) | Alto | Bajo | Media |
+| FEATURE-044 — Correcciones de runtime Roadmap/Testing Policy/Release Plan (✅ Ejecutado, mergeado a main) | Medio | Alto | Alta |
 | FEATURE-036 — Release activo nominal tras cierre (P1) | Bajo | Medio | Baja |
 | FEATURE-029 — Contrato build output / COMANDO_TEST (P1) | Bajo | Bajo | Baja |
 | FEATURE-043 — Separar configuración de ejecución (repo/rama) del caso de negocio (✅ Ejecutado) | Bajo | Bajo | Baja |
@@ -1219,8 +1236,8 @@ correctamente en secuencia sobre un run genuino con Docker y red real.
 
 ### ✅ FEATURE-033 — Lifecycle de `01-PROJECT-BRIEF-TEMPLATE`
 
-**Estado:** Implementada y validada E2E en vivo (VPS, 2026-08-16) — pendiente de merge a `main`
-por decisión del owner. Ver `docs/features/FEATURE-033-Lifecycle-canónico-de-Project-Brief-basado-en-el-Runbook.md`,
+**Estado:** Implementada, validada E2E en vivo (VPS, 2026-08-16) y **mergeada a `main`** (commit
+`6bce083`). Ver `docs/features/FEATURE-033-Lifecycle-canónico-de-Project-Brief-basado-en-el-Runbook.md`,
 sección 12 (Resultado de Validación E2E).
 
 Persistencia de dominio propia (sin tabla polimórfica común con Feature/Architecture/Release Plan,
@@ -1234,8 +1251,8 @@ Functional → Planning), sin regresión sobre FEATURE-023. Tres bugs de prompt 
 
 ### ✅ FEATURE-034 — Lifecycle de `02-ARCHITECTURE-TEMPLATE`
 
-**Estado:** Implementada y validada E2E en vivo (VPS, 2026-08-16) — pendiente de merge a `main`
-por decisión del owner. Ver
+**Estado:** Implementada, validada E2E en vivo (VPS, 2026-08-16) y **mergeada a `main`** (commit
+`cb4c492`). Ver
 `docs/features/FEATURE-034-Lifecycle-canónico-de-Architecture-basado-en-el-Runbook.md`, sección 11
 (Resultado de Validación E2E).
 
@@ -1250,10 +1267,11 @@ FEATURE-023/FEATURE-033.
 Incluyó el botón "Descargar" en el panel de documento de Feature (`FeatureDocumentPanel`,
 `web/src/runs/RunDetailPage.tsx`), agregado tras el cierre de F033.
 
-### 🟢 FEATURE-035 — Lifecycle de `09-RELEASE-PLAN-TEMPLATE`
+### ✅ FEATURE-035 — Lifecycle de `09-RELEASE-PLAN-TEMPLATE`
 
-**Estado:** Implementada y validada E2E parcialmente en vivo (VPS, 2026-08-16/17) — pendiente de
-merge a `main` por decisión del owner. Ver
+**Estado:** Implementada, validada E2E en vivo (VPS, 2026-08-16/17) y **mergeada a `main`** (commit
+`43798b2`). Los dos hallazgos que habían bloqueado completar la validación en vivo (ver más abajo)
+quedaron resueltos por FEATURE-044. Ver
 `docs/features/FEATURE-035-Lifecycle-canónico-de-Release-Plan-basado-en-el-Runbook.md`, sección 11
 (Resultado de Validación E2E).
 
@@ -1267,10 +1285,64 @@ completa, Feature 2 en placeholder explícito, en el Markdown materializado). Nu
 
 Durante la validación se encontraron y corrigieron/anotaron 3 bugs preexistentes de FEATURE-020/023/037
 (ninguno originado en esta Feature): redeclaración de Features activadas en reingreso de Functional
-(corregido), falta de persistencia real de la Testing Policy configurable (`task_81cd46a5`,
-pendiente), y re-escalación de aprobación de Roadmap en cada reingreso de Architect
-(`task_ddde9489`, pendiente) — estos dos últimos bloquearon completar en vivo el ciclo de cierre
-con 2 Features; detalle completo en la sección 11 del doc de la Feature.
+(corregido en esta misma Feature), falta de persistencia real de la Testing Policy configurable
+(`task_81cd46a5`), y re-escalación de aprobación de Roadmap en cada reingreso de Architect
+(`task_ddde9489`) — estos dos últimos habían bloqueado completar en vivo el ciclo de cierre con 2
+Features; **ambos resueltos por FEATURE-044** (ver esa entrada), que además encontró y corrigió una
+tercera variante del mismo bug de redeclaración de Features (por el camino normal de invocación de
+Functional, no solo por reingreso) y otros 8 hallazgos más al completar por primera vez la
+validación de punta a punta. Detalle original en la sección 11 del doc de la Feature.
+
+### ✅ FEATURE-044 — Correcciones de runtime del ciclo Roadmap/Testing Policy/Release Plan
+
+**Estado:** Implementada, validada E2E en vivo (VPS, 2026-08-17) y **mergeada a `main`**. Bloque
+correctivo (mismo patrón que FEATURE-019/020/021 en su momento), no una Feature de producto nueva —
+surge de intentar por primera vez validar de punta a punta un release con **dos** Features, una de
+ellas con una ambigüedad de contrato real resuelta a mitad de camino. Ese camino nunca se había
+ejercitado completo; cada bug encontrado bloqueaba probar el siguiente. Diseño y detalle completo en
+`docs/features/FEATURE-044-Correcciones-de-runtime-del-ciclo-Roadmap-Testing-Policy-Release-Plan.md`.
+
+**10 hallazgos, cada uno con causa raíz verificada en vivo contra la VPS** (no solo el síntoma):
+
+1. Architect re-escalaba la aprobación de un Roadmap ya aprobado — dos causas distintas
+   (reingreso por escalamiento ajeno sin excepción para "el Roadmap resultante es idéntico al ya
+   aprobado"; reingreso corrigiendo su propia ambigüedad de Regla 2 sin ninguna señal de que el
+   proyecto ya tuviera un Roadmap aprobado). Cierra `task_ddde9489`, abierto durante FEATURE-035.
+2. Testing Policy nunca se persistía ni llegaba resuelta a Planning — llegaba siempre como el
+   template estático sin completar. Cierra `task_81cd46a5`, abierto durante FEATURE-035.
+3. Documentos canónicos fallaban con `EEXIST` al materializarse en un worktree cuyo branch base ya
+   tenía el documento commiteado de un run anterior (el flag de escritura se decidía según el ciclo
+   de vida de la fila en DB, no del filesystem del worktree — dos ciclos de vida independientes).
+4. Planning perdía la finalización de una Feature cuando escalaba por la siguiente — causa raíz
+   confirmada de un loop de "Feature ya activada" y del ícono de Feature que nunca pasaba a
+   completado en la UI (el bug real detrás del síntoma cosmético que parecía UI-only).
+5. SSE: indicador de conexión hardcodeado (nunca leía el estado real) + notificaciones de Postgres
+   sin serializar por run (ventana de carrera real entre las queries concurrentes de dos
+   notificaciones casi seguidas).
+6. Extracción de JSON en texto plano (formato Codex) truncaba en silencio cualquier valor con
+   saltos de línea reales adentro — riesgo latente en todos los campos JSON grandes del sistema
+   (Roadmap, Project Brief, Architecture, Release Plan Document), no solo en el que lo disparó.
+7. Auto-navegación al run hijo cuando el reingreso cross-pipeline lo crea sin acción humana — con
+   una regresión propia corregida en la misma Feature (navegaba también al abrir a propósito
+   cualquier run histórico ya resuelto, haciendo imposible revisarlos).
+8. Condición de carrera: el run padre se marcaba terminado antes de que el run hijo existiera en
+   la DB, en los dos caminos de continuación automática.
+9. Functional redeclaraba Features ya activadas al recibir la propuesta de Architect por el camino
+   normal (no solo por reingreso) — tercera variante del mismo síntoma que FEATURE-035 ya había
+   corregido parcialmente.
+
+**Principio común a los 10 fixes**: cada uno reemplaza una dependencia de que el LLM
+infiera/recuerde algo de la conversación por un dato determinístico que el backend le entrega
+explícitamente (`existingRoadmapApproval`, `existingTestingPolicyConfig`, `existingFeatures`,
+`childRunId`) o por una corrección de orden de operaciones que elimina la ventana de carrera en sí.
+Ninguno depende del "buen comportamiento" del modelo — todos mueven la fuente de verdad al backend.
+
+**Validación E2E real (2026-08-17, VPS, proyecto `pruebas-ia`)**: múltiples corridas hasta agotar el
+catálogo de bugs (cada fix expuso el siguiente), cerrando con un ciclo completo de dos Features del
+mismo release sin ninguno de los bugs originales — incluida la ambigüedad real de contrato
+resuelta a mitad de camino y el cierre de release propuesto correctamente al agotar las Features.
+Cobertura automatizada: 336/336 tests, incluidos 12 tests nuevos específicos de esta Feature
+(reproducción exacta de la extracción de JSON truncada y de la regresión de auto-navegación).
 
 ### ✅ FEATURE-036 — Release activo nominal tras cierre de proyecto sin release siguiente
 
