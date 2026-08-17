@@ -6,7 +6,7 @@
 * Type: Arquitectura / Workflow / Persistencia documental / UI
 * Owner: Asdru — Product Owner
 * Implementation Owner: DAIA
-* Status: Diseño aprobado — GO para Development
+* Status: Implementada y validada E2E parcialmente en vivo (VPS) — pendiente de merge a `main` por decisión del owner
 * Playbook Mode: Standard
 * Template de gobernanza: `docs/playbook/07-FEATURE-TEMPLATE.md`
 * Template operativo: `docs/runbook/09-RELEASE-PLAN-TEMPLATE.md`
@@ -439,3 +439,76 @@ central de este diseño).
 (construcción incremental en vez de "nace completo", sección 4.3/4.4/4.6) y D7 (nombres de
 archivo/función explícitos para el gate de tamaño nuevo, para no dejarlo implícito en una zona ya
 sensible por historia de bugs — "corrección del runtime de circuitos").
+
+## 11. Resultado de Validación E2E
+
+**Fecha:** 2026-08-16/17. **Rama:** `feature/FEATURE-035-release-plan-lifecycle`. **Entorno:** VPS
+real (`asdru@179.197.79.99`, servicio `ai-orchestrator.service`, Postgres real vía Docker), caso
+de negocio real con 2 Features en el mismo release, corrido por el owner a través del frontend en
+Vercel.
+
+### Qué se validó con evidencia real
+
+La corrida de las 2026-08-16 22:13–22:22hs probó lo central del diseño antes de que interfirieran
+los bugs preexistentes descritos abajo:
+
+1. Architect declaró `ARCHITECTURE` junto con `ROADMAP` desde la primera propuesta (Rule 18 de
+   F034, sigue funcionando sin bugs de prompt).
+2. Functional decompuso el caso en **2 Features reales** (`calculateTip`, `calculateSplitTip`).
+3. **Planning, primera invocación:** `RELEASE_PLAN_DOCUMENT` con `secuencia` completa (2 entradas,
+   con justificación de orden) y `featurePlan` conteniendo **únicamente** la primera Feature — no
+   la segunda. Confirmado contra el Markdown materializado real (`docs/releases/r1/RELEASE-PLAN.md`
+   descargado): §0 con "Riesgo razonable", §1 con la secuencia justificada, §2 con el bloque
+   completo de la Feature 1 (Enfoque Técnico + Test Plan con 4 escenarios, nivel L3) y el
+   placeholder explícito `"Enfoque técnico y Test Plan todavía no planificados."` para la Feature 2
+   — exactamente el comportamiento incremental diseñado, sin necesidad de que el modelo resolviera
+   ambas Features de una sola vez.
+4. Developer↔QA de la Feature 1 completó con 4/4 tests aprobados; merge en Modo Manual aprobado y
+   ejecutado realmente (push real a la rama base).
+5. Project Brief y Architecture (F033/F034) siguieron funcionando sin regresión durante toda la
+   corrida, visibles junto al panel de Release Plan en la misma UI.
+
+**No se completó** la segunda vuelta (acumulación del bloque de la Feature 2 sobre el snapshot ya
+persistido de la Feature 1, y el cierre del release con `RELEASE_COMPLETO`) — quedó bloqueada
+repetidamente por dos bugs preexistentes ajenos a F035 (ver abajo), no por el código de esta
+Feature. La lógica de acumulación (`mergeFeaturePlan` en `releasePlanLifecycle.ts`) está cubierta
+por tests unitarios directos (`releasePlanDocument.test.ts`: "§2 respeta el orden de la secuencia,
+no el orden de llegada de los featurePlans") que sí verifican ese comportamiento de forma aislada,
+aunque no se haya observado en un run E2E completo de punta a punta.
+
+### Bugs preexistentes encontrados durante la validación (no de F035)
+
+Uno se corrigió en esta misma sesión; dos quedaron como investigación separada porque exceden el
+alcance de esta Feature y se retroalimentan entre sí:
+
+1. **Corregido** — Functional redeclaraba Features ya activadas en reingreso por escalamiento
+   ajeno, porque `functional.txt` no distinguía esa invocación de la primera (batch completo vs.
+   sólo lo corregido). Bloqueaba cualquier release con más de una Feature en cuanto el reingreso
+   automático pasaba por Functional. Fix acotado a `functional.txt` Regla 5 (commit `468de12`),
+   sin tocar `src/features/lifecycle.ts` — el guard de protección real se mantiene intacto.
+   Investigación completa:
+   `docs/research/FEATURE-035-redeclaracion-de-feature-activada-en-reingreso-de-functional.md`.
+   Confirmado funcionando después del fix (Functional declaró sólo la Feature corregida en
+   sucesivas corridas).
+2. **Pendiente, anotado aparte (`task_81cd46a5`)** — la sección "Configuración Editable por
+   Producto" de `04-TESTING-POLICY.md` no tiene ningún mecanismo real de persistencia: Planning
+   siempre recibe el template estático sin completar (`governance.testingPolicy`,
+   `runStart.ts:1018`), sin importar lo que Architect declare al respecto. Causa escalamientos
+   repetidos e irresolubles por el canal "oficial".
+3. **Pendiente, anotado aparte (`task_ddde9489`)** — Architect re-escala pidiendo aprobación de
+   Roadmap en cada reingreso donde decide "corregir algo real" (Regla 6), aunque el Roadmap en sí
+   no haya cambiado, porque la Regla 4 no distingue "propuesta nueva" de "propuesta re-generada
+   idéntica". Se retroalimenta con el bug 2: mientras Testing Policy siga sin resolverse, cada
+   reingreso automático dispara este bug también, forzando al humano a re-aprobar el mismo Roadmap
+   repetidamente.
+
+### Conclusión
+
+FEATURE-035 queda validada parcialmente en vivo, con evidencia real y directa de sus dos
+mecanismos más nuevos y riesgosos (acumulación incremental sin `release_plan_revisions`, y
+protección de los gates de aprobación existentes). No se alcanzó a observar en vivo el ciclo
+completo de 2 Features hasta el cierre del release, bloqueado por bugs preexistentes ya
+documentados y anotados para resolución separada — ninguno originado en el código de esta Feature.
+La suite automatizada (328+ tests) y la validación parcial en vivo dan confianza suficiente para
+mergear; el resto del ciclo (segunda Feature + cierre) queda pendiente de una corrida futura una
+vez resueltos los bugs 2 y 3 de arriba.
