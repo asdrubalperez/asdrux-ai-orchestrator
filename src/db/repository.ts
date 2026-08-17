@@ -1449,6 +1449,23 @@ export async function getRunDetailForUser(runId: string, userId: string) {
   return detail;
 }
 
+/**
+ * Fix (2026-08-17), hallazgo en vivo: cuando un escalamiento se resuelve solo -- el mecanismo de
+ * reingreso cross-pipeline (FEATURE-020) crea y arranca un run hijo sin ninguna acción humana --
+ * el usuario quedaba mirando el run viejo (ya "resolved") sin ninguna señal de a qué run nuevo
+ * seguir, a diferencia de responder un escalamiento a mano (esa respuesta HTTP sí devuelve
+ * `childRunId` y el frontend navega ahí solo). `originated_from_run_id` ya se persiste igual en
+ * ambos caminos (`respondService.ts` y `runStart.ts`) -- esta consulta expone esa relación al
+ * frontend para que también pueda seguir el camino automático.
+ */
+export async function getChildRunId(runId: string): Promise<string | null> {
+  const result = await pool.query<{ id: string }>(
+    "select id from runs where originated_from_run_id = $1 order by created_at desc limit 1",
+    [runId]
+  );
+  return result.rows[0]?.id ?? null;
+}
+
 export async function getRunEventsAfterForUser(runId: string, userId: string, afterEventId: number) {
   const run = await pool.query<Pick<RunRow, "owner_id">>("select owner_id from runs where id = $1", [runId]);
   if (!run.rows[0] || run.rows[0].owner_id !== userId) return null;

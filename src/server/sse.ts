@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { pool } from "../db/pool.js";
 import {
+  getChildRunId,
   getCurrentProjectConfig,
   getReleasePlansByRelease,
   getRunDetailForUser,
@@ -63,11 +64,16 @@ export async function openRunEventsStream(params: {
   };
   addClient(client);
 
-  const [roadmap, featureDocument] = await Promise.all([
+  const [roadmap, featureDocument, childRunId] = await Promise.all([
     resolveReleaseRoadmap(detail.run.project_id),
     getFeatureDocumentForRun(params.runId),
+    getChildRunId(params.runId),
   ]);
-  writeEvent(params.response, "snapshot", buildRunViewModel(detail, roadmap, featureDocument));
+  writeEvent(
+    params.response,
+    "snapshot",
+    buildRunViewModel(detail, roadmap, featureDocument, null, null, null, childRunId)
+  );
   await replayEvents(client);
 
   const heartbeat = setInterval(() => {
@@ -153,11 +159,16 @@ async function pushRunSnapshotToClients(runId: string): Promise<void> {
         client.response.end();
         return;
       }
-      const [roadmap, featureDocument] = await Promise.all([
+      const [roadmap, featureDocument, childRunId] = await Promise.all([
         resolveReleaseRoadmap(detail.run.project_id),
         getFeatureDocumentForRun(client.runId),
+        getChildRunId(client.runId),
       ]);
-      writeEvent(client.response, "snapshot", buildRunViewModel(detail, roadmap, featureDocument));
+      writeEvent(
+        client.response,
+        "snapshot",
+        buildRunViewModel(detail, roadmap, featureDocument, null, null, null, childRunId)
+      );
       await replayEvents(client);
     })
   );

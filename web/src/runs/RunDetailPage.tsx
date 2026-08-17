@@ -127,6 +127,12 @@ interface RunViewModel {
     complete: boolean;
     reason: "CONTENT_TOO_LARGE" | null;
   } | null;
+  /**
+   * Fix (2026-08-17): id del run que se originó a partir de este, sea porque el usuario respondió
+   * un escalamiento o porque el reingreso cross-pipeline (FEATURE-020) lo creó solo. `null` mientras
+   * este run siga siendo el vigente.
+   */
+  childRunId: string | null;
 }
 
 /** FEATURE-033: helper puro y reusable — dispara la descarga del Markdown canónico en el navegador. */
@@ -145,8 +151,23 @@ export function RunDetailPage() {
   const runId = params.caseId ?? "";
   const query = useRunQuery(runId);
   const connectionStatus = useRunStream(runId, query.refresh);
+  const navigate = useNavigate();
 
   const run = query.data;
+
+  // Fix (2026-08-17), hallazgo en vivo: cuando el reingreso cross-pipeline (FEATURE-020) resuelve
+  // un escalamiento y arranca un run hijo sin ninguna acción humana, el usuario quedaba mirando el
+  // run viejo (ya "resolved") sin ninguna señal de a qué run nuevo seguir -- a diferencia de
+  // responder un escalamiento a mano, que sí navega solo (ver EscalationActionBanner más abajo,
+  // vía el `childRunId` que devuelve la respuesta HTTP). `run.childRunId` cubre ambos caminos por
+  // igual, así que este efecto sigue la cadena automáticamente sin importar cuál la generó.
+  // `replace: true` para no ensuciar el historial del navegador con cada eslabón intermedio.
+  React.useEffect(() => {
+    if (!run?.childRunId || !params.projectId) return;
+    navigate(`/projects/${encodeURIComponent(params.projectId)}/cases/${encodeURIComponent(run.childRunId)}`, {
+      replace: true,
+    });
+  }, [run?.childRunId, params.projectId, navigate]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-4 px-4 py-5 sm:px-6 lg:px-8">

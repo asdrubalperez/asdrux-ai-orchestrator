@@ -114,6 +114,20 @@ test("el snapshot de vista refleja cambios de runs aunque no haya eventos nuevos
   assert.equal(view.narrative.length, 1);
 });
 
+// Fix (2026-08-17): childRunId por defecto es null (run sin sucesor todavía) y se propaga tal cual
+// cuando el llamador ya lo resolvió -- el frontend lo usa para seguir automáticamente el run nuevo
+// que el reingreso cross-pipeline crea sin ninguna acción humana (mismo criterio que ya usaba la
+// respuesta HTTP de "responder un escalamiento a mano").
+test("childRunId es null por defecto y se propaga cuando el llamador lo resuelve", () => {
+  const detail = { run: { ...baseRun, status: "resolved" }, events: [event(1, "run_started", {})], artifacts: [] };
+
+  assert.equal(buildRunViewModel(detail).childRunId, null);
+  assert.equal(
+    buildRunViewModel(detail, null, null, null, null, null, "child-run-id").childRunId,
+    "child-run-id"
+  );
+});
+
 test("usa summary de phase_finished como bitacora narrativa y muestra escalamiento", () => {
   const view = buildRunViewModel({
     run: { ...baseRun, status: "escalated", current_phase: "planning" },
