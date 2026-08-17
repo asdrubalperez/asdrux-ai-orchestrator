@@ -388,6 +388,18 @@ test("extractRoadmapApproval devuelve null si el string de Codex no trae la lín
   );
 });
 
+// Fix (2026-08-17), hallazgo en vivo: Codex puede emitir el JSON de un tag con saltos de línea
+// reales adentro (pese a la instrucción de "una sola línea") cuando el payload es grande -- el
+// regex de una sola línea truncaba en silencio, produciendo "Expected ',' or '}' after property
+// value" en el llamador. Reproduce exactamente ese caso con JSON pretty-printed (embebe \n de
+// verdad, no \\n escapado dentro de un string) para confirmar que la extracción balanceada por
+// llaves lo resuelve sin depender de que el modelo respete el formato de una sola línea.
+test("extractRoadmapApproval reconoce ROADMAP aunque Codex lo emita con saltos de línea reales adentro del JSON", () => {
+  const multilineRoadmapJson = JSON.stringify(VALID_ROADMAP, null, 2);
+  const codexOutput = `RESUMEN: listo\nARTEFACTO: null\nROADMAP: ${multilineRoadmapJson}\nRAZON_ESCALAMIENTO: null`;
+  assert.deepEqual(extractRoadmapApproval({ phase: "architect" }, { outputArtifact: codexOutput }), VALID_ROADMAP);
+});
+
 test("extractReleasePlanDeclaration reconoce RELEASE_PLAN cuando outputArtifact es el string real que produce Codex", () => {
   const codexOutput = `RESUMEN: plan\nRELEASE_PLAN: ${JSON.stringify(VALID_RELEASE_PLAN_DECLARATION)}\nRELEASE_COMPLETO: null`;
   assert.deepEqual(

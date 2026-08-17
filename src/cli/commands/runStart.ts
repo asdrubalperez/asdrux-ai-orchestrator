@@ -525,20 +525,37 @@ export async function executePipelineRun(params: {
           if (!activeReleaseForPlanning) {
             throw new Error(`Run ${runId}: Planning declaró RELEASE_PLAN sin release activo fijado.`);
           }
-          await persistReleasePlanDocument({
-            projectId,
-            runId,
-            releaseKey: activeReleaseForPlanning.id,
-            phaseFinishedEventId,
-            payload: parseReleasePlanDocumentPayload(result.outputArtifact),
-            operationalFeatures: releaseDeclarationForDocument.features,
-            templateAsset: await runbookProvider.readText(RELEASE_PLAN_TEMPLATE_ASSET),
-          });
-          await materializeReleasePlanDocument({
-            projectId,
-            releaseKey: activeReleaseForPlanning.id,
-            worktreePath: worktree.worktreePath,
-          });
+          // Fix (2026-08-17), hallazgo en vivo: `RELEASE_PLAN` (arriba, control del pipeline) ya
+          // quedó persistido con éxito en este punto -- `RELEASE_PLAN_DOCUMENT` es contenido
+          // enriquecido de solo lectura (el documento Markdown), y un JSON malformado del modelo acá
+          // (riesgo inherente de generación de LLM, mismo tipo de riesgo H12 ya aceptado en otros
+          // campos etiquetados del sistema) no debería tirar abajo un turno de Planning que por lo
+          // demás fue exitoso -- antes de este fix, un JSON inválido en este campo dejaba el run
+          // entero en `failed` pese a que la Feature ya había sido asignada correctamente,
+          // desincronizando el estado real del pipeline del estado del run. Se degrada a un evento
+          // diagnóstico: el documento simplemente no se actualiza en este turno (se regenera solito
+          // en el próximo turno exitoso de Planning para este release, mismo patrón de acumulación
+          // que ya usa `RELEASE_PLAN_DOCUMENT`), pero el pipeline continúa.
+          try {
+            await persistReleasePlanDocument({
+              projectId,
+              runId,
+              releaseKey: activeReleaseForPlanning.id,
+              phaseFinishedEventId,
+              payload: parseReleasePlanDocumentPayload(result.outputArtifact),
+              operationalFeatures: releaseDeclarationForDocument.features,
+              templateAsset: await runbookProvider.readText(RELEASE_PLAN_TEMPLATE_ASSET),
+            });
+            await materializeReleasePlanDocument({
+              projectId,
+              releaseKey: activeReleaseForPlanning.id,
+              worktreePath: worktree.worktreePath,
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            await recordRunEvent(runId, "release_plan_document_persist_failed", { error: message });
+            console.error(`[run:start] no se pudo persistir RELEASE_PLAN_DOCUMENT en el run ${runId}:`, message);
+          }
         }
       }
 

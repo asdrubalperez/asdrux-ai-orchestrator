@@ -41,6 +41,21 @@ test("parsea RELEASE_PLAN_DOCUMENT en forma de texto plano (Codex)", () => {
   assert.equal(payload.secuencia[0].sourceKey, "f1");
 });
 
+// Fix (2026-08-17), hallazgo en vivo: un run real murió con "RELEASE_PLAN_DOCUMENT no contiene
+// JSON válido (Expected ',' or '}' after property value...)" -- Codex había emitido el JSON con
+// saltos de línea reales adentro (formato "pretty", no en una sola línea pese a la instrucción), y
+// el extractor de texto plano lo truncaba en el primer \n, dejando un objeto incompleto. Reproduce
+// ese caso exacto (JSON.stringify con indentación, saltos de línea de verdad) para confirmar que la
+// extracción balanceada por llaves de `extractStructuredValue` ya no depende de que el modelo
+// respete el formato de una sola línea.
+test("parsea RELEASE_PLAN_DOCUMENT en forma de texto plano de Codex aunque el JSON venga con saltos de línea reales adentro", () => {
+  const multilineJson = JSON.stringify(validPayload(), null, 2);
+  const line = `RELEASE_PLAN_DOCUMENT: ${multilineJson}`;
+  const payload = parseReleasePlanDocumentPayload(`ESTADO: completed\n${line}\nRAZON_ESCALAMIENTO: null`);
+  assert.equal(payload.secuencia[0].sourceKey, "f1");
+  assert.equal(payload.featurePlan?.sourceKey, "f1");
+});
+
 test("featurePlan puede ser null (RELEASE_COMPLETO, sin Feature nueva que aportar)", () => {
   const payload = parseReleasePlanDocumentPayload({
     releasePlanDocument: { ...validPayload(), featurePlan: null },
