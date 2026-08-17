@@ -317,7 +317,13 @@ export async function materializeActiveFeatureDocument(params: {
   const root = path.resolve(params.worktreePath);
   if (!target.startsWith(root + path.sep)) throw new Error("Ruta documental fuera del worktree.");
   await mkdir(path.dirname(target), { recursive: true });
-  await writeFile(target, markdown, { encoding: "utf8", flag: feature.document_hash ? "w" : "wx" });
+  // Fix (2026-08-17), hallazgo en vivo: "wx" (creación exclusiva) fallaba con EEXIST en cualquier
+  // worktree fresco cuyo branch base ya tuviera el documento commiteado por un run anterior --
+  // `document_hash` es un dato de la fila en DB, no una garantía sobre el estado del filesystem del
+  // worktree (que vive en un ciclo de vida completamente distinto). El path es determinístico y
+  // pertenece exclusivamente a esta Feature (ya validado arriba que cae dentro del worktree), y el
+  // contenido es la fuente canónica de verdad -- sobrescribir siempre es lo correcto.
+  await writeFile(target, markdown, { encoding: "utf8", flag: "w" });
   const hash = sha256(markdown);
   await pool.query(
     "update features set document_hash = $1, updated_at = now() where id = $2",

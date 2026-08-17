@@ -224,7 +224,11 @@ export async function materializeReleasePlanDocument(params: {
   const root = path.resolve(params.worktreePath);
   if (!target.startsWith(root + path.sep)) throw new Error("Ruta documental fuera del worktree.");
   await mkdir(path.dirname(target), { recursive: true });
-  await writeFile(target, markdown, { encoding: "utf8", flag: releasePlan.document_hash ? "w" : "wx" });
+  // Fix (2026-08-17), hallazgo en vivo: mismo criterio que features/lifecycle.ts -- "wx" fallaba
+  // con EEXIST en un worktree fresco cuyo branch base ya tenía el documento commiteado por un run
+  // anterior. `document_hash` describe la fila en DB, no el filesystem del worktree. Sobrescribir
+  // siempre es correcto: el path es determinístico y el contenido es la fuente canónica de verdad.
+  await writeFile(target, markdown, { encoding: "utf8", flag: "w" });
   const hash = sha256(markdown);
   await pool.query(
     "update release_plans set document_hash = $1, updated_at = now() where id = $2",
