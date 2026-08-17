@@ -56,6 +56,7 @@
 **⚪ Tentativo**
 - Escalamiento optimizado sin reinicio completo
 - Planning valida la Feature de Functional antes de diseñar el Release Plan
+- Feedback no bloqueante entre roles del pipeline
 - Approval Model por Release
 - Concurrencia de runs simultáneos
 - Limpieza automática de worktrees/branches vencidos
@@ -1256,6 +1257,27 @@ entre Features del release, huecos) antes de diseñar el Release Plan. Complemen
 ### ⚪ Limpieza de persistencia de código versionado
 `artifacts.commit_ref` existe en el schema pero no se puebla nunca; los commits reales quedan hoy
 solo en `run_events`.
+
+### ⚪ Feedback no bloqueante entre roles del pipeline
+Investigación cerrada (2026-08-16) en
+`docs/research/FEATURE-035-feedback-no-bloqueante-entre-roles-del-pipeline.md`, originada como hueco
+identificado durante el diseño de FEATURE-035. Hoy el único circuito de "vuelta atrás" entre roles es
+el bloqueante de FEATURE-019/020 (reinicia el pipeline completo desde Architect y frena la Feature en
+curso); no existe una vía para que Developer/QA dejen un hallazgo dirigido a otro rol (p. ej. a
+Architect) sin bloquear la entrega actual. Hallazgo clave: Architect y Functional no tienen "próxima
+invocación garantizada" dentro de un release (`PLANNING_TO_QA` arranca directo en Planning, sin pasar
+por ellos), así que un mecanismo puramente documental (agregar sección "Hallazgos y Anomalías" a
+`07-FEATURE-TEMPLATE.md`, hoy ausente) no garantiza que el hallazgo se atienda.
+
+Recomendación de la investigación: una cola de hallazgos pendientes por rol destino (reutilizando los
+patrones ya validados de persistencia `artifact`/`run_event` y autoselección `NO_APLICA`), inyectada
+al contexto de cualquier invocación futura del rol destino — complementada, no sustituida, por la
+sección documental como bitácora legible. Explícitamente **no** recomendado diseñarlo como parte de
+FEATURE-035 ni de ninguna Feature existente: es transversal a los 5 roles y a los otros 3 documentos
+(Project Brief, Architecture, Release Plan), y el propio precedente de FEATURE-033 advierte contra
+construir la pieza genérica antes de validarla contra al menos un caso real (p. ej. QA→Architect).
+Sigue en Tentativo hasta que surja ese caso concreto y se diseñe primero contra ese único par
+origen→destino.
 
 ### ⚪ Approval Model por Release
 Feature 09 (`06-DELIVERY-WORKFLOW.md`, Stage 6) ya diseñó la v1: Modo Manual (default — automático
