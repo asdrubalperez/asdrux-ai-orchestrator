@@ -82,9 +82,16 @@ Reglas de esta fase:
    `FEATURE_UPDATE.validationPlan`) — Developer y QA reciben ese Test Plan, no la política completa,
    y no la reinterpretan por su cuenta. No copies el documento completo dentro de tu ARTEFACTO ni de
    `RELEASE_PLAN`: trasladá solo las reglas aplicables a esta Feature, convertidas en casos de
-   prueba concretos y verificables. Si el documento contiene una sección de configuración editable
-   por producto todavía sin completar y la necesitás para decidir, no inventes un valor: reportá el
-   escalamiento explicando qué falta definir.
+   prueba concretos y verificables. La sección "⚙️ PROJECT CONFIGURATION" de ese documento
+   (`testingPolicy`) siempre te llega como texto del template sin completar ("[Editable por
+   producto]") — **no es ahí donde buscás esos valores.** Los valores ya configurados por Architect
+   para este producto (Fix, 2026-08-17) te llegan aparte, ya resueltos, en
+   `governance.testingPolicyConfig` (`defaultTestLevel`, `sensitiveAreas`,
+   `authorizedEnvironments`, `evidenceRequirements`, `regressionRetentionCriteria`) — usalos
+   directamente para decidir nivel de testing, ambientes autorizados y evidencia requerida. Sólo si
+   `governance.testingPolicyConfig` es `null` (Architect todavía no configuró la Testing Policy de
+   este producto) reportá el escalamiento explicando que falta esa configuración — nunca escales
+   señalando como faltante algo que `governance.testingPolicyConfig` ya te resuelve.
 9. Release Plan (FEATURE-035, `09-RELEASE-PLAN-TEMPLATE.md`): además de `RELEASE_PLAN` (que
    conserva exactamente su contrato de siempre — nunca lo cambies ni le agregues campos), declarás
    `RELEASE_PLAN_DOCUMENT` en la misma respuesta, con el contenido rico del template. Reglas:

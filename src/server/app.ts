@@ -19,6 +19,7 @@ import {
 import {
   getCurrentProjectConfig,
   getReleasePlansByRelease,
+  getChildRunId,
   getRunDetailForUser,
   getGlobalAgentConfig,
   setGlobalAgentConfig,
@@ -1049,13 +1050,14 @@ export function createApp(config: ServerConfig): express.Express {
         res.status(404).json({ error: "run_not_found" });
         return;
       }
-      const [releaseRoadmap, featureDocument, projectBriefDocument, architectureDocument, releasePlanDocument] =
+      const [releaseRoadmap, featureDocument, projectBriefDocument, architectureDocument, releasePlanDocument, childRunId] =
         await Promise.all([
           resolveReleaseRoadmap(detail.run.project_id),
           getFeatureDocumentForRun(runId),
           getProjectBriefDocumentForRun(runId),
           getArchitectureDocumentForRun(runId),
           getReleasePlanDocumentForRun(runId),
+          getChildRunId(runId),
         ]);
       res.json(
         buildRunViewModel(
@@ -1064,7 +1066,8 @@ export function createApp(config: ServerConfig): express.Express {
           featureDocument,
           projectBriefDocument,
           architectureDocument,
-          releasePlanDocument
+          releasePlanDocument,
+          childRunId
         )
       );
     } catch (err) {

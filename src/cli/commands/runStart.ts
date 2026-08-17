@@ -84,6 +84,7 @@ import {
   materializeActiveFeatureDocument,
   getApprovalModeForRun,
   getActiveFeatureForRun,
+  getActivatedFeatureIdentities,
   FeatureLifecycleEscalationError,
   persistActiveFeatureContribution,
   persistFunctionalFeatureBatch,
@@ -408,7 +409,13 @@ export async function executePipelineRun(params: {
       await updateRunCurrentPhase(runId, phase.agentRole);
       const baseContext = contextForNextPhase;
       const context =
-        phase.agentRole === "planning" ? await withRoleContext(projectId, runId, baseContext) : baseContext;
+        phase.agentRole === "planning"
+          ? await withRoleContext(projectId, runId, baseContext)
+          : phase.agentRole === "architect"
+            ? await withArchitectRoleContext(projectId, baseContext)
+            : phase.agentRole === "functional"
+              ? await withFunctionalRoleContext(projectId, baseContext)
+              : baseContext;
       const roleInstructions = await readRole(phase.agentRole);
       const selection = await resolveSelection(phase.agentRole);
       const { executor, finalizeAuth } = await buildExecutor(selection, worktree.worktreePath, runId, userId);
@@ -521,20 +528,37 @@ export async function executePipelineRun(params: {
           if (!activeReleaseForPlanning) {
             throw new Error(`Run ${runId}: Planning declaró RELEASE_PLAN sin release activo fijado.`);
           }
-          await persistReleasePlanDocument({
-            projectId,
-            runId,
-            releaseKey: activeReleaseForPlanning.id,
-            phaseFinishedEventId,
-            payload: parseReleasePlanDocumentPayload(result.outputArtifact),
-            operationalFeatures: releaseDeclarationForDocument.features,
-            templateAsset: await runbookProvider.readText(RELEASE_PLAN_TEMPLATE_ASSET),
-          });
-          await materializeReleasePlanDocument({
-            projectId,
-            releaseKey: activeReleaseForPlanning.id,
-            worktreePath: worktree.worktreePath,
-          });
+          // Fix (2026-08-17), hallazgo en vivo: `RELEASE_PLAN` (arriba, control del pipeline) ya
+          // quedó persistido con éxito en este punto -- `RELEASE_PLAN_DOCUMENT` es contenido
+          // enriquecido de solo lectura (el documento Markdown), y un JSON malformado del modelo acá
+          // (riesgo inherente de generación de LLM, mismo tipo de riesgo H12 ya aceptado en otros
+          // campos etiquetados del sistema) no debería tirar abajo un turno de Planning que por lo
+          // demás fue exitoso -- antes de este fix, un JSON inválido en este campo dejaba el run
+          // entero en `failed` pese a que la Feature ya había sido asignada correctamente,
+          // desincronizando el estado real del pipeline del estado del run. Se degrada a un evento
+          // diagnóstico: el documento simplemente no se actualiza en este turno (se regenera solito
+          // en el próximo turno exitoso de Planning para este release, mismo patrón de acumulación
+          // que ya usa `RELEASE_PLAN_DOCUMENT`), pero el pipeline continúa.
+          try {
+            await persistReleasePlanDocument({
+              projectId,
+              runId,
+              releaseKey: activeReleaseForPlanning.id,
+              phaseFinishedEventId,
+              payload: parseReleasePlanDocumentPayload(result.outputArtifact),
+              operationalFeatures: releaseDeclarationForDocument.features,
+              templateAsset: await runbookProvider.readText(RELEASE_PLAN_TEMPLATE_ASSET),
+            });
+            await materializeReleasePlanDocument({
+              projectId,
+              releaseKey: activeReleaseForPlanning.id,
+              worktreePath: worktree.worktreePath,
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            await recordRunEvent(runId, "release_plan_document_persist_failed", { error: message });
+            console.error(`[run:start] no se pudo persistir RELEASE_PLAN_DOCUMENT en el run ${runId}:`, message);
+          }
         }
       }
 
@@ -643,7 +667,20 @@ export async function executePipelineRun(params: {
           // propio rol que escaló, nunca llegaría a Architect. En vez de eso, este run se resuelve
           // y se crea/ejecuta automáticamente (sin esperar humano) un run FULL_PIPELINE que
           // arranca en Architect con el mismo ReentryContext que usa el reingreso humano.
-          await updateRunStatus(runId, "resolved");
+          //
+          // Fix (2026-08-17), hallazgo en vivo: `updateRunStatus(runId, "resolved")` corría ACÁ,
+          // antes de crear el run hijo -- eso dispara de inmediato el trigger de notify sobre ESTE
+          // run (`runs_notify_observer`, `after update of status`), y el cliente SSE que lo estaba
+          // mirando reconsulta `getChildRunId(runId)` en ese mismo instante. Pero `createRunWorktree`
+          // (adentro de `createArchitectReentryChildRun`, más abajo) hace trabajo real de git que
+          // toma tiempo real -- el run hijo todavía no existía en la DB en el momento de esa
+          // reconsulta, así que el snapshot que recibía el frontend traía `childRunId: null`. Como
+          // nada vuelve a tocar la fila de ESTE run después (toda la actividad siguiente es del run
+          // hijo), no había ninguna notificación posterior que disparara un reintento -- el usuario
+          // quedaba viendo el run viejo "resolved" para siempre, sin ninguna señal de a dónde seguir.
+          // Ahora el estado del padre se marca DESPUÉS de que el run hijo ya está commiteado en la
+          // DB, para que la única notificación sobre este run sea también la única consulta
+          // necesaria -- ya encuentra el `childRunId` bien.
           const releasePlanConfig = await getCurrentProjectConfig(projectId, "release_plan");
           const ramaBaseTrabajo = (releasePlanConfig?.value as { ramaBaseTrabajo?: unknown } | undefined)
             ?.ramaBaseTrabajo;
@@ -664,6 +701,7 @@ export async function executePipelineRun(params: {
             cliAgentOverride,
             model,
           });
+          await updateRunStatus(runId, "resolved");
           console.log(`[run:start] run de reingreso a Architect creado: ${childRunId}.`);
           await executePipelineRun({
             projectRepoRoot: childWorktree.worktreePath,
@@ -1022,12 +1060,73 @@ async function withRoleContext(projectId: string, runId: string, incomingContext
     runbookVersion: testingPolicy.runbookVersion,
     assetHash: testingPolicy.assetHash,
   });
+  // Fix (2026-08-17): `testingPolicy` de arriba es siempre el texto estático del template, con los
+  // placeholders "[Editable por producto]" sin completar -- la Configuración Editable por Producto
+  // real (si Architect ya la configuró, ver architect.txt Regla 9) vive aparte, en
+  // `project_config_versions` (`testing_policy_config`), y se entrega como campo estructurado
+  // separado para que Planning use los valores ya resueltos en vez de escalar pidiéndolos.
+  const testingPolicyConfig = await getCurrentProjectConfig(projectId, "testing_policy_config");
   const shared = {
     activeRelease,
     releasePlan: resolveReleasePlanForActiveRelease({ activeReleaseId: activeRelease?.id ?? null, candidate }),
-    governance: { testingPolicy },
+    governance: { testingPolicy, testingPolicyConfig: testingPolicyConfig?.value ?? null },
   };
   return shapeRoleContext(incomingContext, shared);
+}
+
+/**
+ * Fix (2026-08-17): mismo criterio que `withRoleContext` (Planning), pero para Architect --
+ * `existingTestingPolicyConfig` le permite distinguir (architect.txt, Regla 9) si el producto ya
+ * tiene una Testing Policy configurada (debe conservarla, declarando `TESTING_POLICY_CONFIG: null`)
+ * o si todavía no existe ninguna (debe completarla junto con `ROADMAP`).
+ *
+ * `existingRoadmapApproval` (fix del mismo día, hallazgo en vivo): la Regla 5 original ("si tu
+ * contexto indica explícitamente que el roadmap ya fue aprobado") sólo daba esa señal cuando
+ * Architect respondía DIRECTAMENTE a la aprobación de su propio roadmap (`respondService.ts`,
+ * `buildRoadmapApprovalHumanSolution`) -- en cualquier otro camino de reingreso (por ejemplo,
+ * corrigiendo su propia propuesta tras resolver una ambigüedad de Regla 2 que Functional había
+ * escalado) Architect no tenía forma de saber que este proyecto ya tenía un Roadmap aprobado, y
+ * volvía a escalar pidiendo su re-aprobación aunque la estructura de releases fuera la misma --
+ * mismo síntoma que el bug que motivó `existingTestingPolicyConfig`, con una causa distinta y más
+ * amplia. Se entrega siempre que exista, sin importar el camino de invocación (Regla 4 ahora
+ * decide en base a este dato, no a inferencia de la conversación).
+ */
+async function withArchitectRoleContext(projectId: string, incomingContext: unknown): Promise<unknown> {
+  if (incomingContext === null || typeof incomingContext !== "object") {
+    return incomingContext;
+  }
+  const [testingPolicyConfig, roadmapApproval] = await Promise.all([
+    getCurrentProjectConfig(projectId, "testing_policy_config"),
+    getCurrentProjectConfig(projectId, "release_roadmap"),
+  ]);
+  const extra: Record<string, unknown> = {};
+  if (testingPolicyConfig) extra.existingTestingPolicyConfig = testingPolicyConfig.value;
+  if (roadmapApproval) extra.existingRoadmapApproval = roadmapApproval.value;
+  if (Object.keys(extra).length === 0) return incomingContext;
+  return { ...(incomingContext as Record<string, unknown>), ...extra };
+}
+
+/**
+ * Fix (2026-08-17), hallazgo en vivo: cuando el reingreso cross-pipeline a Architect resuelve una
+ * ambigüedad de Regla 2 y Architect declara ESTADO: completed con una propuesta fresca, Functional
+ * recibe esa propuesta por el camino NORMAL (`functionalArtifact`), no por el de reingreso con
+ * `escalationReason`/`targetAgentRole` -- así que su Regla 4 ("primera invocación, batch completo")
+ * lo hace redeclarar TODAS las Features del release, incluidas las que ya fueron activadas e
+ * implementadas en un run anterior de este mismo release, disparando el guard de
+ * `persistFunctionalFeatureBatch` en loop. Mismo criterio que `existingRoadmapApproval` para
+ * Architect: se le da a Functional la lista de Features ya activadas para el release actual como
+ * dato explícito (`existingFeatures`), en vez de esperar que lo infiera de la conversación.
+ */
+async function withFunctionalRoleContext(projectId: string, incomingContext: unknown): Promise<unknown> {
+  if (incomingContext === null || typeof incomingContext !== "object") {
+    return incomingContext;
+  }
+  const roadmap = await getCurrentProjectConfig(projectId, "release_roadmap");
+  const activeRelease = activeReleaseFromRoadmap(roadmap?.value);
+  if (!activeRelease) return incomingContext;
+  const existingFeatures = await getActivatedFeatureIdentities(projectId, activeRelease.id);
+  if (existingFeatures.length === 0) return incomingContext;
+  return { ...(incomingContext as Record<string, unknown>), existingFeatures };
 }
 
 /**
@@ -1178,7 +1277,27 @@ export async function persistReleasePlanIfDeclared(params: {
   const isReleaseCompletion =
     params.result.status === "escalated" &&
     isReleaseCompletionEscalation({ phase: "planning" }, { outputArtifact: params.result.outputArtifact });
-  if (params.result.status !== "completed" && !isReleaseCompletion) return;
+  if (params.result.status !== "completed" && !isReleaseCompletion) {
+    // Fix (2026-08-17), hallazgo en vivo: Planning puede escalar por una razón legítima ajena a la
+    // Feature que QA ya aprobó -- por ejemplo, una ambigüedad real en la SIGUIENTE Feature que le
+    // toca asignar. Antes de este fix, esa finalización ya conocida (`featureJustCompleted`) se
+    // perdía en silencio: como esta función retornaba sin persistir nada, nadie volvía a marcar esa
+    // Feature como completada en `release_plan` hasta la próxima vez que Planning lograra declarar
+    // un RELEASE_PLAN íntegro (incluyendo la Feature siguiente) -- dejando el plan persistido
+    // desactualizado ("En curso") en el medio. Confirmado como causa raíz de una escalación
+    // encadenada de Planning ("inconsistencia entre el artefacto funcional y el plan persistido")
+    // cuando Functional corregía la Feature siguiente sin redeclarar la ya completada (tal como debe
+    // hacer, ver functional.txt Regla 5) y Planning volvía a ver esa Feature marcada "En curso" en su
+    // propio Release Plan vigente. Es determinístico -- no depende de que el LLM lo redeclare -- así
+    // que corre sin importar si Planning llegó a escalar por cualquier otro motivo.
+    await markFeatureCompletedInPersistedReleasePlan({
+      projectId: params.projectId,
+      runId: params.runId,
+      featureJustCompleted: params.featureJustCompleted,
+      inputReleasePlan: params.inputReleasePlan,
+    });
+    return;
+  }
 
   const declaration = extractReleasePlanDeclaration(
     { phase: "planning" },
@@ -1242,6 +1361,43 @@ export async function persistReleasePlanIfDeclared(params: {
     releasePlan,
     featureActualId: declaration.featureActualId,
     update,
+  });
+}
+
+/**
+ * Fix (2026-08-17): contraparte determinística de `persistReleasePlanIfDeclared` para cuando
+ * Planning escala por un motivo ajeno a la Feature que QA ya aprobó. No depende de que Planning
+ * redeclare nada -- marca `featureJustCompleted` como "Completada" directamente sobre el
+ * `inputReleasePlan` que el propio Planning recibió como contexto de entrada en esta invocación
+ * (nunca sobre lo que declaró de salida, que en este camino de escalación no es un RELEASE_PLAN
+ * válido), y persiste esa versión actualizada. No-op si no hay `featureJustCompleted`, si
+ * `inputReleasePlan` no tiene forma válida, si esa Feature no aparece en el plan, o si ya estaba
+ * marcada "Completada" (evita reescrituras redundantes de `project_config_versions`).
+ */
+async function markFeatureCompletedInPersistedReleasePlan(params: {
+  projectId: string;
+  runId: string;
+  featureJustCompleted: string | null;
+  inputReleasePlan: unknown;
+}): Promise<void> {
+  if (!params.featureJustCompleted) return;
+  if (!isReleasePlanDeclaration(params.inputReleasePlan)) return;
+
+  const plan = params.inputReleasePlan as ReleasePlanDeclaration & { ramaBaseTrabajo?: unknown };
+  const entry = plan.features.find((feature) => feature.id === params.featureJustCompleted);
+  if (!entry || entry.estado === "Completada") return;
+
+  const updatedFeatures = plan.features.map((feature) =>
+    feature.id === params.featureJustCompleted ? { ...feature, estado: "Completada" as const } : feature
+  );
+  // Ninguna Feature queda "en curso" hasta que Planning logre asignar la siguiente con éxito -- si
+  // la que se acaba de completar era la activa, se limpia junto con la marca de completada.
+  const featureActualId = plan.featureActualId === params.featureJustCompleted ? null : plan.featureActualId;
+  await setProjectConfig({
+    projectId: params.projectId,
+    configKey: "release_plan",
+    value: { ...plan, features: updatedFeatures, featureActualId },
+    changedInRunId: params.runId,
   });
 }
 
@@ -1403,14 +1559,15 @@ async function continueReleaseAfterFeatureApproved(params: {
     featureBranch: worktree.branchName,
     mode: "auto",
   });
-  await finalizeRun(runId, {
-    status: "completed",
-    outputArtifact: null,
-    summary: `Feature lista, mergeada a "${baseBranch}" en modo auto.`,
-    escalationReason: null,
-  });
   console.log(`[run:start] Modo Auto: sub-rama "${worktree.branchName}" mergeada y pusheada a "${baseBranch}".`);
 
+  // Fix (2026-08-17): mismo criterio que el reingreso a Architect más arriba -- `finalizeRun`
+  // (status: "completed") corre DESPUÉS de crear el run de continuación, no antes, para que la
+  // única notificación de este run que le llega al SSE ya encuentre el `childRunId` en la DB.
+  // Antes de este fix, `finalizeRun` acá arriba disparaba el notify antes de que
+  // `createPlanningToQaChildRun` (que hace trabajo real de git) terminara de commitear el run hijo
+  // -- mismo síntoma que el otro camino: el usuario quedaba viendo el run "completed" sin ninguna
+  // señal de a qué run seguir.
   const { childRunId, childWorktree } = await createPlanningToQaChildRun({
     repoRoot,
     parentRunId: runId,
@@ -1419,6 +1576,12 @@ async function continueReleaseAfterFeatureApproved(params: {
     userId,
     cliAgentOverride,
     model,
+  });
+  await finalizeRun(runId, {
+    status: "completed",
+    outputArtifact: null,
+    summary: `Feature lista, mergeada a "${baseBranch}" en modo auto.`,
+    escalationReason: null,
   });
   console.log(`[run:start] run de continuación creado: ${childRunId} (Planning).`);
   await executePipelineRun({

@@ -133,8 +133,57 @@ function extractTaggedField(outputArtifact: unknown, tag: string, property: stri
     return (outputArtifact as Record<string, unknown>)[property];
   }
   if (typeof outputArtifact === "string") {
+    // Fix (2026-08-17), causa raíz confirmada en vivo: el regex de una sola línea (`[^\n]+`) trunca
+    // en silencio cualquier valor JSON que el modelo termine emitiendo con un salto de línea real
+    // adentro (payloads grandes -- ROADMAP, TESTING_POLICY_CONFIG -- tienen más superficie para que
+    // Codex, pese a la instrucción de "una sola línea", rompa el JSON en más de una línea física).
+    // El síntoma es un "Expected ',' or '}' after property value" justo al final del texto
+    // capturado -- JSON.parse recibiendo un objeto incompleto, no basura real del modelo. Antes de
+    // intentar la captura de una sola línea, se prueba una extracción consciente de llaves/corchetes
+    // balanceados desde el primer `{`/`[` después de la etiqueta, que no depende de que el valor
+    // cierre antes del próximo salto de línea.
+    const balanced = extractBalancedJsonAfterTag(outputArtifact, tag);
+    if (balanced !== undefined) return balanced;
     const match = outputArtifact.match(new RegExp(`(?:^|\\n)${tag}:\\s*([^\\n]+)`, "i"));
     return match ? match[1].trim() : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Fix (2026-08-17): extrae el valor JSON completo que sigue a `TAG:` en texto plano, contando
+ * llaves/corchetes y respetando comillas/escapes dentro de strings, en vez de asumir que el valor
+ * cabe antes del próximo `\n`. Devuelve `undefined` si no hay match de la etiqueta, si lo que sigue
+ * no arranca con `{`/`[`, o si el texto se corta antes de cerrar el valor (en ese caso el llamador
+ * cae al regex de una sola línea, que produce el mismo error de siempre -- no se inventa un cierre).
+ */
+function extractBalancedJsonAfterTag(text: string, tag: string): string | undefined {
+  const prefixMatch = text.match(new RegExp(`(?:^|\\n)${tag}:\\s*`, "i"));
+  if (!prefixMatch || prefixMatch.index === undefined) return undefined;
+  const start = prefixMatch.index + prefixMatch[0].length;
+  const opener = text[start];
+  if (opener !== "{" && opener !== "[") return undefined;
+  const closer = opener === "{" ? "}" : "]";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === opener) depth++;
+    else if (ch === closer) {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
   }
   return undefined;
 }
@@ -235,6 +284,56 @@ export function extractRoadmapApproval(
   }
 
   return isRoadmapApprovalPayload(parsed) ? parsed : null;
+}
+
+/**
+ * Fix (2026-08-17): `04-TESTING-POLICY.md` tiene una sección "Configuración Editable por
+ * Producto" que el propio Runbook dice que Architect completa una sola vez, persistida en
+ * `project_config_versions` (mismo criterio que `release_roadmap`) -- pero antes de este fix no
+ * existía ningún código que la persistiera ni que la mezclara en lo que Planning recibe
+ * (`governance.testingPolicy` en `runStart.ts` era siempre el template estático sin completar).
+ * Planning escalaba en loop pidiendo una configuración que nunca podía llegarle. Mismo patrón que
+ * `extractRoadmapApproval`: se persiste en el mismo momento que el roadmap (aprobación humana,
+ * `respondService.ts`), y `runStart.ts` la mezcla en el contexto de Planning como
+ * `governance.testingPolicyConfig`.
+ */
+export interface TestingPolicyConfigPayload {
+  defaultTestLevel: "L1" | "L2" | "L3";
+  sensitiveAreas: string[];
+  authorizedEnvironments: string[];
+  evidenceRequirements: string[];
+  regressionRetentionCriteria: string[];
+}
+
+export function isTestingPolicyConfigPayload(value: unknown): value is TestingPolicyConfigPayload {
+  if (value === null || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    (candidate.defaultTestLevel === "L1" || candidate.defaultTestLevel === "L2" || candidate.defaultTestLevel === "L3") &&
+    isStringArray(candidate.sensitiveAreas) &&
+    isStringArray(candidate.authorizedEnvironments) &&
+    isStringArray(candidate.evidenceRequirements) &&
+    isStringArray(candidate.regressionRetentionCriteria)
+  );
+}
+
+export function extractTestingPolicyConfig(
+  artifact: { phase: AgentRole },
+  content: { outputArtifact: unknown }
+): TestingPolicyConfigPayload | null {
+  if (artifact.phase !== "architect") return null;
+
+  const raw = extractTaggedField(content.outputArtifact, "TESTING_POLICY_CONFIG", "testingPolicyConfig");
+  if (typeof raw !== "string") return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  return isTestingPolicyConfigPayload(parsed) ? parsed : null;
 }
 
 export type GateKind = "roadmap_approval" | "release_completion" | "release_size_risk";

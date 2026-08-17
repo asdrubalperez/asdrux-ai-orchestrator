@@ -1,5 +1,5 @@
 import React from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -127,6 +127,12 @@ interface RunViewModel {
     complete: boolean;
     reason: "CONTENT_TOO_LARGE" | null;
   } | null;
+  /**
+   * Fix (2026-08-17): id del run que se originó a partir de este, sea porque el usuario respondió
+   * un escalamiento o porque el reingreso cross-pipeline (FEATURE-020) lo creó solo. `null` mientras
+   * este run siga siendo el vigente.
+   */
+  childRunId: string | null;
 }
 
 /** FEATURE-033: helper puro y reusable — dispara la descarga del Markdown canónico en el navegador. */
@@ -140,13 +146,83 @@ function downloadMarkdown(filename: string, markdown: string) {
   URL.revokeObjectURL(url);
 }
 
+export interface ChildRunFollowState {
+  runId: string;
+  hadChildAtLoad: boolean;
+}
+
+/**
+ * Fix (2026-08-17), hallazgo en vivo: función pura extraída de `RunDetailPage` para poder
+ * testearla sin infraestructura de render de React (que este repo no tiene todavía) -- mismo
+ * criterio que `pickBranchSeed`/`completenessPercent` en `ReviewModal.tsx`. Decide, dado el estado
+ * previo de seguimiento y la observación actual, cuál es el próximo estado y si corresponde
+ * navegar. La distinción clave: la PRIMERA observación de un `runId` nunca navega por sí sola (solo
+ * arma la base) salvo que hayamos llegado acá vía un salto automático anterior (`arrivedViaAutoFollow`),
+ * en cuyo caso si ya trae `childRunId` se sigue la cadena de inmediato. Cualquier observación
+ * POSTERIOR para el mismo `runId` navega en cuanto aparece un `childRunId` que no estaba en la base.
+ */
+export function nextChildRunFollowState(
+  previous: ChildRunFollowState | null,
+  params: { runId: string; currentChildRunId: string | null; arrivedViaAutoFollow: boolean }
+): { state: ChildRunFollowState; shouldNavigateTo: string | null } {
+  const state: ChildRunFollowState =
+    !previous || previous.runId !== params.runId
+      ? {
+          runId: params.runId,
+          hadChildAtLoad: params.arrivedViaAutoFollow ? false : params.currentChildRunId !== null,
+        }
+      : previous;
+  const shouldNavigateTo = !state.hadChildAtLoad && params.currentChildRunId ? params.currentChildRunId : null;
+  return { state, shouldNavigateTo };
+}
+
 export function RunDetailPage() {
   const params = useParams<{ projectId: string; caseId: string }>();
   const runId = params.caseId ?? "";
   const query = useRunQuery(runId);
-  useRunStream(runId, query.refresh);
+  const connectionStatus = useRunStream(runId, query.refresh);
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const run = query.data;
+
+  // Fix (2026-08-17), hallazgo en vivo: cuando el reingreso cross-pipeline (FEATURE-020) resuelve
+  // un escalamiento y arranca un run hijo sin ninguna acción humana, el usuario quedaba mirando el
+  // run viejo (ya "resolved") sin ninguna señal de a qué run nuevo seguir. El primer intento de este
+  // fix navegaba SIEMPRE que `childRunId` estuviera presente -- pero eso incluye abrir a propósito,
+  // desde la lista de Casos, cualquier run viejo ya resuelto (que por definición YA tiene un
+  // childRunId, sea de hace un minuto o de hace una semana): el usuario quedaba sin poder revisar
+  // NINGÚN run histórico, porque cada uno lo rebotaba en cadena hasta el más nuevo. Regresión real,
+  // reportada en vivo con captura de pantalla.
+  //
+  // La distinción correcta es "el childRunId apareció mientras esta página ya estaba abierta" (eso
+  // sí amerita seguir la cadena) vs. "el childRunId ya estaba ahí la primera vez que cargamos este
+  // run" (eso es una visita deliberada a un run ya resuelto, no hay que sacar al usuario de ahí). Se
+  // guarda una base por `runId`: la primera observación de cada run nunca navega, solo arma la base;
+  // recién una observación POSTERIOR con `childRunId` nuevo dispara la navegación. Para que la
+  // cadena de auto-saltos siga funcionando cuando varios runs se resuelven solos en fila (ej.
+  // Architect NO_APLICA -> Functional -> Planning, todos en segundos), el propio salto automático
+  // marca el `state` de la navegación (`autoFollowed`) -- si llegamos así, la primera observación del
+  // run nuevo SÍ puede navegar de inmediato si ya trae `childRunId`, porque sabemos que este hop es
+  // parte de la misma cadena que el usuario nunca pidió frenar.
+  const baselineRef = React.useRef<ChildRunFollowState | null>(null);
+  React.useEffect(() => {
+    if (!run || !runId) return;
+    const arrivedViaAutoFollow = Boolean((location.state as { autoFollowed?: boolean } | null)?.autoFollowed);
+    const { state, shouldNavigateTo } = nextChildRunFollowState(baselineRef.current, {
+      runId,
+      currentChildRunId: run.childRunId,
+      arrivedViaAutoFollow,
+    });
+    baselineRef.current = state;
+
+    if (shouldNavigateTo && params.projectId) {
+      navigate(`/projects/${encodeURIComponent(params.projectId)}/cases/${encodeURIComponent(shouldNavigateTo)}`, {
+        replace: true,
+        state: { autoFollowed: true },
+      });
+    }
+  }, [run, runId, params.projectId, navigate, location.state]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-4 px-4 py-5 sm:px-6 lg:px-8">
@@ -154,7 +230,7 @@ export function RunDetailPage() {
       {query.isError ? <ErrorState /> : null}
       {run ? (
         <>
-          <RunOverview run={run} runId={runId} />
+          <RunOverview run={run} runId={runId} connectionStatus={connectionStatus} />
           <ProjectBriefPanel document={run.projectBriefDocument} />
           <ArchitecturePanel document={run.architectureDocument} />
           <ReleasePlanDocumentPanel document={run.releasePlanDocument} />
@@ -193,19 +269,41 @@ function useRunQuery(runId: string) {
   return { data: query.data ?? null, isLoading: query.isLoading, isError: query.isError, refresh };
 }
 
-function useRunStream(runId: string, refresh: () => void) {
+export type SseConnectionStatus = "connecting" | "open" | "reconnecting";
+
+/**
+ * Fix (2026-08-17), hallazgo en vivo: `ConnectionPanel` mostraba "SSE activo" siempre que hubiera
+ * un `runId`, sin leer nunca el estado real de la conexión -- el usuario reportó que la UI no se
+ * actualizaba tras un escalamiento pese a que ese indicador decía que todo estaba bien. Ahora el
+ * hook expone el estado real derivado de los eventos nativos del `EventSource`
+ * (`onopen`/`onerror`, más el `readyState` en el error para distinguir un reintento en curso de
+ * una conexión recién abriéndose) para que el panel deje de mentir.
+ */
+function useRunStream(runId: string, refresh: () => void): SseConnectionStatus {
+  const [status, setStatus] = React.useState<SseConnectionStatus>("connecting");
+
   React.useEffect(() => {
     if (!runId) return;
+    setStatus("connecting");
     const source = new EventSource(apiUrl(`/runs/${encodeURIComponent(runId)}/stream`), { withCredentials: true });
     source.addEventListener("snapshot", refresh);
     source.addEventListener("run_event", refresh);
+    source.onopen = () => {
+      setStatus("open");
+    };
     source.onerror = () => {
+      // El navegador reintenta automáticamente salvo que el servidor haya cerrado la conexión
+      // (readyState CLOSED) -- distinguimos "reconectando" de "cerrado" para no mostrar un estado
+      // engañosamente definitivo mientras el propio EventSource sigue reintentando solo.
+      setStatus(source.readyState === EventSource.CLOSED ? "reconnecting" : "connecting");
       refresh();
     };
     return () => {
       source.close();
     };
   }, [runId, refresh]);
+
+  return status;
 }
 
 function LoadingState() {
@@ -225,13 +323,21 @@ function ErrorState() {
   );
 }
 
-function RunOverview({ run, runId }: { run: RunViewModel; runId: string }) {
+function RunOverview({
+  run,
+  runId,
+  connectionStatus,
+}: {
+  run: RunViewModel;
+  runId: string;
+  connectionStatus: SseConnectionStatus;
+}) {
   return (
     <section className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
       <StatusMetric label="Estado" status={run.run.status} />
       <Metric label="Fase actual" value={run.run.current_phase ?? "sin fase"} />
       <Metric label="Eventos" value={String(run.narrative.length)} />
-      <ConnectionPanel runId={runId} />
+      <ConnectionPanel runId={runId} status={connectionStatus} />
       <MetadataPanel run={run} />
     </section>
   );
@@ -503,7 +609,13 @@ function EscalationResponseDialog({
       // El humano respondió y el pipeline sigue en un run nuevo (encadenado) -- lo natural es
       // seguir viéndolo ahí, no quedarse mirando el run padre ya resuelto/abortado.
       if (result?.childRunId && projectId) {
-        navigate(`/projects/${encodeURIComponent(projectId)}/cases/${encodeURIComponent(result.childRunId)}`);
+        // `autoFollowed: true` para que, si ese run nuevo ya trae a su vez su propio childRunId
+        // (reingreso encadenado que se resolvió solo en el instante entre la respuesta y esta
+        // navegación), el efecto de auto-seguimiento de RunDetailPage continúe la cadena en vez de
+        // tratarlo como una visita deliberada a un run ya resuelto.
+        navigate(`/projects/${encodeURIComponent(projectId)}/cases/${encodeURIComponent(result.childRunId)}`, {
+          state: { autoFollowed: true },
+        });
         return;
       }
 
@@ -678,13 +790,22 @@ function Narrative({ entries }: { entries: RunViewModel["narrative"] }) {
   );
 }
 
-function ConnectionPanel({ runId }: { runId: string }) {
+function ConnectionPanel({ runId, status }: { runId: string; status: SseConnectionStatus }) {
+  const label = !runId
+    ? "Sin run seleccionado"
+    : status === "open"
+      ? "SSE activo"
+      : status === "reconnecting"
+        ? "SSE reconectando..."
+        : "SSE conectando...";
+  const colorClass = !runId ? "text-zinc-400" : status === "open" ? "text-emerald-600" : "text-amber-500";
+
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4">
       <CardLabel>Conexión</CardLabel>
       <div className="mt-3 flex items-center gap-2 text-sm text-zinc-600">
-        <Radio className="h-4 w-4 text-emerald-600" />
-        {runId ? "SSE activo" : "Sin run seleccionado"}
+        <Radio className={`h-4 w-4 ${colorClass}`} />
+        {label}
       </div>
     </section>
   );

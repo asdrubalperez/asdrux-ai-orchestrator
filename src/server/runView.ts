@@ -127,6 +127,14 @@ export interface RunViewModel {
   architectureDocument: ArchitectureDocumentView | null;
   /** FEATURE-035: null hasta que Planning complete el Release Plan canónico del release activo. */
   releasePlanDocument: ReleasePlanDocumentView | null;
+  /**
+   * Fix (2026-08-17): id del run que se originó a partir de este (`originated_from_run_id`), sea
+   * porque el usuario respondió un escalamiento o porque el reingreso cross-pipeline lo creó solo.
+   * `null` mientras este run siga siendo el vigente. El frontend lo usa para seguir automáticamente
+   * al run nuevo en el camino automático (el camino de respuesta manual ya navega por su cuenta con
+   * el `childRunId` que devuelve `POST /runs/:id/respond`).
+   */
+  childRunId: string | null;
 }
 
 const AGENT_NODES: Array<{ id: Exclude<TimelineNodeId, "user">; label: string }> = [
@@ -144,7 +152,8 @@ export function buildRunViewModel(
   featureDocument: FeatureDocumentView | null = null,
   projectBriefDocument: ProjectBriefDocumentView | null = null,
   architectureDocument: ArchitectureDocumentView | null = null,
-  releasePlanDocument: ReleasePlanDocumentView | null = null
+  releasePlanDocument: ReleasePlanDocumentView | null = null,
+  childRunId: string | null = null
 ): RunViewModel {
   const timeline = buildTimeline(detail.run, detail.events);
   return {
@@ -157,6 +166,7 @@ export function buildRunViewModel(
     projectBriefDocument,
     architectureDocument,
     releasePlanDocument,
+    childRunId,
   };
 }
 
