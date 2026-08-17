@@ -285,6 +285,17 @@
   pendientes al validar FEATURE-035 (`task_81cd46a5`, `task_ddde9489`). Implementada, validada E2E
   y **mergeada a `main`**. Ver
   `docs/features/FEATURE-044-Correcciones-de-runtime-del-ciclo-Roadmap-Testing-Policy-Release-Plan.md`.
+- ✅ FEATURE-025-Parte-1 — Asistente IA, modelo y credenciales API por agente: selección de
+  proveedor por rol con UI real (`web/src/agentConfig/AgentConfigPage.tsx`), selección de modelo por
+  rol (`user_agent_config.model`, `agentModelCatalog.ts`), credenciales/API token cifradas por
+  agente (`user_ai_provider_credentials`, `aiCredentialService.ts`, mismo patrón de cifrado
+  AES-256-GCM que `user_git_connections` de FEATURE-026), y el mapeo de intake gana un sexto rol
+  configurable (`"intake"`) con el mismo mecanismo de resolución que los 5 roles reales. Corta
+  explícitamente si resuelve a Codex o a `cli_session` (cerrado por FEATURE-025-Parte-3, ✅
+  Ejecutada). **Implementada y mergeada a `main`** (commit `140e599`, 2026-08-02, 261/261 tests
+  backend+frontend) — **pendiente de validación E2E real en VPS** (código integrado, comportamiento
+  real todavía no ejercitado end-to-end; no confundir con "no implementada"). Diseño en
+  `docs/features/FEATURE-025-Parte-1-Asistente-Modelo-y-Credenciales-API-por-Agente.md`.
 - ✅ FEATURE-041 — Creación y gestión de cuentas de usuario (self-service). Antes no existía ningún
   flujo de registro real — el único mecanismo era `seed:user` (CLI de administración manual, sin
   UI), y `users` no tenía columnas de perfil. Alcance completo: registro público, verificación de
@@ -310,24 +321,6 @@
   `docs/features/FEATURE-041-Creacion-y-gestion-de-cuentas-de-usuario-self-service.md`.
 
 **🟡 Confirmado**
-- FEATURE-025-Parte-1 — Asistente IA, modelo y credenciales API por agente. Prioridad Alta —
-  **implementada y mergeada, pendiente de validación E2E en VPS** (ya no "próxima a encarar", ver
-  detalle abajo). División de alcance decidida el 2026-08-02: el punto de
-  selección de asistente por rol ya está casi resuelto desde FEATURE-016
-  (`user_agent_config`/`resolveAgentConfig`); el modelo por agente no existe en absoluto (hoy es un
-  flag de CLI global al run, sin persistir); y el modo de autenticación por API key sigue
-  dependiendo de una clave compartida del host (`ANTHROPIC_API_KEY`/`CODEX_API_KEY`) en vez de la
-  credencial propia del usuario — el hueco de seguridad real que esta parte cierra, reutilizando el
-  cifrado AES-256-GCM ya construido en FEATURE-026. **Ampliación decidida durante la
-  implementación (2026-08-02)**: el mapeo de intake (texto libre -> campos del caso de negocio,
-  `mapBusinessCase.ts`, FEATURE-017) usaba la misma clave global que esta parte retira para los 5
-  roles reales, sin estar identificado como "un agente" — se agregó `"intake"` ("Asistente de
-  Entrada") como un sexto rol configurable más, con el mismo mecanismo de resolución
-  (`resolveAgentConfig`/`resolveExecutorAuthentication`, migración `0022`). Corta explícitamente si
-  resuelve a Codex o a `cli_session` (sin soporte todavía, ver FEATURE-025-Parte-3). **Implementada y
-  mergeada a `main`** (commit `140e599`, sin merge commit dedicado) — pendiente todavía de
-  validación E2E en VPS (código integrado, comportamiento real no ejercitado end-to-end). Diseño en
-  `docs/features/FEATURE-025-Parte-1-Asistente-Modelo-y-Credenciales-API-por-Agente.md`.
 - ✅ FEATURE-025-Parte-2 — OAuth personal por proveedor de IA (Claude/Codex). Implementada y
   validada end-to-end en el VPS con cuentas reales de Claude y Codex (circuito completo Architect→
   Functional→Planning→Developer↔QA→merge→cierre de release→continuación al release siguiente). El
@@ -836,7 +829,7 @@ recorre secuencialmente los pasos intermedios aunque no tengan nada que resolver
 optimización futura: permitir que el circuito llegue directo al dueño real sin recorrer los pasos
 intermedios, cuando el costo de la v1 secuencial resulte un problema real en la práctica.
 
-### 🟡 FEATURE-025-Parte-1 — Asistente IA, modelo y credenciales API por agente
+### ✅ FEATURE-025-Parte-1 — Asistente IA, modelo y credenciales API por agente
 
 **Estado (corregido, esta sección describía el alcance a diseñar, no el estado real de
 implementación):** **implementada y mergeada a `main`** (commit `140e599`, 2026-08-02) — pendiente
