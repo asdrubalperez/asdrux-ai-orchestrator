@@ -85,6 +85,35 @@ Reglas de esta fase:
    prueba concretos y verificables. Si el documento contiene una sección de configuración editable
    por producto todavía sin completar y la necesitás para decidir, no inventes un valor: reportá el
    escalamiento explicando qué falta definir.
+9. Release Plan (FEATURE-035, `09-RELEASE-PLAN-TEMPLATE.md`): además de `RELEASE_PLAN` (que
+   conserva exactamente su contrato de siempre — nunca lo cambies ni le agregues campos), declarás
+   `RELEASE_PLAN_DOCUMENT` en la misma respuesta, con el contenido rico del template. Reglas:
+   - **Evaluación de tamaño (§0 del template) — sólo en tu primera invocación de este release**
+     (cuando tu contexto trae `functionalArtifact`, no `featureJustCompleted`): evaluá si el
+     release es demasiado grande para completarse con riesgo razonable (cantidad de Features,
+     dependencias entre ellas, tamaño acumulado, plazo). Si concluís "Riesgo real": declará
+     `ESTADO: escalated`, `RELEASE_SIZE_RISK: true`, `ARTEFACTO: null`, `COMANDO_TEST: null`,
+     `RELEASE_PLAN: null`, `FEATURE_UPDATE: null`, `RELEASE_PLAN_DOCUMENT: null` — no continúes con
+     la secuencia ni con ninguna Feature hasta que el humano resuelva. Si concluís "Riesgo
+     razonable", seguí normalmente y no declares `RELEASE_SIZE_RISK` (dejalo null en el resto de
+     tus respuestas para este release).
+   - **Secuencia (§1) — se declara completa desde tu primera invocación** y se redeclara igual (no
+     un diff) en cada respuesta siguiente, mismo criterio que ya usás para `RELEASE_PLAN.features`:
+     el orden completo de todas las Features del release, con el motivo de ese orden para cada una.
+   - **Por Feature — Enfoque Técnico y Test Plan (§2) — se construye de a una, NO todas de
+     entrada.** En cada respuesta donde asignás una Feature real a Developer↔QA, declará el bloque
+     completo (Enfoque Técnico + Test Plan) únicamente de esa Feature en `RELEASE_PLAN_DOCUMENT.featurePlan`
+     — nunca de las demás, el Orquestador ya conserva los bloques de Features anteriores y los
+     acumula por vos. El `sourceKey` de `featurePlan` DEBE coincidir exactamente con
+     `RELEASE_PLAN.featureActualId` (misma regla que ya aplica entre `FEATURE_UPDATE.sourceKey` y
+     `RELEASE_PLAN.featureActualId`, Regla 6). El Enfoque Técnico debe mantenerse dentro de la
+     Architecture vigente; si la excede, escalá en vez de avanzar.
+   - Cuando declarás `RELEASE_COMPLETO: true` (no hay Feature que asignar), `featurePlan` va
+     `null` — no hay bloque nuevo que aportar, el Orquestador usa los bloques ya acumulados.
+   - No declarés `RELEASE_PLAN_DOCUMENT: null` salvo que también estés declarando `RELEASE_PLAN: null`
+     (ambigüedad genérica de la Regla 3, o gate de tamaño de arriba) — si estás asignando o
+     confirmando trabajo real sobre el release, `RELEASE_PLAN_DOCUMENT` siempre acompaña con
+     contenido real, en la misma respuesta, nunca diferido a una invocación posterior.
 
 Formato de respuesta esperado (texto plano estricto: SIN Markdown de ningún tipo -- nada de **negrita**, _cursiva_, encabezados con #, ni code fences. Cada etiqueta va exactamente como "ETIQUETA:" al inicio de su propia línea):
 ESTADO: completed | escalated
@@ -94,4 +123,6 @@ COMANDO_TEST: <comando de shell exacto para la Feature asignada, ej. "node --tes
 RELEASE_PLAN: <JSON estricto en una sola línea con la forma exacta {"features":[{"id":"f1","nombre":"...","estado":"Pendiente|En curso|Completada"}],"featureActualId":"f1"} -- "featureActualId" es null si declarás RELEASE_COMPLETO>
 FEATURE_UPDATE: <JSON estricto en una sola línea, sin propiedades adicionales, con la forma exacta {"sourceKey":"f1","technicalConsiderations":{"affectedComponents":["..."],"approach":"...","dependencies":["..."]},"validationPlan":{"testCommand":"node --test ...","scenarios":[{"scenario":"...","action":"...","expected":"..."}],"evidenceRequired":["..."]},"technicalRisks":["..."]}; validationPlan.testCommand debe coincidir exactamente con COMANDO_TEST; null sólo si declarás RELEASE_COMPLETO o escalás>
 RELEASE_COMPLETO: <true si no queda ninguna Feature pendiente, o null en cualquier otro caso>
+RELEASE_PLAN_DOCUMENT: <JSON estricto en una sola línea con la forma exacta {"evaluacionTamano":{"cantidadFeatures":N,"factoresRiesgo":["..."],"conclusion":"Riesgo razonable|Riesgo real"},"secuencia":[{"sourceKey":"f1","motivoOrden":"..."}],"featurePlan":{"sourceKey":"f1","technicalApproach":{"affectedComponents":["..."],"impact":"...","alternativesConsidered":["..."]},"testPlan":{"level":"L1|L2|L3|L4","scenarios":[{"scenario":"...","action":"...","expected":"..."}],"evidenceRequired":["..."],"validationEnvironment":"...","externalWrites":null}} o null si declarás RELEASE_COMPLETO,"hallazgos":"..."} -- "secuencia" siempre completa y redeclarada; "featurePlan" es sólo la Feature que asignás en ESTA respuesta, nunca todas; null completo sólo si RELEASE_PLAN también es null (ambigüedad genérica o gate de tamaño)>
+RELEASE_SIZE_RISK: <true sólo si tu Evaluación de Tamaño (§0, primera invocación del release) concluyó "Riesgo real", o null en cualquier otro caso>
 RAZON_ESCALAMIENTO: <motivo específico si ESTADO=escalated, o null>

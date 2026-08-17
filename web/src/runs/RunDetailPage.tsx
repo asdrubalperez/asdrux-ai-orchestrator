@@ -114,6 +114,19 @@ interface RunViewModel {
     complete: boolean;
     reason: "CONTENT_TOO_LARGE" | null;
   } | null;
+  /** FEATURE-035: documento canónico del Release Plan del release activo, si Planning ya lo produjo. */
+  releasePlanDocument: {
+    projectId: string;
+    releaseKey: string;
+    templateKey: string;
+    templateVersion: string;
+    path: string;
+    canonicalArtifactId: string;
+    materialized: boolean;
+    markdown: string | null;
+    complete: boolean;
+    reason: "CONTENT_TOO_LARGE" | null;
+  } | null;
 }
 
 /** FEATURE-033: helper puro y reusable — dispara la descarga del Markdown canónico en el navegador. */
@@ -144,6 +157,7 @@ export function RunDetailPage() {
           <RunOverview run={run} runId={runId} />
           <ProjectBriefPanel document={run.projectBriefDocument} />
           <ArchitecturePanel document={run.architectureDocument} />
+          <ReleasePlanDocumentPanel document={run.releasePlanDocument} />
           <FeatureDocumentPanel document={run.featureDocument} />
           {run.escalation.isEscalated ? (
             <EscalationActionBanner run={run} projectId={params.projectId ?? ""} onRefresh={query.refresh} />
@@ -223,6 +237,86 @@ function RunOverview({ run, runId }: { run: RunViewModel; runId: string }) {
   );
 }
 
+/**
+ * FEATURE-035: shell visual común a los 4 documentos canónicos (Feature, Project Brief,
+ * Architecture, Release Plan) — extraído ahora que hay 4 consumidores reales casi idénticos
+ * (F033/034 los mantuvieron deliberadamente separados hasta tener esa evidencia). Los
+ * comportamientos específicos de cada documento (autoapertura de Feature, approval mode, etc.)
+ * quedan fuera del componente común, inyectados por el caller vía props (`open`/`onOpenChange`
+ * controlado, `dialogDescription` libre).
+ */
+function CanonicalDocumentPanel({
+  title,
+  subtitle,
+  dialogTitle,
+  dialogDescription,
+  markdown,
+  downloadFilename,
+  open,
+  onOpenChange,
+}: {
+  title: string;
+  subtitle: string;
+  dialogTitle: string;
+  dialogDescription: React.ReactNode;
+  markdown: string | null;
+  downloadFilename: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const copy = async () => {
+    if (markdown) await navigator.clipboard.writeText(markdown);
+  };
+  const download = () => {
+    if (markdown) downloadMarkdown(downloadFilename, markdown);
+  };
+
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <FileText className="mt-0.5 h-5 w-5 text-zinc-500" />
+          <div>
+            <h2 className="text-sm font-semibold">{title}</h2>
+            <p className="mt-1 text-xs text-zinc-500">{subtitle}</p>
+          </div>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => onOpenChange(true)}>
+          Ver documento
+        </Button>
+      </div>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>{dialogTitle}</DialogTitle>
+            <DialogDescription>{dialogDescription}</DialogDescription>
+          </DialogHeader>
+          {markdown ? (
+            <pre className="max-h-[65vh] overflow-auto whitespace-pre-wrap rounded-md border border-zinc-200 bg-zinc-50 p-4 text-xs text-zinc-800">
+              {markdown}
+            </pre>
+          ) : (
+            <p className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              El documento supera 64 KiB. El contenido completo no está disponible en esta versión.
+            </p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => void copy()} disabled={!markdown}>
+              <Copy className="h-4 w-4" />
+              Copiar
+            </Button>
+            <Button variant="outline" onClick={download} disabled={!markdown}>
+              <Download className="h-4 w-4" />
+              Descargar .md
+            </Button>
+            <Button onClick={() => onOpenChange(false)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </section>
+  );
+}
+
 function FeatureDocumentPanel({ document }: { document: RunViewModel["featureDocument"] }) {
   const [open, setOpen] = React.useState(false);
 
@@ -235,186 +329,72 @@ function FeatureDocumentPanel({ document }: { document: RunViewModel["featureDoc
   }, [document]);
 
   if (!document) return null;
-  const copy = async () => {
-    if (document.markdown) await navigator.clipboard.writeText(document.markdown);
-  };
-  const download = () => {
-    if (document.markdown) downloadMarkdown(`${document.featureCode}.md`, document.markdown);
-  };
 
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
-          <FileText className="mt-0.5 h-5 w-5 text-zinc-500" />
-          <div>
-            <h2 className="text-sm font-semibold">
-              {document.featureCode} — {document.name}
-            </h2>
-            <p className="mt-1 text-xs text-zinc-500">
-              {document.publicationState} · {document.path}
-            </p>
-          </div>
-        </div>
-        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-          Ver documento
-        </Button>
-      </div>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>{document.featureCode} — Documento canónico</DialogTitle>
-            <DialogDescription>
-              Estado: {document.publicationState}. Approval mode: {document.approvalMode}.
-            </DialogDescription>
-          </DialogHeader>
-          {document.markdown ? (
-            <pre className="max-h-[65vh] overflow-auto whitespace-pre-wrap rounded-md border border-zinc-200 bg-zinc-50 p-4 text-xs text-zinc-800">
-              {document.markdown}
-            </pre>
-          ) : (
-            <p className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-              El documento supera 64 KiB. El contenido completo no está disponible en esta versión.
-            </p>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => void copy()} disabled={!document.markdown}>
-              <Copy className="h-4 w-4" />
-              Copiar
-            </Button>
-            <Button variant="outline" onClick={download} disabled={!document.markdown}>
-              <Download className="h-4 w-4" />
-              Descargar .md
-            </Button>
-            <Button onClick={() => setOpen(false)}>Cerrar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </section>
+    <CanonicalDocumentPanel
+      title={`${document.featureCode} — ${document.name}`}
+      subtitle={`${document.publicationState} · ${document.path}`}
+      dialogTitle={`${document.featureCode} — Documento canónico`}
+      dialogDescription={`Estado: ${document.publicationState}. Approval mode: ${document.approvalMode}.`}
+      markdown={document.markdown}
+      downloadFilename={`${document.featureCode}.md`}
+      open={open}
+      onOpenChange={setOpen}
+    />
   );
 }
 
-/**
- * FEATURE-033: mismo lenguaje visual que `FeatureDocumentPanel` (card + Dialog + Copiar), sin
- * tocar ese componente ya validado — panel dedicado, no una generalización forzada en este pase.
- * Agrega "Descargar", ausente hoy en el panel de Feature.
- */
 function ProjectBriefPanel({ document }: { document: RunViewModel["projectBriefDocument"] }) {
   const [open, setOpen] = React.useState(false);
-
   if (!document) return null;
-  const copy = async () => {
-    if (document.markdown) await navigator.clipboard.writeText(document.markdown);
-  };
-  const download = () => {
-    if (document.markdown) downloadMarkdown("PROJECT-BRIEF.md", document.markdown);
-  };
 
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
-          <FileText className="mt-0.5 h-5 w-5 text-zinc-500" />
-          <div>
-            <h2 className="text-sm font-semibold">Project Brief</h2>
-            <p className="mt-1 text-xs text-zinc-500">
-              {document.materialized ? "materializado" : "no materializado"} · {document.path}
-            </p>
-          </div>
-        </div>
-        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-          Ver documento
-        </Button>
-      </div>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>Project Brief — Documento canónico</DialogTitle>
-            <DialogDescription>Template: {document.templateKey}@{document.templateVersion}.</DialogDescription>
-          </DialogHeader>
-          {document.markdown ? (
-            <pre className="max-h-[65vh] overflow-auto whitespace-pre-wrap rounded-md border border-zinc-200 bg-zinc-50 p-4 text-xs text-zinc-800">
-              {document.markdown}
-            </pre>
-          ) : (
-            <p className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-              El documento supera 64 KiB. El contenido completo no está disponible en esta versión.
-            </p>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => void copy()} disabled={!document.markdown}>
-              <Copy className="h-4 w-4" />
-              Copiar
-            </Button>
-            <Button variant="outline" onClick={download} disabled={!document.markdown}>
-              <Download className="h-4 w-4" />
-              Descargar .md
-            </Button>
-            <Button onClick={() => setOpen(false)}>Cerrar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </section>
+    <CanonicalDocumentPanel
+      title="Project Brief"
+      subtitle={`${document.materialized ? "materializado" : "no materializado"} · ${document.path}`}
+      dialogTitle="Project Brief — Documento canónico"
+      dialogDescription={`Template: ${document.templateKey}@${document.templateVersion}.`}
+      markdown={document.markdown}
+      downloadFilename="PROJECT-BRIEF.md"
+      open={open}
+      onOpenChange={setOpen}
+    />
   );
 }
 
-/** FEATURE-034: mismo patrón que `ProjectBriefPanel` — panel dedicado, sin generalizar el shell todavía. */
 function ArchitecturePanel({ document }: { document: RunViewModel["architectureDocument"] }) {
   const [open, setOpen] = React.useState(false);
-
   if (!document) return null;
-  const copy = async () => {
-    if (document.markdown) await navigator.clipboard.writeText(document.markdown);
-  };
-  const download = () => {
-    if (document.markdown) downloadMarkdown("ARCHITECTURE.md", document.markdown);
-  };
 
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
-          <FileText className="mt-0.5 h-5 w-5 text-zinc-500" />
-          <div>
-            <h2 className="text-sm font-semibold">Architecture</h2>
-            <p className="mt-1 text-xs text-zinc-500">
-              {document.materialized ? "materializado" : "no materializado"} · {document.path}
-            </p>
-          </div>
-        </div>
-        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-          Ver documento
-        </Button>
-      </div>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>Architecture — Documento canónico</DialogTitle>
-            <DialogDescription>Template: {document.templateKey}@{document.templateVersion}.</DialogDescription>
-          </DialogHeader>
-          {document.markdown ? (
-            <pre className="max-h-[65vh] overflow-auto whitespace-pre-wrap rounded-md border border-zinc-200 bg-zinc-50 p-4 text-xs text-zinc-800">
-              {document.markdown}
-            </pre>
-          ) : (
-            <p className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-              El documento supera 64 KiB. El contenido completo no está disponible en esta versión.
-            </p>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => void copy()} disabled={!document.markdown}>
-              <Copy className="h-4 w-4" />
-              Copiar
-            </Button>
-            <Button variant="outline" onClick={download} disabled={!document.markdown}>
-              <Download className="h-4 w-4" />
-              Descargar .md
-            </Button>
-            <Button onClick={() => setOpen(false)}>Cerrar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </section>
+    <CanonicalDocumentPanel
+      title="Architecture"
+      subtitle={`${document.materialized ? "materializado" : "no materializado"} · ${document.path}`}
+      dialogTitle="Architecture — Documento canónico"
+      dialogDescription={`Template: ${document.templateKey}@${document.templateVersion}.`}
+      markdown={document.markdown}
+      downloadFilename="ARCHITECTURE.md"
+      open={open}
+      onOpenChange={setOpen}
+    />
+  );
+}
+
+function ReleasePlanDocumentPanel({ document }: { document: RunViewModel["releasePlanDocument"] }) {
+  const [open, setOpen] = React.useState(false);
+  if (!document) return null;
+
+  return (
+    <CanonicalDocumentPanel
+      title="Release Plan"
+      subtitle={`${document.materialized ? "materializado" : "no materializado"} · ${document.path}`}
+      dialogTitle="Release Plan — Documento canónico"
+      dialogDescription={`Release: ${document.releaseKey} · Template: ${document.templateKey}@${document.templateVersion}.`}
+      markdown={document.markdown}
+      downloadFilename="RELEASE-PLAN.md"
+      open={open}
+      onOpenChange={setOpen}
+    />
   );
 }
 

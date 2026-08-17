@@ -16,6 +16,7 @@ import {
   isReentryContext,
   isReleaseCompletionEscalation,
   isReleasePlanDeclaration,
+  isReleaseSizeRiskEscalation,
   isRoadmapApprovalPayload,
   parsePipelineDefinitionRow,
   predecessorRoleFor,
@@ -330,6 +331,39 @@ test("classifyGateEscalation reconoce release_completion solo para planning con 
 test("classifyGateEscalation devuelve null para una escalación genérica (ni roadmap ni release completo)", () => {
   assert.equal(classifyGateEscalation("developer", "ambigüedad real, texto libre"), null);
   assert.equal(classifyGateEscalation("planning", { releasePlan: "{}" }), null);
+});
+
+test("isReleaseSizeRiskEscalation detecta el marcador releaseSizeRisk de Planning", () => {
+  assert.equal(
+    isReleaseSizeRiskEscalation({ phase: "planning" }, { outputArtifact: { releaseSizeRisk: "true" } }),
+    true
+  );
+  assert.equal(
+    isReleaseSizeRiskEscalation({ phase: "planning" }, { outputArtifact: { releaseSizeRisk: true } }),
+    true
+  );
+});
+
+test("isReleaseSizeRiskEscalation es false para ambigüedad genérica de Planning o rol distinto", () => {
+  assert.equal(isReleaseSizeRiskEscalation({ phase: "planning" }, { outputArtifact: null }), false);
+  assert.equal(
+    isReleaseSizeRiskEscalation({ phase: "developer" }, { outputArtifact: { releaseSizeRisk: "true" } }),
+    false
+  );
+});
+
+test("classifyGateEscalation reconoce release_size_risk solo para planning con releaseSizeRisk", () => {
+  assert.equal(classifyGateEscalation("planning", { releaseSizeRisk: "true" }), "release_size_risk");
+  assert.equal(classifyGateEscalation("developer", { releaseSizeRisk: "true" }), null);
+});
+
+test("classifyGateEscalation distingue release_size_risk de release_completion (no se pisan entre sí)", () => {
+  assert.equal(classifyGateEscalation("planning", { releaseCompleto: "true" }), "release_completion");
+  assert.equal(classifyGateEscalation("planning", { releaseSizeRisk: "true" }), "release_size_risk");
+  assert.equal(
+    classifyGateEscalation("planning", { releaseCompleto: "true", releaseSizeRisk: "true" }),
+    "release_completion"
+  );
 });
 
 test("extractRoadmapApproval (movida a escalation.ts) sigue parseando un ROADMAP válido bolteado a outputArtifact", () => {
