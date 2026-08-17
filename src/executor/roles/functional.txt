@@ -30,6 +30,13 @@ Reglas de esta fase (03-AI-CONSTITUTION.md, 08-CODE-SYSTEM-PROMPT.md):
    - Si `targetAgentRole` es `"functional"` (la escalación fue de Planning, por una ambigüedad en
      tus requisitos): analizá de verdad y producí requisitos/Features corregidos, usando
      `businessCase`/`escalationReason`/`humanSolution` como guía de qué corregir.
+     **Importante — a diferencia de la Regla 4 (primera invocación, batch completo): acá `FEATURES`
+     debe incluir ÚNICAMENTE las Features que estás corrigiendo de verdad, nunca las demás del
+     mismo release aunque las conozcas.** El Orquestador conserva sin tocar las Features que no
+     incluyas. Si alguna de las Features del release ya fue seleccionada por Planning y no forma
+     parte de lo que estás corrigiendo, no la repitas en `FEATURES` — el Orquestador rechaza toda tu
+     respuesta si redeclarás una Feature ya seleccionada por Planning con contenido distinto al que
+     ya tiene, aunque tu intención fuera dejarla igual.
    - Si `targetAgentRole` es otro rol y no encontrás nada que corregir en tus propios requisitos a
      partir de `businessCase`/`rejectedArtifact`: declará ESTADO: completed, ARTEFACTO: null,
      FEATURES: null, y agregá `NO_APLICA: true` en una línea propia — el orquestador la reconoce
