@@ -237,6 +237,56 @@ export function extractRoadmapApproval(
   return isRoadmapApprovalPayload(parsed) ? parsed : null;
 }
 
+/**
+ * Fix (2026-08-17): `04-TESTING-POLICY.md` tiene una sección "Configuración Editable por
+ * Producto" que el propio Runbook dice que Architect completa una sola vez, persistida en
+ * `project_config_versions` (mismo criterio que `release_roadmap`) -- pero antes de este fix no
+ * existía ningún código que la persistiera ni que la mezclara en lo que Planning recibe
+ * (`governance.testingPolicy` en `runStart.ts` era siempre el template estático sin completar).
+ * Planning escalaba en loop pidiendo una configuración que nunca podía llegarle. Mismo patrón que
+ * `extractRoadmapApproval`: se persiste en el mismo momento que el roadmap (aprobación humana,
+ * `respondService.ts`), y `runStart.ts` la mezcla en el contexto de Planning como
+ * `governance.testingPolicyConfig`.
+ */
+export interface TestingPolicyConfigPayload {
+  defaultTestLevel: "L1" | "L2" | "L3";
+  sensitiveAreas: string[];
+  authorizedEnvironments: string[];
+  evidenceRequirements: string[];
+  regressionRetentionCriteria: string[];
+}
+
+export function isTestingPolicyConfigPayload(value: unknown): value is TestingPolicyConfigPayload {
+  if (value === null || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    (candidate.defaultTestLevel === "L1" || candidate.defaultTestLevel === "L2" || candidate.defaultTestLevel === "L3") &&
+    isStringArray(candidate.sensitiveAreas) &&
+    isStringArray(candidate.authorizedEnvironments) &&
+    isStringArray(candidate.evidenceRequirements) &&
+    isStringArray(candidate.regressionRetentionCriteria)
+  );
+}
+
+export function extractTestingPolicyConfig(
+  artifact: { phase: AgentRole },
+  content: { outputArtifact: unknown }
+): TestingPolicyConfigPayload | null {
+  if (artifact.phase !== "architect") return null;
+
+  const raw = extractTaggedField(content.outputArtifact, "TESTING_POLICY_CONFIG", "testingPolicyConfig");
+  if (typeof raw !== "string") return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  return isTestingPolicyConfigPayload(parsed) ? parsed : null;
+}
+
 export type GateKind = "roadmap_approval" | "release_completion" | "release_size_risk";
 
 /**

@@ -408,7 +408,11 @@ export async function executePipelineRun(params: {
       await updateRunCurrentPhase(runId, phase.agentRole);
       const baseContext = contextForNextPhase;
       const context =
-        phase.agentRole === "planning" ? await withRoleContext(projectId, runId, baseContext) : baseContext;
+        phase.agentRole === "planning"
+          ? await withRoleContext(projectId, runId, baseContext)
+          : phase.agentRole === "architect"
+            ? await withArchitectRoleContext(projectId, baseContext)
+            : baseContext;
       const roleInstructions = await readRole(phase.agentRole);
       const selection = await resolveSelection(phase.agentRole);
       const { executor, finalizeAuth } = await buildExecutor(selection, worktree.worktreePath, runId, userId);
@@ -1022,12 +1026,32 @@ async function withRoleContext(projectId: string, runId: string, incomingContext
     runbookVersion: testingPolicy.runbookVersion,
     assetHash: testingPolicy.assetHash,
   });
+  // Fix (2026-08-17): `testingPolicy` de arriba es siempre el texto estático del template, con los
+  // placeholders "[Editable por producto]" sin completar -- la Configuración Editable por Producto
+  // real (si Architect ya la configuró, ver architect.txt Regla 9) vive aparte, en
+  // `project_config_versions` (`testing_policy_config`), y se entrega como campo estructurado
+  // separado para que Planning use los valores ya resueltos en vez de escalar pidiéndolos.
+  const testingPolicyConfig = await getCurrentProjectConfig(projectId, "testing_policy_config");
   const shared = {
     activeRelease,
     releasePlan: resolveReleasePlanForActiveRelease({ activeReleaseId: activeRelease?.id ?? null, candidate }),
-    governance: { testingPolicy },
+    governance: { testingPolicy, testingPolicyConfig: testingPolicyConfig?.value ?? null },
   };
   return shapeRoleContext(incomingContext, shared);
+}
+
+/**
+ * Fix (2026-08-17): mismo criterio que `withRoleContext` (Planning), pero para Architect --
+ * `existingTestingPolicyConfig` le permite distinguir (architect.txt, Regla 9) si el producto ya
+ * tiene una Testing Policy configurada (debe conservarla, declarando `TESTING_POLICY_CONFIG: null`)
+ * o si todavía no existe ninguna (debe completarla junto con `ROADMAP`).
+ */
+async function withArchitectRoleContext(projectId: string, incomingContext: unknown): Promise<unknown> {
+  const testingPolicyConfig = await getCurrentProjectConfig(projectId, "testing_policy_config");
+  if (!testingPolicyConfig || incomingContext === null || typeof incomingContext !== "object") {
+    return incomingContext;
+  }
+  return { ...(incomingContext as Record<string, unknown>), existingTestingPolicyConfig: testingPolicyConfig.value };
 }
 
 /**

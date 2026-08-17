@@ -28,6 +28,7 @@ import {
   buildReentryContext,
   extractMergeApproval,
   extractRoadmapApproval,
+  extractTestingPolicyConfig,
   isAgentRole,
   isReentryContext,
   isReleaseCompletionEscalation,
@@ -223,6 +224,12 @@ export async function respondToEscalation(params: {
   // sin persistir nada nuevo.
   const roadmapApproval = extractRoadmapApproval(escalationArtifact, escalationContent);
 
+  // Fix (2026-08-17): mismo momento y misma señal de aprobación humana que `roadmapApproval` --
+  // Architect declara `TESTING_POLICY_CONFIG` junto con `ROADMAP` (architect.txt, Regla 9), así
+  // que se persiste en la misma transacción, sólo cuando de verdad viene con contenido (Architect
+  // declara null cuando ya existe una Testing Policy vigente que no está cambiando).
+  const testingPolicyConfig = extractTestingPolicyConfig(escalationArtifact, escalationContent);
+
   const humanSolution = roadmapApproval
     ? buildRoadmapApprovalHumanSolution(rawSolution)
     : releaseClosureRoadmap
@@ -306,6 +313,17 @@ export async function respondToEscalation(params: {
         projectId,
         configKey: "release_roadmap",
         value: roadmapApproval ?? releaseClosureRoadmap,
+        changedByUserId: params.userId,
+        changedInRunId: params.parentRunId,
+        client,
+      });
+    }
+
+    if (testingPolicyConfig) {
+      await setProjectConfig({
+        projectId,
+        configKey: "testing_policy_config",
+        value: testingPolicyConfig,
         changedByUserId: params.userId,
         changedInRunId: params.parentRunId,
         client,
