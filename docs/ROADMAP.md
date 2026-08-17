@@ -310,8 +310,9 @@
   `docs/features/FEATURE-041-Creacion-y-gestion-de-cuentas-de-usuario-self-service.md`.
 
 **🟡 Confirmado**
-- FEATURE-025-Parte-1 — Asistente IA, modelo y credenciales API por agente. Prioridad Alta (próxima
-  a encarar, ver handoff de priorización). División de alcance decidida el 2026-08-02: el punto de
+- FEATURE-025-Parte-1 — Asistente IA, modelo y credenciales API por agente. Prioridad Alta —
+  **implementada y mergeada, pendiente de validación E2E en VPS** (ya no "próxima a encarar", ver
+  detalle abajo). División de alcance decidida el 2026-08-02: el punto de
   selección de asistente por rol ya está casi resuelto desde FEATURE-016
   (`user_agent_config`/`resolveAgentConfig`); el modelo por agente no existe en absoluto (hoy es un
   flag de CLI global al run, sin persistir); y el modo de autenticación por API key sigue
@@ -323,9 +324,9 @@
   roles reales, sin estar identificado como "un agente" — se agregó `"intake"` ("Asistente de
   Entrada") como un sexto rol configurable más, con el mismo mecanismo de resolución
   (`resolveAgentConfig`/`resolveExecutorAuthentication`, migración `0022`). Corta explícitamente si
-  resuelve a Codex o a `cli_session` (sin soporte todavía, ver FEATURE-025-Parte-3). Implementada en
-  la rama `feature/025-parte-1-asistente-modelo-credenciales`, pendiente de validación E2E en VPS.
-  Diseño en
+  resuelve a Codex o a `cli_session` (sin soporte todavía, ver FEATURE-025-Parte-3). **Implementada y
+  mergeada a `main`** (commit `140e599`, sin merge commit dedicado) — pendiente todavía de
+  validación E2E en VPS (código integrado, comportamiento real no ejercitado end-to-end). Diseño en
   `docs/features/FEATURE-025-Parte-1-Asistente-Modelo-y-Credenciales-API-por-Agente.md`.
 - ✅ FEATURE-025-Parte-2 — OAuth personal por proveedor de IA (Claude/Codex). Implementada y
   validada end-to-end en el VPS con cuentas reales de Claude y Codex (circuito completo Architect→
@@ -390,7 +391,7 @@ Esfuerzo.
 | Elemento | Esfuerzo | Impacto | Ponderación |
 |---|---|---|---|
 | FEATURE-028 — Release Plan asociado al Release activo (P1) | Medio | Alto | Alta |
-| FEATURE-025-Parte-1 — Asistente/modelo/credenciales API por agente (próxima a encarar) | Medio | Medio | Alta |
+| FEATURE-025-Parte-1 — Asistente/modelo/credenciales API por agente (✅ Implementada y mergeada, pendiente validación E2E) | Medio | Medio | Alta |
 | FEATURE-025-Parte-2 — OAuth personal por proveedor de IA (después de Parte 1, requiere spike) | Alto | Medio | Media |
 | FEATURE-025-Parte-3 — Soporte Codex/OAuth para el Asistente de Entrada (mapeo de intake) | Bajo | Bajo | Baja |
 | FEATURE-032 — Instalación determinística de dependencias (P2) | Medio | Medio | Alta |
@@ -836,30 +837,34 @@ optimización futura: permitir que el circuito llegue directo al dueño real sin
 intermedios, cuando el costo de la v1 secuencial resulte un problema real en la práctica.
 
 ### 🟡 FEATURE-025-Parte-1 — Asistente IA, modelo y credenciales API por agente
-Promovido de ⚪ Tentativo a 🟡 Confirmado (ítem ampliado en la sesión de FEATURE-007). Dividido en
-dos partes el 2026-08-02 tras un análisis de dependencia con FEATURE-041 que reveló una asimetría
-real entre las tres superficies de configuración originales — contexto completo en
+
+**Estado (corregido, esta sección describía el alcance a diseñar, no el estado real de
+implementación):** **implementada y mergeada a `main`** (commit `140e599`, 2026-08-02) — pendiente
+todavía de validación E2E en VPS, no de código. Dividido en dos partes el 2026-08-02 tras un
+análisis de dependencia con FEATURE-041 que reveló una asimetría real entre las tres superficies de
+configuración originales — contexto completo en
 `docs/research/HANDOFF-FEATURE-025-priorizacion-y-division-en-dos-partes.md`.
 
-- Selección de proveedor (Claude Code / Codex / futuro) por rol — ya casi resuelto desde
-  FEATURE-016 (`user_agent_config`/`resolveAgentConfig`), falta solo UI.
-- Selección de modelo dentro de ese proveedor, por rol (motivado por H12: Haiku no siempre
-  respeta convenciones de formato estrictas) — no existe en absoluto hoy, ni columna ni resolución;
-  el `--model` de CLI es un string suelto, global al run, sin validar contra el proveedor.
-- Configuración de credenciales/API token por agente o global. Hoy resuelto a mano vía
-  `.env.local` (`ANTHROPIC_API_KEY`, `CODEX_API_KEY`), compartido por todos los usuarios sin
-  importar quién esté logueado — el hueco de seguridad real que esta parte cierra, reutilizando el
-  cifrado AES-256-GCM ya construido en FEATURE-026 (`user_git_connections`).
-- El owner confirmó que la personalización debe ser libre por agente, sin forzar "mismo asistente
-  para todos" — el schema actual ya lo permite tal cual está, sin cambios adicionales.
-- El paso de mapeo del intake (FEATURE-017, `mapBusinessCase.ts`) hoy usa una llamada directa fija
-  (Claude Haiku + API key, sin pasar por `authMode`/`resolveAgentConfig`) — decisión explícita del
-  owner de que, a futuro, este paso también debe respetar la misma configuración de agente/authMode
-  que el resto de los roles, no quedar como excepción fija. Pendiente de diseño técnico (el mapeo no
-  usa Executor/holder-worker hoy, por no necesitar tools — ver FEATURE-017 Regla 5 y Risks).
+Qué se implementó (los tres puntos de alcance original, los tres ya con código, no solo diseño):
+- Selección de proveedor (Claude Code / Codex) por rol, con UI real:
+  `web/src/agentConfig/AgentConfigPage.tsx` (nueva pantalla completa, no solo backend).
+- Selección de modelo dentro de ese proveedor, por rol: columna `model` en `user_agent_config`
+  (`migrations/0021`) + `src/executor/agentModelCatalog.ts` (catálogo server-side con validación),
+  reemplaza el `--model` de CLI suelto sin validar.
+- Credenciales/API token cifradas por agente: tabla nueva `user_ai_provider_credentials` (mismo
+  patrón de un solo campo de ciphertext que `user_git_connections`, FEATURE-026),
+  `src/auth/aiCredentialService.ts` — CRUD + `resolveExecutorAuthentication` resuelve siempre la
+  credencial vigente en el momento, nunca una copia congelada (los reintentos de escalación usan la
+  credencial actual, no una vieja).
+- El paso de mapeo del intake gana un sexto rol configurable (`"intake"`, "Asistente de Entrada"),
+  con el mismo mecanismo de resolución que los 5 roles reales — ya no es una excepción de
+  credenciales fijas.
 
-Diseño preliminar completo (Scope, Functional Rules borrador, modelo de datos abierto, Risks) en
-`docs/features/FEATURE-025-Parte-1-Asistente-Modelo-y-Credenciales-API-por-Agente.md`.
+Corta explícitamente si resuelve a Codex o a `cli_session` para el rol `intake` (sin soporte
+todavía, cerrado por FEATURE-025-Parte-3, ✅ Ejecutada). Diseño completo (documento de diseño
+original, sección de estado del gate no actualizada tras implementar) en
+`docs/features/FEATURE-025-Parte-1-Asistente-Modelo-y-Credenciales-API-por-Agente.md`. 261/261 tests
+verificados al mergear (backend + frontend), incluida integración real contra Postgres.
 
 ### ✅ FEATURE-025-Parte-2 — OAuth personal por proveedor de IA
 Separada de Parte 1 el 2026-08-02. El modo de autenticación `cli_session` ya existía como selector
