@@ -133,6 +133,7 @@ import { openRunEventsStream } from "./sse.js";
 import { getFeatureDocumentForRun } from "../features/lifecycle.js";
 import { getProjectBriefDocumentForRun } from "../features/projectBriefLifecycle.js";
 import { getArchitectureDocumentForRun } from "../features/architectureLifecycle.js";
+import { getReleasePlanDocumentForRun } from "../features/releasePlanLifecycle.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -1048,14 +1049,23 @@ export function createApp(config: ServerConfig): express.Express {
         res.status(404).json({ error: "run_not_found" });
         return;
       }
-      const [releaseRoadmap, featureDocument, projectBriefDocument, architectureDocument] = await Promise.all([
-        resolveReleaseRoadmap(detail.run.project_id),
-        getFeatureDocumentForRun(runId),
-        getProjectBriefDocumentForRun(runId),
-        getArchitectureDocumentForRun(runId),
-      ]);
+      const [releaseRoadmap, featureDocument, projectBriefDocument, architectureDocument, releasePlanDocument] =
+        await Promise.all([
+          resolveReleaseRoadmap(detail.run.project_id),
+          getFeatureDocumentForRun(runId),
+          getProjectBriefDocumentForRun(runId),
+          getArchitectureDocumentForRun(runId),
+          getReleasePlanDocumentForRun(runId),
+        ]);
       res.json(
-        buildRunViewModel(detail, releaseRoadmap, featureDocument, projectBriefDocument, architectureDocument)
+        buildRunViewModel(
+          detail,
+          releaseRoadmap,
+          featureDocument,
+          projectBriefDocument,
+          architectureDocument,
+          releasePlanDocument
+        )
       );
     } catch (err) {
       next(err);

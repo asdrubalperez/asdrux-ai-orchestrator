@@ -21,6 +21,12 @@ export const PROJECT_BRIEF_TEMPLATE_ASSET = "01-PROJECT-BRIEF-TEMPLATE.md";
  * a persistencia documental.
  */
 export const ARCHITECTURE_TEMPLATE_ASSET = "02-ARCHITECTURE-TEMPLATE.md";
+/**
+ * FEATURE-035 (mismo patrón de FEATURE-033/034 Rule 7/9 de FEATURE-023 Parte 2): Planning es
+ * dueño del Release Plan; el template se incorpora al catálogo obligatorio y hereda la validación
+ * previa a persistencia documental.
+ */
+export const RELEASE_PLAN_TEMPLATE_ASSET = "09-RELEASE-PLAN-TEMPLATE.md";
 export const REQUIRED_RUNBOOK_ASSETS = Object.freeze([
   RUNBOOK_VERSION_ASSET,
   FEATURE_TEMPLATE_ASSET,
@@ -28,6 +34,7 @@ export const REQUIRED_RUNBOOK_ASSETS = Object.freeze([
   CODING_STANDARDS_ASSET,
   PROJECT_BRIEF_TEMPLATE_ASSET,
   ARCHITECTURE_TEMPLATE_ASSET,
+  RELEASE_PLAN_TEMPLATE_ASSET,
 ]);
 export const SUPPORTED_RUNBOOK_VERSIONS = Object.freeze(["v1.0"]);
 

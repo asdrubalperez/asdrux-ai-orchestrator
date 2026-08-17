@@ -7,6 +7,7 @@ import {
 import type { FeatureDocumentView } from "../features/lifecycle.js";
 import type { ProjectBriefDocumentView } from "../features/projectBriefLifecycle.js";
 import type { ArchitectureDocumentView } from "../features/architectureLifecycle.js";
+import type { ReleasePlanDocumentView } from "../features/releasePlanLifecycle.js";
 
 export type TimelineNodeId = "user" | "architect" | "functional" | "planning" | "developer" | "qa";
 export type TimelineNodeStatus =
@@ -124,6 +125,8 @@ export interface RunViewModel {
   projectBriefDocument: ProjectBriefDocumentView | null;
   /** FEATURE-034: null hasta que Architect complete la Architecture canónica del proyecto. */
   architectureDocument: ArchitectureDocumentView | null;
+  /** FEATURE-035: null hasta que Planning complete el Release Plan canónico del release activo. */
+  releasePlanDocument: ReleasePlanDocumentView | null;
 }
 
 const AGENT_NODES: Array<{ id: Exclude<TimelineNodeId, "user">; label: string }> = [
@@ -140,7 +143,8 @@ export function buildRunViewModel(
   releaseRoadmap: ReleaseRoadmapView | null = null,
   featureDocument: FeatureDocumentView | null = null,
   projectBriefDocument: ProjectBriefDocumentView | null = null,
-  architectureDocument: ArchitectureDocumentView | null = null
+  architectureDocument: ArchitectureDocumentView | null = null,
+  releasePlanDocument: ReleasePlanDocumentView | null = null
 ): RunViewModel {
   const timeline = buildTimeline(detail.run, detail.events);
   return {
@@ -152,6 +156,7 @@ export function buildRunViewModel(
     featureDocument,
     projectBriefDocument,
     architectureDocument,
+    releasePlanDocument,
   };
 }
 

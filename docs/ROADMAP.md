@@ -388,7 +388,7 @@ Esfuerzo.
 | FEATURE-026 — Autenticación GitHub por usuario (✅ Ejecutado) | Alto | Medio | Alta |
 | FEATURE-033 — Lifecycle 01-PROJECT-BRIEF-TEMPLATE (✅ Implementada, validada E2E, pendiente de merge) | Alto | Bajo | Alta |
 | FEATURE-034 — Lifecycle 02-ARCHITECTURE-TEMPLATE (✅ Implementada, validada E2E, pendiente de merge) | Alto | Bajo | Alta |
-| FEATURE-035 — Lifecycle 09-RELEASE-PLAN-TEMPLATE | Alto | Bajo | Media |
+| FEATURE-035 — Lifecycle 09-RELEASE-PLAN-TEMPLATE (✅ Implementada, validada E2E parcialmente, pendiente de merge) | Alto | Bajo | Media |
 | FEATURE-036 — Release activo nominal tras cierre (P1) | Bajo | Medio | Baja |
 | FEATURE-029 — Contrato build output / COMANDO_TEST (P1) | Bajo | Bajo | Baja |
 | FEATURE-043 — Separar configuración de ejecución (repo/rama) del caso de negocio (✅ Ejecutado) | Bajo | Bajo | Baja |
@@ -1250,13 +1250,27 @@ FEATURE-023/FEATURE-033.
 Incluyó el botón "Descargar" en el panel de documento de Feature (`FeatureDocumentPanel`,
 `web/src/runs/RunDetailPage.tsx`), agregado tras el cierre de F033.
 
-### 🟡 FEATURE-035 — Lifecycle de `09-RELEASE-PLAN-TEMPLATE`
+### 🟢 FEATURE-035 — Lifecycle de `09-RELEASE-PLAN-TEMPLATE`
 
-**Estado:** Confirmada; posterior a FEATURE-023 Parte 2, prioridad por definir.
+**Estado:** Implementada y validada E2E parcialmente en vivo (VPS, 2026-08-16/17) — pendiente de
+merge a `main` por decisión del owner. Ver
+`docs/features/FEATURE-035-Lifecycle-canónico-de-Release-Plan-basado-en-el-Runbook.md`, sección 11
+(Resultado de Validación E2E).
 
-Deberá definir creación, actualización, validación, persistencia DB, ubicación canónica,
-versionado, lectura mediante FEATURE-022 y exposición en UI del Release Plan. No se diseña en
-detalle en esta actualización.
+Persistencia propia (`release_plans`, `unique(project_id, release_key)` — a diferencia de Project
+Brief/Architecture, es por release), sin `release_plan_revisions`: §2 (Enfoque Técnico + Test Plan
+por Feature) se acumula incrementalmente en el runtime sobre snapshots sucesivos, en vez de
+exigirle al modelo redeclarar Features ya planificadas — confirmado con evidencia real (Feature 1
+completa, Feature 2 en placeholder explícito, en el Markdown materializado). Nuevo gate
+`release_size_risk` protegido igual que `roadmap_approval`/`release_completion`. UI: se extrajo
+`CanonicalDocumentPanel`, shell común a los 4 documentos canónicos.
+
+Durante la validación se encontraron y corrigieron/anotaron 3 bugs preexistentes de FEATURE-020/023/037
+(ninguno originado en esta Feature): redeclaración de Features activadas en reingreso de Functional
+(corregido), falta de persistencia real de la Testing Policy configurable (`task_81cd46a5`,
+pendiente), y re-escalación de aprobación de Roadmap en cada reingreso de Architect
+(`task_ddde9489`, pendiente) — estos dos últimos bloquearon completar en vivo el ciclo de cierre
+con 2 Features; detalle completo en la sección 11 del doc de la Feature.
 
 ### ✅ FEATURE-036 — Release activo nominal tras cierre de proyecto sin release siguiente
 

@@ -192,6 +192,20 @@ export function isReleaseCompletionEscalation(
 }
 
 /**
+ * FEATURE-035: distingue el gate de "release demasiado grande" (§0 de `09-RELEASE-PLAN-TEMPLATE.md`)
+ * de una ambigüedad genérica de Planning — mismo criterio de distinción por contenido que
+ * `isReleaseCompletionEscalation`, misma forma dual (booleano real o string `"true"`).
+ */
+export function isReleaseSizeRiskEscalation(
+  artifact: { phase: AgentRole },
+  content: { outputArtifact: unknown }
+): boolean {
+  if (artifact.phase !== "planning") return false;
+  const raw = extractTaggedField(content.outputArtifact, "RELEASE_SIZE_RISK", "releaseSizeRisk");
+  return raw === "true" || raw === true;
+}
+
+/**
  * FEATURE-018, sección 7.2: distingue una escalación de "aprobación de roadmap" de una escalación
  * genérica sin campo/tipo de acción nuevo — solo Architect declara ROADMAP, y solo lo declara con
  * contenido cuando completó su análisis (nunca junto con una ambigüedad genérica sin resolver, por
@@ -223,21 +237,23 @@ export function extractRoadmapApproval(
   return isRoadmapApprovalPayload(parsed) ? parsed : null;
 }
 
-export type GateKind = "roadmap_approval" | "release_completion";
+export type GateKind = "roadmap_approval" | "release_completion" | "release_size_risk";
 
 /**
  * Corrección del runtime de circuitos: clasifica una escalación ANTES de que el retry genérico
- * (`handleLinearEscalation`) la procese. `roadmap_approval` (Architect proponiendo el Roadmap) y
- * `release_completion` (Planning declarando `RELEASE_COMPLETO`) son decisiones de gobernanza
- * esperadas — Approval Gates, no errores reintentables. Antes de esta corrección, ambas entraban
- * primero al retry automático (hasta 3 reinvocaciones del mismo rol) antes de mostrarse al humano.
- * `merge_approval` no necesita clasificarse acá: nunca pasa por el loop de fases de
- * `executePipelineRun` (se construye aparte, en `continueReleaseAfterFeatureApproved`), así que
- * nunca llega a `handleLinearEscalation`.
+ * (`handleLinearEscalation`) la procese. `roadmap_approval` (Architect proponiendo el Roadmap),
+ * `release_completion` (Planning declarando `RELEASE_COMPLETO`) y `release_size_risk` (FEATURE-035,
+ * Planning declarando que el release es demasiado grande) son decisiones de gobernanza esperadas —
+ * Approval Gates, no errores reintentables. Antes de esta corrección, entraban primero al retry
+ * automático (hasta 3 reinvocaciones del mismo rol) antes de mostrarse al humano. `merge_approval`
+ * no necesita clasificarse acá: nunca pasa por el loop de fases de `executePipelineRun` (se
+ * construye aparte, en `continueReleaseAfterFeatureApproved`), así que nunca llega a
+ * `handleLinearEscalation`.
  */
 export function classifyGateEscalation(agentRole: AgentRole, outputArtifact: unknown): GateKind | null {
   if (extractRoadmapApproval({ phase: agentRole }, { outputArtifact }) !== null) return "roadmap_approval";
   if (isReleaseCompletionEscalation({ phase: agentRole }, { outputArtifact })) return "release_completion";
+  if (isReleaseSizeRiskEscalation({ phase: agentRole }, { outputArtifact })) return "release_size_risk";
   return null;
 }
 

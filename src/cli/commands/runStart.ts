@@ -96,12 +96,15 @@ import { parseProjectBriefPayload } from "../../features/projectBriefContracts.j
 import { materializeProjectBriefDocument, persistProjectBrief } from "../../features/projectBriefLifecycle.js";
 import { parseArchitecturePayload } from "../../features/architectureContracts.js";
 import { materializeArchitectureDocument, persistArchitecture } from "../../features/architectureLifecycle.js";
+import { parseReleasePlanDocumentPayload } from "../../features/releasePlanContracts.js";
+import { materializeReleasePlanDocument, persistReleasePlanDocument } from "../../features/releasePlanLifecycle.js";
 import {
   ARCHITECTURE_TEMPLATE_ASSET,
   CODING_STANDARDS_ASSET,
   defaultRunbookProvider,
   FEATURE_TEMPLATE_ASSET,
   PROJECT_BRIEF_TEMPLATE_ASSET,
+  RELEASE_PLAN_TEMPLATE_ASSET,
   TESTING_POLICY_ASSET,
   type RunbookProvider,
   type RunbookTextAsset,
@@ -500,6 +503,39 @@ export async function executePipelineRun(params: {
           featureJustCompleted,
           inputReleasePlan,
         });
+
+        // FEATURE-035: mismo criterio de "declaración conjunta" que F034 -- se persiste el
+        // documento rico cada vez que RELEASE_PLAN trae contenido operacional real, incluida la
+        // excepción ya existente del cierre de release (RELEASE_COMPLETO viaja con status
+        // "escalated", mismo patrón que ya usa persistReleasePlanIfDeclared arriba).
+        const releaseDeclarationForDocument = extractReleasePlanDeclaration(
+          { phase: "planning" },
+          { outputArtifact: result.outputArtifact }
+        );
+        const isReleaseCompletionForDocument =
+          result.status === "escalated" &&
+          isReleaseCompletionEscalation({ phase: "planning" }, { outputArtifact: result.outputArtifact });
+        if ((result.status === "completed" || isReleaseCompletionForDocument) && releaseDeclarationForDocument) {
+          const roadmapForReleasePlan = await getCurrentProjectConfig(projectId, "release_roadmap");
+          const activeReleaseForPlanning = activeReleaseFromRoadmap(roadmapForReleasePlan?.value);
+          if (!activeReleaseForPlanning) {
+            throw new Error(`Run ${runId}: Planning declaró RELEASE_PLAN sin release activo fijado.`);
+          }
+          await persistReleasePlanDocument({
+            projectId,
+            runId,
+            releaseKey: activeReleaseForPlanning.id,
+            phaseFinishedEventId,
+            payload: parseReleasePlanDocumentPayload(result.outputArtifact),
+            operationalFeatures: releaseDeclarationForDocument.features,
+            templateAsset: await runbookProvider.readText(RELEASE_PLAN_TEMPLATE_ASSET),
+          });
+          await materializeReleasePlanDocument({
+            projectId,
+            releaseKey: activeReleaseForPlanning.id,
+            worktreePath: worktree.worktreePath,
+          });
+        }
       }
 
       if (functionalBatch) {
