@@ -664,7 +664,20 @@ export async function executePipelineRun(params: {
           // propio rol que escaló, nunca llegaría a Architect. En vez de eso, este run se resuelve
           // y se crea/ejecuta automáticamente (sin esperar humano) un run FULL_PIPELINE que
           // arranca en Architect con el mismo ReentryContext que usa el reingreso humano.
-          await updateRunStatus(runId, "resolved");
+          //
+          // Fix (2026-08-17), hallazgo en vivo: `updateRunStatus(runId, "resolved")` corría ACÁ,
+          // antes de crear el run hijo -- eso dispara de inmediato el trigger de notify sobre ESTE
+          // run (`runs_notify_observer`, `after update of status`), y el cliente SSE que lo estaba
+          // mirando reconsulta `getChildRunId(runId)` en ese mismo instante. Pero `createRunWorktree`
+          // (adentro de `createArchitectReentryChildRun`, más abajo) hace trabajo real de git que
+          // toma tiempo real -- el run hijo todavía no existía en la DB en el momento de esa
+          // reconsulta, así que el snapshot que recibía el frontend traía `childRunId: null`. Como
+          // nada vuelve a tocar la fila de ESTE run después (toda la actividad siguiente es del run
+          // hijo), no había ninguna notificación posterior que disparara un reintento -- el usuario
+          // quedaba viendo el run viejo "resolved" para siempre, sin ninguna señal de a dónde seguir.
+          // Ahora el estado del padre se marca DESPUÉS de que el run hijo ya está commiteado en la
+          // DB, para que la única notificación sobre este run sea también la única consulta
+          // necesaria -- ya encuentra el `childRunId` bien.
           const releasePlanConfig = await getCurrentProjectConfig(projectId, "release_plan");
           const ramaBaseTrabajo = (releasePlanConfig?.value as { ramaBaseTrabajo?: unknown } | undefined)
             ?.ramaBaseTrabajo;
@@ -685,6 +698,7 @@ export async function executePipelineRun(params: {
             cliAgentOverride,
             model,
           });
+          await updateRunStatus(runId, "resolved");
           console.log(`[run:start] run de reingreso a Architect creado: ${childRunId}.`);
           await executePipelineRun({
             projectRepoRoot: childWorktree.worktreePath,
@@ -1519,14 +1533,15 @@ async function continueReleaseAfterFeatureApproved(params: {
     featureBranch: worktree.branchName,
     mode: "auto",
   });
-  await finalizeRun(runId, {
-    status: "completed",
-    outputArtifact: null,
-    summary: `Feature lista, mergeada a "${baseBranch}" en modo auto.`,
-    escalationReason: null,
-  });
   console.log(`[run:start] Modo Auto: sub-rama "${worktree.branchName}" mergeada y pusheada a "${baseBranch}".`);
 
+  // Fix (2026-08-17): mismo criterio que el reingreso a Architect más arriba -- `finalizeRun`
+  // (status: "completed") corre DESPUÉS de crear el run de continuación, no antes, para que la
+  // única notificación de este run que le llega al SSE ya encuentre el `childRunId` en la DB.
+  // Antes de este fix, `finalizeRun` acá arriba disparaba el notify antes de que
+  // `createPlanningToQaChildRun` (que hace trabajo real de git) terminara de commitear el run hijo
+  // -- mismo síntoma que el otro camino: el usuario quedaba viendo el run "completed" sin ninguna
+  // señal de a qué run seguir.
   const { childRunId, childWorktree } = await createPlanningToQaChildRun({
     repoRoot,
     parentRunId: runId,
@@ -1535,6 +1550,12 @@ async function continueReleaseAfterFeatureApproved(params: {
     userId,
     cliAgentOverride,
     model,
+  });
+  await finalizeRun(runId, {
+    status: "completed",
+    outputArtifact: null,
+    summary: `Feature lista, mergeada a "${baseBranch}" en modo auto.`,
+    escalationReason: null,
   });
   console.log(`[run:start] run de continuación creado: ${childRunId} (Planning).`);
   await executePipelineRun({
