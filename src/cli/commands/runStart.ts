@@ -1220,7 +1220,27 @@ export async function persistReleasePlanIfDeclared(params: {
   const isReleaseCompletion =
     params.result.status === "escalated" &&
     isReleaseCompletionEscalation({ phase: "planning" }, { outputArtifact: params.result.outputArtifact });
-  if (params.result.status !== "completed" && !isReleaseCompletion) return;
+  if (params.result.status !== "completed" && !isReleaseCompletion) {
+    // Fix (2026-08-17), hallazgo en vivo: Planning puede escalar por una razón legítima ajena a la
+    // Feature que QA ya aprobó -- por ejemplo, una ambigüedad real en la SIGUIENTE Feature que le
+    // toca asignar. Antes de este fix, esa finalización ya conocida (`featureJustCompleted`) se
+    // perdía en silencio: como esta función retornaba sin persistir nada, nadie volvía a marcar esa
+    // Feature como completada en `release_plan` hasta la próxima vez que Planning lograra declarar
+    // un RELEASE_PLAN íntegro (incluyendo la Feature siguiente) -- dejando el plan persistido
+    // desactualizado ("En curso") en el medio. Confirmado como causa raíz de una escalación
+    // encadenada de Planning ("inconsistencia entre el artefacto funcional y el plan persistido")
+    // cuando Functional corregía la Feature siguiente sin redeclarar la ya completada (tal como debe
+    // hacer, ver functional.txt Regla 5) y Planning volvía a ver esa Feature marcada "En curso" en su
+    // propio Release Plan vigente. Es determinístico -- no depende de que el LLM lo redeclare -- así
+    // que corre sin importar si Planning llegó a escalar por cualquier otro motivo.
+    await markFeatureCompletedInPersistedReleasePlan({
+      projectId: params.projectId,
+      runId: params.runId,
+      featureJustCompleted: params.featureJustCompleted,
+      inputReleasePlan: params.inputReleasePlan,
+    });
+    return;
+  }
 
   const declaration = extractReleasePlanDeclaration(
     { phase: "planning" },
@@ -1284,6 +1304,43 @@ export async function persistReleasePlanIfDeclared(params: {
     releasePlan,
     featureActualId: declaration.featureActualId,
     update,
+  });
+}
+
+/**
+ * Fix (2026-08-17): contraparte determinística de `persistReleasePlanIfDeclared` para cuando
+ * Planning escala por un motivo ajeno a la Feature que QA ya aprobó. No depende de que Planning
+ * redeclare nada -- marca `featureJustCompleted` como "Completada" directamente sobre el
+ * `inputReleasePlan` que el propio Planning recibió como contexto de entrada en esta invocación
+ * (nunca sobre lo que declaró de salida, que en este camino de escalación no es un RELEASE_PLAN
+ * válido), y persiste esa versión actualizada. No-op si no hay `featureJustCompleted`, si
+ * `inputReleasePlan` no tiene forma válida, si esa Feature no aparece en el plan, o si ya estaba
+ * marcada "Completada" (evita reescrituras redundantes de `project_config_versions`).
+ */
+async function markFeatureCompletedInPersistedReleasePlan(params: {
+  projectId: string;
+  runId: string;
+  featureJustCompleted: string | null;
+  inputReleasePlan: unknown;
+}): Promise<void> {
+  if (!params.featureJustCompleted) return;
+  if (!isReleasePlanDeclaration(params.inputReleasePlan)) return;
+
+  const plan = params.inputReleasePlan as ReleasePlanDeclaration & { ramaBaseTrabajo?: unknown };
+  const entry = plan.features.find((feature) => feature.id === params.featureJustCompleted);
+  if (!entry || entry.estado === "Completada") return;
+
+  const updatedFeatures = plan.features.map((feature) =>
+    feature.id === params.featureJustCompleted ? { ...feature, estado: "Completada" as const } : feature
+  );
+  // Ninguna Feature queda "en curso" hasta que Planning logre asignar la siguiente con éxito -- si
+  // la que se acaba de completar era la activa, se limpia junto con la marca de completada.
+  const featureActualId = plan.featureActualId === params.featureJustCompleted ? null : plan.featureActualId;
+  await setProjectConfig({
+    projectId: params.projectId,
+    configKey: "release_plan",
+    value: { ...plan, features: updatedFeatures, featureActualId },
+    changedInRunId: params.runId,
   });
 }
 
