@@ -98,10 +98,50 @@ export async function startRunEventsListener(): Promise<void> {
   }
 }
 
+/**
+ * Fix (2026-08-17), hallazgo en vivo: cada NOTIFY de Postgres disparaba `handleNotification` de
+ * forma independiente (`void`, sin awaitear ni serializar) -- cuando un escalamiento se abre,
+ * llegan al menos dos notificaciones casi seguidas (el insert de `run_events` con `runs.status`
+ * todavía viejo, y el update de `runs.status` poco después), y como ambos handlers corrían
+ * concurrentemente, no había garantía de que la query de la notificación más reciente terminara de
+ * escribir al stream DESPUÉS que la más vieja -- el usuario reportó tener que salir y reentrar a la
+ * vista de un caso para ver un escalamiento que el servidor ya sabía que existía. Esta cola
+ * coalescente por `runId` garantiza que, para un mismo run, nunca corran dos consultas/escrituras
+ * de snapshot en paralelo, y que la última notificación que llega mientras una ya está en curso
+ * dispare una repetición final tras esa consulta -- así el último snapshot que ven los clientes
+ * siempre refleja el estado más reciente en DB, sin importar el orden de llegada de las notify.
+ */
+const notificationQueueByRunId = new Map<string, { processing: boolean; pending: boolean }>();
+
 async function handleNotification(payload: string | undefined): Promise<void> {
   const runId = runIdFromNotification(payload);
   if (!runId) return;
+  await scheduleRunRefresh(runId);
+}
 
+async function scheduleRunRefresh(runId: string): Promise<void> {
+  let state = notificationQueueByRunId.get(runId);
+  if (!state) {
+    state = { processing: false, pending: false };
+    notificationQueueByRunId.set(runId, state);
+  }
+  if (state.processing) {
+    state.pending = true;
+    return;
+  }
+  state.processing = true;
+  try {
+    do {
+      state.pending = false;
+      await pushRunSnapshotToClients(runId);
+    } while (state.pending);
+  } finally {
+    state.processing = false;
+    if (!state.pending) notificationQueueByRunId.delete(runId);
+  }
+}
+
+async function pushRunSnapshotToClients(runId: string): Promise<void> {
   const clients = clientsByRunId.get(runId);
   if (!clients) return;
 

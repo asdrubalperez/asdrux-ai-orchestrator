@@ -144,7 +144,7 @@ export function RunDetailPage() {
   const params = useParams<{ projectId: string; caseId: string }>();
   const runId = params.caseId ?? "";
   const query = useRunQuery(runId);
-  useRunStream(runId, query.refresh);
+  const connectionStatus = useRunStream(runId, query.refresh);
 
   const run = query.data;
 
@@ -154,7 +154,7 @@ export function RunDetailPage() {
       {query.isError ? <ErrorState /> : null}
       {run ? (
         <>
-          <RunOverview run={run} runId={runId} />
+          <RunOverview run={run} runId={runId} connectionStatus={connectionStatus} />
           <ProjectBriefPanel document={run.projectBriefDocument} />
           <ArchitecturePanel document={run.architectureDocument} />
           <ReleasePlanDocumentPanel document={run.releasePlanDocument} />
@@ -193,19 +193,41 @@ function useRunQuery(runId: string) {
   return { data: query.data ?? null, isLoading: query.isLoading, isError: query.isError, refresh };
 }
 
-function useRunStream(runId: string, refresh: () => void) {
+export type SseConnectionStatus = "connecting" | "open" | "reconnecting";
+
+/**
+ * Fix (2026-08-17), hallazgo en vivo: `ConnectionPanel` mostraba "SSE activo" siempre que hubiera
+ * un `runId`, sin leer nunca el estado real de la conexión -- el usuario reportó que la UI no se
+ * actualizaba tras un escalamiento pese a que ese indicador decía que todo estaba bien. Ahora el
+ * hook expone el estado real derivado de los eventos nativos del `EventSource`
+ * (`onopen`/`onerror`, más el `readyState` en el error para distinguir un reintento en curso de
+ * una conexión recién abriéndose) para que el panel deje de mentir.
+ */
+function useRunStream(runId: string, refresh: () => void): SseConnectionStatus {
+  const [status, setStatus] = React.useState<SseConnectionStatus>("connecting");
+
   React.useEffect(() => {
     if (!runId) return;
+    setStatus("connecting");
     const source = new EventSource(apiUrl(`/runs/${encodeURIComponent(runId)}/stream`), { withCredentials: true });
     source.addEventListener("snapshot", refresh);
     source.addEventListener("run_event", refresh);
+    source.onopen = () => {
+      setStatus("open");
+    };
     source.onerror = () => {
+      // El navegador reintenta automáticamente salvo que el servidor haya cerrado la conexión
+      // (readyState CLOSED) -- distinguimos "reconectando" de "cerrado" para no mostrar un estado
+      // engañosamente definitivo mientras el propio EventSource sigue reintentando solo.
+      setStatus(source.readyState === EventSource.CLOSED ? "reconnecting" : "connecting");
       refresh();
     };
     return () => {
       source.close();
     };
   }, [runId, refresh]);
+
+  return status;
 }
 
 function LoadingState() {
@@ -225,13 +247,21 @@ function ErrorState() {
   );
 }
 
-function RunOverview({ run, runId }: { run: RunViewModel; runId: string }) {
+function RunOverview({
+  run,
+  runId,
+  connectionStatus,
+}: {
+  run: RunViewModel;
+  runId: string;
+  connectionStatus: SseConnectionStatus;
+}) {
   return (
     <section className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
       <StatusMetric label="Estado" status={run.run.status} />
       <Metric label="Fase actual" value={run.run.current_phase ?? "sin fase"} />
       <Metric label="Eventos" value={String(run.narrative.length)} />
-      <ConnectionPanel runId={runId} />
+      <ConnectionPanel runId={runId} status={connectionStatus} />
       <MetadataPanel run={run} />
     </section>
   );
@@ -678,13 +708,22 @@ function Narrative({ entries }: { entries: RunViewModel["narrative"] }) {
   );
 }
 
-function ConnectionPanel({ runId }: { runId: string }) {
+function ConnectionPanel({ runId, status }: { runId: string; status: SseConnectionStatus }) {
+  const label = !runId
+    ? "Sin run seleccionado"
+    : status === "open"
+      ? "SSE activo"
+      : status === "reconnecting"
+        ? "SSE reconectando..."
+        : "SSE conectando...";
+  const colorClass = !runId ? "text-zinc-400" : status === "open" ? "text-emerald-600" : "text-amber-500";
+
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4">
       <CardLabel>Conexión</CardLabel>
       <div className="mt-3 flex items-center gap-2 text-sm text-zinc-600">
-        <Radio className="h-4 w-4 text-emerald-600" />
-        {runId ? "SSE activo" : "Sin run seleccionado"}
+        <Radio className={`h-4 w-4 ${colorClass}`} />
+        {label}
       </div>
     </section>
   );
