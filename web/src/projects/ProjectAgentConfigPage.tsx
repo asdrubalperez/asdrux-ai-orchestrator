@@ -62,30 +62,6 @@ export function ProjectAgentConfigPage() {
 
       <section className="mx-auto max-w-2xl space-y-4 px-4 py-6 sm:px-6 lg:px-8">
         <div className="rounded-lg border border-zinc-200 bg-white p-4">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Credenciales disponibles</h2>
-          <p className="mt-1 text-xs text-zinc-500">
-            Solo lectura -- para agregar, quitar o reconectar credenciales, andá a{" "}
-            <Link to="/settings/agents" className="underline">
-              tu cuenta
-            </Link>
-            .
-          </p>
-          <div className="mt-3 space-y-2">
-            {credentials.isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />
-            ) : (
-              (credentials.data?.credentials ?? []).map((c) => (
-                <div key={c.provider} className="flex items-center gap-2 text-sm">
-                  <KeyRound className="h-4 w-4 text-zinc-500" />
-                  <span className="capitalize">{c.provider}</span>
-                  <Badge variant={c.configured ? "success" : "outline"}>{c.configured ? "Configurada" : "Sin configurar"}</Badge>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-zinc-200 bg-white p-4">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Conexiones OAuth disponibles</h2>
           <p className="mt-1 text-xs text-zinc-500">
             Solo lectura -- para conectar, reconectar o desconectar, andá a{" "}
@@ -105,6 +81,30 @@ export function ProjectAgentConfigPage() {
                   <Badge variant={c.status === "connected" ? "success" : c.status === "reauth_required" ? "warning" : "outline"}>
                     {OAUTH_STATUS_LABEL[c.status]}
                   </Badge>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-zinc-200 bg-white p-4">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Credenciales disponibles</h2>
+          <p className="mt-1 text-xs text-zinc-500">
+            Solo lectura -- para agregar, quitar o reconectar credenciales, andá a{" "}
+            <Link to="/settings/agents" className="underline">
+              tu cuenta
+            </Link>
+            .
+          </p>
+          <div className="mt-3 space-y-2">
+            {credentials.isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />
+            ) : (
+              (credentials.data?.credentials ?? []).map((c) => (
+                <div key={c.provider} className="flex items-center gap-2 text-sm">
+                  <KeyRound className="h-4 w-4 text-zinc-500" />
+                  <span className="capitalize">{c.provider}</span>
+                  <Badge variant={c.configured ? "success" : "outline"}>{c.configured ? "Configurada" : "Sin configurar"}</Badge>
                 </div>
               ))
             )}
