@@ -1,11 +1,21 @@
 import React from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, KeyRound, Loader2 } from "lucide-react";
+import { CheckCircle2, KeyRound, Loader2, ShieldCheck } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { getProject, setProjectAgentConfigProfile } from "./api";
-import { getAgentConfig, getAiCredentialStatuses } from "../agentConfig/api";
+import { getAgentConfig, getAiCredentialStatuses, getOAuthConnectionStatuses } from "../agentConfig/api";
+import type { OAuthConnectionStatusValue } from "../agentConfig/types";
 import { queryClient } from "../lib/queryClient";
+
+// FEATURE-025-Parte-2: mismo texto que la pantalla de cuenta (AgentConfigPage) para el estado de
+// una conexión OAuth -- se duplica acá en vez de importar porque ahí es un detalle privado del
+// módulo, no una constante exportada.
+const OAUTH_STATUS_LABEL: Record<OAuthConnectionStatusValue, string> = {
+  not_connected: "No conectado",
+  connected: "Conectado",
+  reauth_required: "Requiere reautenticación",
+};
 
 /**
  * FEATURE-041, Regla 5.10/Scope "Separación cuenta/proyecto/caso": esta pantalla es el mirror de
@@ -23,6 +33,7 @@ export function ProjectAgentConfigPage() {
   const project = useQuery({ queryKey: ["projects", projectId], queryFn: () => getProject(projectId) });
   const agentConfig = useQuery({ queryKey: ["agent-config"], queryFn: () => getAgentConfig() });
   const credentials = useQuery({ queryKey: ["agent-credentials"], queryFn: () => getAiCredentialStatuses() });
+  const oauthConnections = useQuery({ queryKey: ["ai-oauth-connections"], queryFn: () => getOAuthConnectionStatuses() });
 
   const selectedProfileId = project.data?.project.agentConfigProfileId ?? null;
 
@@ -50,6 +61,32 @@ export function ProjectAgentConfigPage() {
       </header>
 
       <section className="mx-auto max-w-2xl space-y-4 px-4 py-6 sm:px-6 lg:px-8">
+        <div className="rounded-lg border border-zinc-200 bg-white p-4">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Conexiones OAuth disponibles</h2>
+          <p className="mt-1 text-xs text-zinc-500">
+            Solo lectura -- para conectar, reconectar o desconectar, andá a{" "}
+            <Link to="/settings/agents" className="underline">
+              tu cuenta
+            </Link>
+            .
+          </p>
+          <div className="mt-3 space-y-2">
+            {oauthConnections.isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />
+            ) : (
+              (oauthConnections.data?.connections ?? []).map((c) => (
+                <div key={c.provider} className="flex items-center gap-2 text-sm">
+                  <ShieldCheck className="h-4 w-4 text-zinc-500" />
+                  <span className="capitalize">{c.provider}</span>
+                  <Badge variant={c.status === "connected" ? "success" : c.status === "reauth_required" ? "warning" : "outline"}>
+                    {OAUTH_STATUS_LABEL[c.status]}
+                  </Badge>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
         <div className="rounded-lg border border-zinc-200 bg-white p-4">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Credenciales disponibles</h2>
           <p className="mt-1 text-xs text-zinc-500">

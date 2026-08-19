@@ -828,6 +828,15 @@ corregidos durante la propia validación:
 3. Los perfiles personalizados quedaban todos desplegados a la vez sin distinción visual,
    corregido con acordeón por perfil.
 
+**Hallazgo posterior (2026-08-19), detectado en revisión de Roadmap y corregido en rama aparte**:
+`ProjectAgentConfigPage` (el mirror de solo lectura por proyecto) solo consultaba
+`getAiCredentialStatuses` (API keys) — nunca `getOAuthConnectionStatuses`, que FEATURE-025-Parte-2
+ya había agregado a la pantalla de cuenta (`/settings/agents`) antes de que F041 existiera. Omisión
+real (F041 copió el panel de credenciales sin incorporar el de OAuth), no diseño intencional — sin
+documentación previa que la excluyera a propósito. Corregido agregando el panel "Conexiones OAuth
+disponibles" (mismo patrón de solo lectura + link a `/settings/agents`), en el mismo orden que la
+pantalla de cuenta (OAuth antes que API keys). Validado en vivo en VPS.
+
 ### 🟡 FEATURE-027 — Continuidad durable del loop Developer ↔ QA
 
 **Estado:** Confirmada. Prioridad P0.
