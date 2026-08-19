@@ -1,8 +1,11 @@
 import {
   createProject,
   DuplicateProjectError,
+  getFeaturesForProjectAndUser,
   getLastSelectedProjectForUser,
   getProjectByIdForUser,
+  getReentryEventsForProjectAndUser,
+  getReleaseRoadmapsForProjectAndUser,
   listProjectsForUser,
   listRunsForProjectAndUser,
   selectProjectForUser,
@@ -10,8 +13,8 @@ import {
   updateProjectName,
   type GitHubRepositoryVisibility,
   type ProjectRow,
-  type RunRow,
 } from "../db/repository.js";
+import { buildCaseTrees, type CaseTree } from "../cases/caseTree.js";
 import {
   GitConnectionInvalidError,
   GitConnectionRequiredError,
@@ -222,12 +225,23 @@ export async function selectProject(params: { userId: string; projectId: string 
   return selectProjectForUser(params);
 }
 
-export async function listProjectCases(params: {
+// FEATURE-045: evoluciona el contrato de `/projects/:projectId/cases` de lista plana de Runs a
+// árbol jerárquico Caso -> Release -> Feature -> Run/Reingreso. Backend resuelve (Regla 13), el
+// único consumidor detectado en la validación adversarial (`web/src/intake/CasesList.tsx`) se migra
+// en el mismo cambio -- no se preserva el contrato plano por compatibilidad hipotética.
+export async function listProjectCaseTree(params: {
   projectId: string;
   userId: string;
-}): Promise<{ found: boolean; runs: RunRow[] }> {
+}): Promise<{ found: boolean; cases: CaseTree[] }> {
   const project = await getProjectByIdForUser(params.projectId, params.userId);
-  if (!project) return { found: false, runs: [] };
-  const runs = await listRunsForProjectAndUser(params.projectId, params.userId);
-  return { found: true, runs };
+  if (!project) return { found: false, cases: [] };
+
+  const [runs, roadmaps, features, events] = await Promise.all([
+    listRunsForProjectAndUser(params.projectId, params.userId),
+    getReleaseRoadmapsForProjectAndUser(params.projectId, params.userId),
+    getFeaturesForProjectAndUser(params.projectId, params.userId),
+    getReentryEventsForProjectAndUser(params.projectId, params.userId),
+  ]);
+
+  return { found: true, cases: buildCaseTrees({ runs, roadmaps, features, events }) };
 }

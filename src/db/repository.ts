@@ -1367,6 +1367,104 @@ export async function updateRunCurrentPhase(runId: string, phase: string): Promi
   await pool.query("update runs set current_phase = $1, updated_at = now() where id = $2", [phase, runId]);
 }
 
+export interface CaseRoadmapRow {
+  caseKey: string;
+  value: unknown;
+  validFrom: string;
+}
+
+/**
+ * FEATURE-045, Regla 3/4: el Release visible de un Caso se resuelve leyendo `release_roadmap`
+ * (`project_config_versions`) escrito por un run del mismo ciclo (`coalesce(root_run_id, id)`),
+ * nunca "el vigente hoy" para el proyecto -- mismo criterio ya usado por `getReleasePlansByRelease`
+ * para el mecanismo legado, generalizado acá a cualquier versión histórica del roadmap (no solo la
+ * `valid_to is null`), porque un Caso cerrado puede tener su última versión ya superada por un
+ * ciclo posterior sobre el mismo proyecto.
+ */
+export async function getReleaseRoadmapsForProjectAndUser(
+  projectId: string,
+  userId: string
+): Promise<CaseRoadmapRow[]> {
+  const result = await pool.query<{ case_key: string; value: unknown; valid_from: string }>(
+    `select coalesce(writer.root_run_id, writer.id) as case_key, roadmap.value, roadmap.valid_from
+     from project_config_versions roadmap
+     join runs writer on writer.id = roadmap.changed_in_run_id
+     where roadmap.project_id = $1
+       and roadmap.config_key = 'release_roadmap'
+       and writer.project_id = $1
+       and writer.owner_id = $2
+     order by roadmap.valid_from asc`,
+    [projectId, userId]
+  );
+  return result.rows.map((row) => ({ caseKey: row.case_key, value: row.value, validFrom: row.valid_from }));
+}
+
+export interface CaseFeatureRow {
+  caseKey: string;
+  id: string;
+  featureCode: string;
+  name: string;
+  releaseKey: string;
+}
+
+/**
+ * FEATURE-045, Regla 5: una Feature solo pertenece al Caso cuyo `root_run_id` coincide con el del
+ * run que la creó (`created_in_run_id`) -- `features` no tiene columna de ciclo propia (hallazgo de
+ * la validación adversarial, ver FEATURE-046 para el fix de fondo en el write path). Este filtro es
+ * la mitigación de lectura: nunca se asocia una Feature a un Caso solo por `release_key` suelto.
+ */
+export async function getFeaturesForProjectAndUser(projectId: string, userId: string): Promise<CaseFeatureRow[]> {
+  const result = await pool.query<{ case_key: string; id: string; feature_code: string; name: string; release_key: string }>(
+    `select coalesce(creator.root_run_id, creator.id) as case_key,
+       features.id, features.feature_code, features.name, features.release_key
+     from features
+     join runs creator on creator.id = features.created_in_run_id
+     where features.project_id = $1
+       and creator.project_id = $1
+       and creator.owner_id = $2
+     order by features.created_at asc`,
+    [projectId, userId]
+  );
+  return result.rows.map((row) => ({
+    caseKey: row.case_key,
+    id: row.id,
+    featureCode: row.feature_code,
+    name: row.name,
+    releaseKey: row.release_key,
+  }));
+}
+
+export interface CaseRunEventRow {
+  runId: string;
+  eventType: string;
+  payload: unknown;
+}
+
+const CASE_TREE_REENTRY_EVENT_TYPES = [
+  "escalation_cross_pipeline_reentry_prepared",
+  "escalation_retry_context_prepared",
+  "escalation_gate_recognized",
+] as const;
+
+/**
+ * FEATURE-045, Regla 9/10/11: clasificar un Run como Reingreso requiere leer eventos persistidos
+ * de tipo discreto (`event_type`), nunca texto de resumen/artifact -- ver `classifyRunKind` en
+ * `src/cases/caseTree.ts` para el detalle de qué combinación de estos 3 tipos distingue reingreso
+ * real de una continuación de Gate (aprobación de Roadmap/cierre de Release).
+ */
+export async function getReentryEventsForProjectAndUser(projectId: string, userId: string): Promise<CaseRunEventRow[]> {
+  const result = await pool.query<{ run_id: string; event_type: string; payload: unknown }>(
+    `select run_events.run_id, run_events.event_type, run_events.payload
+     from run_events
+     join runs on runs.id = run_events.run_id
+     where runs.project_id = $1
+       and runs.owner_id = $2
+       and run_events.event_type = any($3::text[])`,
+    [projectId, userId, CASE_TREE_REENTRY_EVENT_TYPES]
+  );
+  return result.rows.map((row) => ({ runId: row.run_id, eventType: row.event_type, payload: row.payload }));
+}
+
 /**
  * "resolved" agregado por la corrección del runtime de circuitos: marca el run padre como resuelto
  * cuando un reingreso automático a Architect (sin humano) lo reemplaza por un run hijo
