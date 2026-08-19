@@ -48,6 +48,11 @@
 - ✅ FEATURE-041 — Creación y gestión de cuentas de usuario (self-service)
 
 **🟡 Confirmado**
+- FEATURE-045 — Vista jerárquica y semántica de Casos de Negocio. Implementada en rama
+  `feature/045-vista-jerarquica-casos` (backend `src/cases/caseTree.ts` + endpoint evolucionado +
+  frontend `CasesList.tsx`), 12/12 tests propios y 348/348 del repo en verde, typecheck limpio.
+  Pendiente merge a `main` y validación E2E real del owner. Ver
+  `docs/features/FEATURE-045-Vista-jerarquica-y-semantica-de-Casos-de-Negocio.md`.
 - FEATURE-027 — Continuidad durable del loop Developer ↔ QA. Prioridad P0.
 - FEATURE-039 — Regla 11 de Testing Policy (riesgo de contrato externo repetido) no se aplica
   estructuralmente. Prioridad por definir.
@@ -85,6 +90,7 @@ Esfuerzo.
 
 | Elemento | Esfuerzo | Impacto | Ponderación |
 |---|---|---|---|
+| FEATURE-045 — Vista jerárquica y semántica de Casos de Negocio (implementada, pendiente merge/E2E) | Medio | Alto | Alta |
 | FEATURE-028 — Release Plan asociado al Release activo (P1) | Medio | Alto | Alta |
 | FEATURE-025-Parte-1 — Asistente/modelo/credenciales API por agente (✅ Implementada y mergeada, pendiente validación E2E) | Medio | Medio | Alta |
 | FEATURE-025-Parte-2 — OAuth personal por proveedor de IA (después de Parte 1, requiere spike) | Alto | Medio | Media |
