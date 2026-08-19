@@ -145,7 +145,10 @@ export function CasesList() {
     </div>
   );
 
-  const renderRun = (run: CaseTreeRun, depth: number) => (
+  // FEATURE-045, feedback del owner tras la validación E2E: el run raíz de un Caso (el que abrió
+  // Architect antes de que existiera cualquier Release/Feature) se distingue por identidad
+  // (run.id === caseKey), dato que el backend ya manda -- no hace falta un campo nuevo del DTO.
+  const renderRun = (run: CaseTreeRun, depth: number, caseKey: string) => (
     <div key={run.id}>
       <div
         className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between"
@@ -153,6 +156,7 @@ export function CasesList() {
       >
         <div className="min-w-0">
           <div className="flex items-center gap-2">
+            {run.id === caseKey ? <Badge variant="secondary">Inicio del Caso</Badge> : null}
             <Badge variant={statusVariant(run.status)}>{statusLabel(run.status)}</Badge>
             {run.kind === "reentry" ? <Badge variant="outline">Reingreso</Badge> : null}
             <span className="truncate font-mono text-xs text-zinc-500" title={run.id}>
@@ -166,7 +170,7 @@ export function CasesList() {
         </div>
         {runActions(run)}
       </div>
-      {run.children.map((child) => renderRun(child, depth + 1))}
+      {run.children.map((child) => renderRun(child, depth + 1, caseKey))}
     </div>
   );
 
@@ -183,7 +187,9 @@ export function CasesList() {
           {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
           {feature.featureCode} · {feature.name}
         </button>
-        {!isCollapsed ? <div className="space-y-2">{feature.runs.map((run) => renderRun(run, 0))}</div> : null}
+        {!isCollapsed ? (
+          <div className="space-y-2">{feature.runs.map((run) => renderRun(run, 0, caseKey))}</div>
+        ) : null}
       </div>
     );
   };
@@ -205,13 +211,16 @@ export function CasesList() {
         {!isCollapsed ? (
           <div className="space-y-2">
             {release.features.map((feature) => renderFeature(caseKey, feature))}
-            {release.runs.map((run) => renderRun(run, 1))}
+            {release.runs.map((run) => renderRun(run, 1, caseKey))}
           </div>
         ) : null}
       </div>
     );
   };
 
+  // Feedback del owner: los Runs que cuelgan directo del Caso (típicamente el run raíz, antes de
+  // que exista cualquier Release) se leen mejor primero -- son cronológicamente lo primero que pasó
+  // en el Caso, aunque el Release termine siendo la sección con más contenido.
   const renderCase = (caseTree: CaseTree) => {
     const key = `case:${caseTree.caseKey}`;
     const isCollapsed = collapsed.has(key);
@@ -224,8 +233,8 @@ export function CasesList() {
         </button>
         {!isCollapsed ? (
           <div className="space-y-2">
+            {caseTree.runs.map((run) => renderRun(run, 1, caseTree.caseKey))}
             {caseTree.releases.map((release) => renderRelease(caseTree.caseKey, release))}
-            {caseTree.runs.map((run) => renderRun(run, 1))}
           </div>
         ) : null}
       </div>
