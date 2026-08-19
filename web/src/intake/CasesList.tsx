@@ -178,7 +178,7 @@ export function CasesList() {
     const key = `feature:${caseKey}:${feature.id}`;
     const isCollapsed = collapsed.has(key);
     return (
-      <div key={feature.id} className="ml-5 space-y-2 border-l border-zinc-200 pl-4">
+      <div key={feature.id} className="ml-4 space-y-2">
         <button
           type="button"
           onClick={() => toggle(key)}
@@ -198,7 +198,7 @@ export function CasesList() {
     const key = `release:${caseKey}:${release.id}`;
     const isCollapsed = collapsed.has(key);
     return (
-      <div key={release.id} className="ml-5 space-y-2 border-l border-zinc-200 pl-4">
+      <div key={release.id} className="ml-4 space-y-2">
         <button
           type="button"
           onClick={() => toggle(key)}
