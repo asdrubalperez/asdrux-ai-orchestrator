@@ -54,6 +54,9 @@
 - FEATURE-040 — Gates de gobernanza binarios (merge, cierre de release), sin camino de rechazo con
   feedback correctivo. Prioridad por definir.
 **⚪ Tentativo**
+- FEATURE-046 — Scoping por ciclo de negocio en la persistencia de `release_plans`/`features`
+  (evita mezcla de contenido entre Casos que reutilizan `release_key`). Detectado durante la
+  validación adversarial de FEATURE-045.
 - Escalamiento optimizado sin reinicio completo
 - Planning valida la Feature de Functional antes de diseñar el Release Plan
 - Feedback no bloqueante entre roles del pipeline
