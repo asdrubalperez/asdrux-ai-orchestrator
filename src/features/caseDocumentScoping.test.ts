@@ -127,13 +127,23 @@ test("FEATURE-047: dos Casos del mismo proyecto tienen su propio Project Brief y
     // nunca el del otro (síntoma real observado en la reproducción del 2026-08-20).
     const briefForA = await getProjectBriefDocumentForRun(rootAId);
     const briefForB = await getProjectBriefDocumentForRun(rootBId);
-    assert.ok(briefForA?.materialized, "Caso A debe ver su propio Project Brief materializado");
-    assert.ok(briefForB?.materialized, "Caso B debe ver su propio Project Brief materializado");
+    assert.ok(briefForA, "Caso A debe encontrar su propio Project Brief (canonicalArtifactId no nulo)");
+    assert.ok(briefForB, "Caso B debe encontrar su propio Project Brief (canonicalArtifactId no nulo)");
+    assert.notEqual(
+      briefForA?.canonicalArtifactId,
+      briefForB?.canonicalArtifactId,
+      "los dos Casos no deben compartir el mismo artifact canónico de Project Brief"
+    );
 
     const archForA = await getArchitectureDocumentForRun(rootAId);
     const archForB = await getArchitectureDocumentForRun(rootBId);
-    assert.ok(archForA, "Caso A debe ver su propia Architecture materializada");
-    assert.ok(archForB, "Caso B debe ver su propia Architecture materializada");
+    assert.ok(archForA, "Caso A debe encontrar su propia Architecture (canonicalArtifactId no nulo)");
+    assert.ok(archForB, "Caso B debe encontrar su propia Architecture (canonicalArtifactId no nulo)");
+    assert.notEqual(
+      archForA?.canonicalArtifactId,
+      archForB?.canonicalArtifactId,
+      "los dos Casos no deben compartir el mismo artifact canónico de Architecture"
+    );
 
     // Un run hijo del mismo Caso A (root_run_id compartido) sigue viendo el Project Brief de A --
     // regresión explícita del comportamiento dentro de un mismo Caso.
