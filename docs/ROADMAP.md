@@ -63,7 +63,10 @@
   Caso. Se frenó la prueba antes de aprobar el Gate para no perder los datos. Confirmado por
   búsqueda exhaustiva que ninguna otra tabla tiene el mismo patrón sin cubrir (única
   `unique(project_id)`/`unique(project_id, ...)` restante sin `root_run_id`). Prioridad propuesta
-  P0, mismo criterio que FEATURE-046. Sin diseño todavía.
+  P0, mismo criterio que FEATURE-046. **Aprobado (2026-08-20) e implementado** en rama
+  `feature/047-scoping-caso-negocio-briefs-architectures`, pendiente de validación (migración +
+  suite completa contra DB real + E2E en VPS) antes de mergear —
+  `docs/features/FEATURE-047-Scoping-por-Caso-de-Negocio-root_run_id-en-project_briefs-y-architectures.md`.
 - FEATURE-039 — Regla 11 de Testing Policy (riesgo de contrato externo repetido) no se aplica
   estructuralmente. Prioridad por definir.
 - FEATURE-040 — Gates de gobernanza binarios (merge, cierre de release), sin camino de rechazo con
@@ -97,7 +100,7 @@ Esfuerzo.
 
 | Elemento | Esfuerzo | Impacto | Ponderación |
 |---|---|---|---|
-| FEATURE-047 — Scoping por Caso de Negocio (`root_run_id`) en `project_briefs`/`architectures` (P0, sin diseño) | Medio | Alto | Alta |
+| FEATURE-047 — Scoping por Caso de Negocio (`root_run_id`) en `project_briefs`/`architectures` (P0, implementado, pendiente de validación) | Medio | Alto | Alta |
 | FEATURE-045 — Vista jerárquica y semántica de Casos de Negocio (✅ Ejecutado) | Medio | Alto | Alta |
 | FEATURE-028 — Release Plan asociado al Release activo (P1) | Medio | Alto | Alta |
 | FEATURE-025-Parte-1 — Asistente/modelo/credenciales API por agente (✅ Implementada y mergeada, pendiente validación E2E) | Medio | Medio | Alta |

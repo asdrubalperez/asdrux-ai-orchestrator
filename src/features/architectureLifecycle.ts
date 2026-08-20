@@ -27,6 +27,7 @@ export interface ArchitectureRow {
   final_document_path: string;
   document_hash: string | null;
   created_in_run_id: string;
+  root_run_id: string;
 }
 
 /**
@@ -69,13 +70,15 @@ export async function persistArchitecture(params: {
       );
     }
 
+    // FEATURE-047: `architectures` es de Caso, no de proyecto -- mismo criterio que
+    // `project_briefs`; reutiliza el `rootRunId` ya resuelto arriba para `currentApprovedRoadmap`.
     const existing = await client.query<ArchitectureRow & { last_payload: unknown }>(
       `select architectures.*, artifacts.content -> 'payload' as last_payload
        from architectures
        left join artifacts on artifacts.id = architectures.canonical_artifact_id
-       where architectures.project_id = $1
+       where architectures.project_id = $1 and architectures.root_run_id = $2
        for update of architectures`,
-      [params.projectId]
+      [params.projectId, rootRunId]
     );
     const existingRow = existing.rows[0];
     let row: ArchitectureRow | undefined = existingRow;
@@ -102,9 +105,9 @@ export async function persistArchitecture(params: {
       const inserted = await client.query<ArchitectureRow>(
         `insert into architectures (
            project_id, source_event_key, template_key, template_version, template_hash,
-           template_snapshot, final_document_path, created_in_run_id
+           template_snapshot, final_document_path, created_in_run_id, root_run_id
          )
-         values ($1,$2,$3,$4,$5,$6,$7,$8)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
          returning *`,
         [
           params.projectId,
@@ -115,6 +118,7 @@ export async function persistArchitecture(params: {
           templateMetadata.templateSnapshot,
           ARCHITECTURE_DOCUMENT_PATH,
           params.runId,
+          rootRunId,
         ]
       );
       row = inserted.rows[0];
@@ -170,14 +174,16 @@ export async function persistArchitecture(params: {
 
 export async function materializeArchitectureDocument(params: {
   projectId: string;
+  runId: string;
   worktreePath: string;
 }): Promise<{ architecture: ArchitectureRow; markdown: string; hash: string } | null> {
+  const rootRunId = await getRunRootRunId(pool, params.runId);
   const result = await pool.query<ArchitectureRow & { artifact_content: unknown }>(
     `select architectures.*, artifacts.content as artifact_content
      from architectures
      join artifacts on artifacts.id = architectures.canonical_artifact_id
-     where architectures.project_id = $1`,
-    [params.projectId]
+     where architectures.project_id = $1 and architectures.root_run_id = $2`,
+    [params.projectId, rootRunId]
   );
   const architecture = result.rows[0];
   if (!architecture) return null;
@@ -219,7 +225,9 @@ export async function getArchitectureDocumentForRun(runId: string): Promise<Arch
   const result = await pool.query<ArchitectureRow & { artifact_content: unknown }>(
     `select architectures.*, artifacts.content as artifact_content
      from runs
-     join architectures on architectures.project_id = runs.project_id
+     join architectures
+       on architectures.project_id = runs.project_id
+      and architectures.root_run_id = coalesce(runs.root_run_id, runs.id)
      join artifacts on artifacts.id = architectures.canonical_artifact_id
      where runs.id = $1`,
     [runId]

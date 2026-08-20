@@ -597,7 +597,7 @@ export async function executePipelineRun(params: {
         // docs/project/PROJECT-BRIEF.md quede en el worktree antes de Functional/Developer, y viaje
         // naturalmente en el primer commit real del run — mismo criterio que Feature, sin requerir
         // un paso de commit/push dedicado para este documento (fuera de alcance de F033).
-        await materializeProjectBriefDocument({ projectId, worktreePath: worktree.worktreePath });
+        await materializeProjectBriefDocument({ projectId, runId, worktreePath: worktree.worktreePath });
       }
 
       if (architectArchitecture) {
@@ -610,7 +610,7 @@ export async function executePipelineRun(params: {
         });
         // Mismo criterio que Project Brief: se materializa ya en esta fase para que
         // docs/architecture/ARCHITECTURE.md viaje en el primer commit real del run.
-        await materializeArchitectureDocument({ projectId, worktreePath: worktree.worktreePath });
+        await materializeArchitectureDocument({ projectId, runId, worktreePath: worktree.worktreePath });
       }
 
       previousResult = result;
