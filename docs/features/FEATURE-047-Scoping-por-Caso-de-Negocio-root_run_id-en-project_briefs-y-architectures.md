@@ -18,8 +18,8 @@ Versión de plantilla usada: v2.1 (`docs/playbook/07-FEATURE-TEMPLATE.md`)
 - **Name**: Scoping por Caso de Negocio (`root_run_id`) en `project_briefs` y `architectures`
 - **Type**: Data Integrity / Lifecycle Consistency
 - **Owner**: asdru
-- **Status**: 🟡 Implementado en rama `feature/047-scoping-caso-negocio-briefs-architectures`,
-  pendiente de validación (migración + suite completa contra DB real + E2E en VPS) antes de mergear
+- **Status**: 🟢 Implementado y validado end-to-end en producción real (VPS) — listo para mergear a
+  `main`
 - **Priority**: Propuesta **P0** — mismo criterio que FEATURE-046: hoy el sistema no soporta más de
   un Caso de negocio activo por proyecto a la vez, y en este caso concreto la consecuencia no es solo
   una lectura confusa sino **pérdida silenciosa de contenido** (el segundo Caso sobrescribe el
@@ -326,8 +326,29 @@ resolviendo `rootRunId` en su línea 63/64 antes del fix, call-sites de material
 
 ## 10. Estado de la implementación
 
-🟡 **Implementado en rama `feature/047-scoping-caso-negocio-briefs-architectures`, pendiente de
-validación contra DB real.**
+🟢 **Implementado y validado end-to-end en producción real (rama
+`feature/047-scoping-caso-negocio-briefs-architectures`, commit `96c3fc6`).**
+
+- Migración `0030` aplicada sin error contra Postgres real (worktree separado en el VPS,
+  `~/ai-orchestrator-verify-046`, sin tocar el servicio en producción).
+- Agregado `src/features/caseDocumentScoping.test.ts` — faltaba evidencia automatizada de que el fix
+  resuelve el bug (el entorno de implementación no tenía `DATABASE_URL_DEV`). Dos vueltas de
+  corrección durante la validación: (1) el cleanup del test dejaba filas huérfanas por borrar
+  `runs` antes que `artifacts`/`run_events` (violación de FK); (2) la primera versión del test
+  esperaba `materialized: true` tras solo `persistProjectBrief`/`persistArchitecture`, pero ese
+  campo depende de `document_hash`, que solo setea la materialización real al worktree (no probada
+  acá) — corregido a verificar `canonicalArtifactId` distinto entre Casos, que es lo que realmente
+  prueba el scoping.
+- Suite completa: **367/367** contra Postgres real, 0 fallas.
+- **E2E real en producción (2026-08-20)**: desplegada la rama al servicio real del VPS y reiniciado.
+  Se creó un Caso de negocio nuevo real (`root_run_id 375ab2fb-65db-438f-90fe-5674a0a381a7`,
+  "pruebas-mejoras-ui-casos-feature-047") en el mismo proyecto que ya tenía el Caso de descuentos
+  (`root_run_id 2c7b42d9-...`, con Project Brief/Architecture ya materializados). El nuevo Caso
+  completó ambos releases sin escalar por "roadmap vigente distinto" (el síntoma original del bug).
+  Confirmado contra la DB real: el Caso de descuentos conserva exactamente el mismo
+  `canonical_artifact_id` de antes (`bfd1ca64...` en `project_briefs`, `0ed3353d...` en
+  `architectures`, sin cambios), y el Caso nuevo obtuvo sus propias filas
+  (`c6c034ca...`/`5a63a30f...`) — cero pérdida, cero colisión.
 
 - Migración: `migrations/0030_project_briefs_architectures_root_run_id_scope.sql` — mismo patrón
   exacto que `migrations/0028_release_plans_features_root_run_id_scope.sql` (FEATURE-046, alcance
