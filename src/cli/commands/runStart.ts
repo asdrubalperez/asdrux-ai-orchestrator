@@ -1287,9 +1287,6 @@ export async function persistReleasePlanIfDeclared(params: {
   featureJustCompleted: string | null;
   inputReleasePlan: unknown;
 }): Promise<void> {
-  // FEATURE-046: config de Caso -- se resuelve una vez y se usa en todas las lecturas de
-  // `release_plan`/`release_roadmap` de esta función.
-  const rootRunId = await getRunRootRunId(pool, params.runId);
   // FEATURE-038: excepción exclusiva de persistencia para el cierre de release — RELEASE_COMPLETO
   // viaja con status "escalated" (es un Approval Gate, no un error), así que sin esta excepción el
   // guard de abajo descartaría el RELEASE_PLAN final antes de persistirlo, dejando el estado
@@ -1348,6 +1345,12 @@ export async function persistReleasePlanIfDeclared(params: {
 
   if (!declaration) return;
 
+  // FEATURE-046: config de Caso -- se resuelve recién acá (no al principio de la función) para
+  // preservar el contrato ya testeado de que una escalación inválida o "sin RELEASE_PLAN" nunca
+  // toca la base: los guards de arriba (early return sin declaración, validación de cierre
+  // fallida) deben poder cortar sin resolver el run raíz de un runId que, en esos caminos, puede
+  // no existir todavía como fila real (ver runStart.test.ts, tests "sin tocar la base").
+  const rootRunId = await getRunRootRunId(pool, params.runId);
   const existing = await getCurrentProjectConfig(params.projectId, "release_plan", rootRunId);
   const existingRamaBase = (existing?.value as { ramaBaseTrabajo?: unknown } | undefined)?.ramaBaseTrabajo;
   const ramaBaseTrabajo = typeof existingRamaBase === "string" ? existingRamaBase : params.fallbackRamaBaseTrabajo;
