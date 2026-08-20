@@ -1,7 +1,7 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { pool } from "../db/pool.js";
-import { recordArtifact, recordRunEvent } from "../db/repository.js";
+import { getRunRootRunId, recordArtifact, recordRunEvent } from "../db/repository.js";
 import { canonicalJson } from "./contracts.js";
 import { normalizeLf, sha256, isWithinDocumentSizeLimit } from "./canonicalDocument.js";
 import {
@@ -27,6 +27,8 @@ export interface ReleasePlanRow {
   final_document_path: string;
   document_hash: string | null;
   created_in_run_id: string;
+  /** FEATURE-046: epoch (Caso de negocio) dueño de esta fila -- fijado una única vez al crearla. */
+  root_run_id: string;
 }
 
 interface StoredReleasePlanContent {
@@ -63,6 +65,9 @@ export async function persistReleasePlanDocument(params: {
     if (run.rows[0]?.project_id !== params.projectId) {
       throw new ReleasePlanLifecycleEscalationError("Run y proyecto no coinciden.");
     }
+    // FEATURE-046: dos Casos de negocio distintos del mismo proyecto que reutilicen `releaseKey`
+    // nunca comparten fila -- el lookup/insert de abajo se acota al epoch de este run.
+    const rootRunId = await getRunRootRunId(client, params.runId);
 
     if (params.payload.featurePlan) {
       const secuenciaKeys = new Set(params.payload.secuencia.map((entry) => entry.sourceKey));
@@ -78,8 +83,9 @@ export async function persistReleasePlanDocument(params: {
        from release_plans
        left join artifacts on artifacts.id = release_plans.canonical_artifact_id
        where release_plans.project_id = $1 and release_plans.release_key = $2
+         and release_plans.root_run_id = $3
        for update of release_plans`,
-      [params.projectId, params.releaseKey]
+      [params.projectId, params.releaseKey, rootRunId]
     );
     const existingRow = existing.rows[0];
     let row: ReleasePlanRow | undefined = existingRow;
@@ -121,9 +127,9 @@ export async function persistReleasePlanDocument(params: {
       const inserted = await client.query<ReleasePlanRow>(
         `insert into release_plans (
            project_id, release_key, source_event_key, template_key, template_version, template_hash,
-           template_snapshot, final_document_path, created_in_run_id
+           template_snapshot, final_document_path, created_in_run_id, root_run_id
          )
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
          returning *`,
         [
           params.projectId,
@@ -135,6 +141,7 @@ export async function persistReleasePlanDocument(params: {
           templateMetadata.templateSnapshot,
           releasePlanDocumentPath(params.releaseKey),
           params.runId,
+          rootRunId,
         ]
       );
       row = inserted.rows[0];
@@ -205,6 +212,8 @@ function mergeFeaturePlan(previous: FeaturePlan[], incoming: FeaturePlan | null)
 
 export async function materializeReleasePlanDocument(params: {
   projectId: string;
+  /** FEATURE-046: epoch (Caso de negocio) del run que dispara la materialización. */
+  rootRunId: string;
   releaseKey: string;
   worktreePath: string;
 }): Promise<{ releasePlan: ReleasePlanRow; markdown: string; hash: string } | null> {
@@ -212,8 +221,9 @@ export async function materializeReleasePlanDocument(params: {
     `select release_plans.*, artifacts.content as artifact_content
      from release_plans
      join artifacts on artifacts.id = release_plans.canonical_artifact_id
-     where release_plans.project_id = $1 and release_plans.release_key = $2`,
-    [params.projectId, params.releaseKey]
+     where release_plans.project_id = $1 and release_plans.release_key = $2
+       and release_plans.root_run_id = $3`,
+    [params.projectId, params.releaseKey, params.rootRunId]
   );
   const releasePlan = result.rows[0];
   if (!releasePlan) return null;
@@ -262,6 +272,7 @@ export async function getReleasePlanDocumentForRun(runId: string): Promise<Relea
      from runs
      join features on features.id = runs.active_feature_id
      join release_plans on release_plans.project_id = runs.project_id and release_plans.release_key = features.release_key
+      and release_plans.root_run_id = coalesce(runs.root_run_id, runs.id)
      join artifacts on artifacts.id = release_plans.canonical_artifact_id
      where runs.id = $1`,
     [runId]

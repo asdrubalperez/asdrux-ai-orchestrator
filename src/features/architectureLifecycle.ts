@@ -2,7 +2,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { PoolClient } from "pg";
 import { pool } from "../db/pool.js";
-import { recordArtifact, recordRunEvent } from "../db/repository.js";
+import { getRunRootRunId, recordArtifact, recordRunEvent } from "../db/repository.js";
 import { canonicalJson } from "./contracts.js";
 import { normalizeLf, sha256, isWithinDocumentSizeLimit } from "./canonicalDocument.js";
 import {
@@ -59,7 +59,10 @@ export async function persistArchitecture(params: {
       throw new ArchitectureLifecycleEscalationError("Run y proyecto no coinciden.");
     }
 
-    const roadmap = await currentApprovedRoadmap(client, params.projectId);
+    // FEATURE-046: `release_roadmap` es config de Caso -- Architect solo debe ver el Roadmap de su
+    // propio Caso de negocio, nunca el de un Caso ajeno concurrente en el mismo proyecto.
+    const rootRunId = await getRunRootRunId(client, params.runId);
+    const roadmap = await currentApprovedRoadmap(client, params.projectId, rootRunId);
     if (!roadmap) {
       throw new ArchitectureLifecycleEscalationError(
         `Proyecto ${params.projectId}: no hay release_roadmap operacional válido -- Architecture no puede componer su sección 0.`
@@ -241,12 +244,14 @@ export async function getArchitectureDocumentForRun(runId: string): Promise<Arch
 
 async function currentApprovedRoadmap(
   client: PoolClient,
-  projectId: string
+  projectId: string,
+  rootRunId: string
 ): Promise<RoadmapApprovalPayload | null> {
   const result = await client.query<{ value: unknown }>(
     `select value from project_config_versions
-     where project_id = $1 and config_key = 'release_roadmap' and valid_to is null`,
-    [projectId]
+     where project_id = $1 and config_key = 'release_roadmap' and valid_to is null
+       and root_run_id = $2`,
+    [projectId, rootRunId]
   );
   const value = result.rows[0]?.value ?? null;
   return isRoadmapApprovalPayload(value) ? value : null;

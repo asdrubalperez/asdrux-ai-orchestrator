@@ -109,6 +109,11 @@ export interface ProjectConfigVersionRow {
   value: unknown;
   valid_from: string;
   valid_to: string | null;
+  /**
+   * FEATURE-046: `null` es alcance de proyecto (compartido por todos los Casos de negocio); un
+   * valor concreto es el epoch (`coalesce(runs.root_run_id, runs.id)`) del Caso dueño de esta fila.
+   */
+  root_run_id: string | null;
 }
 
 export interface ReleasePlanByReleaseRow {
@@ -292,6 +297,22 @@ async function resolveRootRunId(
 }
 
 /**
+ * FEATURE-046: epoch (Caso de negocio) de un run ya existente -- `coalesce(root_run_id, id)`,
+ * mismo criterio ya usado por `getReleasePlansByRelease`/`getReleasePlanAssociationCandidate`
+ * (CTE `current_epoch`) y ahora reutilizado para scopear la escritura/lectura de `release_plans`,
+ * `features` y `project_config_versions` por Caso de negocio, en vez de solo por proyecto.
+ */
+export async function getRunRootRunId(db: PoolClient | typeof pool, runId: string): Promise<string> {
+  const result = await db.query<{ root_run_id: string | null }>(
+    "select coalesce(root_run_id, id) as root_run_id from runs where id = $1",
+    [runId]
+  );
+  const rootRunId = result.rows[0]?.root_run_id;
+  if (!rootRunId) throw new Error(`Run inexistente: ${runId}`);
+  return rootRunId;
+}
+
+/**
  * FEATURE-017: crea un run en estado `sin_iniciar` — el caso ya mapeado/confirmado, sin worktree,
  * sin branch, sin invocación al Architect todavía (recién ocurre al apretar Iniciar). No reusa
  * `createRun` porque esa función exige `branchName`/`worktreePath` como parámetros requeridos
@@ -438,29 +459,45 @@ export async function getIntakeFieldDefinitions(): Promise<IntakeFieldDefinition
   return result.rows;
 }
 
+/**
+ * FEATURE-046: `rootRunId` es obligatorio y de matching exacto (`is not distinct from`, sin
+ * fallback entre alcances) -- el caller decide explícitamente si quiere la config de un Caso
+ * puntual (pasa el epoch resuelto de su run, ver `getRunRootRunId`) o la de alcance de proyecto
+ * (pasa `null`). Sin este parámetro, dos Casos de negocio distintos del mismo proyecto verían la
+ * misma fila "vigente" -- el bug original de esta Feature.
+ */
 export async function getCurrentProjectConfig(
   projectId: string,
-  configKey: string
+  configKey: string,
+  rootRunId: string | null
 ): Promise<ProjectConfigVersionRow | null> {
   const result = await pool.query<ProjectConfigVersionRow>(
-    `select id, project_id, config_key, value, valid_from, valid_to
+    `select id, project_id, config_key, value, valid_from, valid_to, root_run_id
      from project_config_versions
-     where project_id = $1 and config_key = $2 and valid_to is null`,
-    [projectId, configKey]
+     where project_id = $1 and config_key = $2 and valid_to is null
+       and root_run_id is not distinct from $3`,
+    [projectId, configKey, rootRunId]
   );
   return result.rows[0] ?? null;
 }
 
+/**
+ * FEATURE-046: a diferencia de `getCurrentProjectConfig`, acá sí se combinan a propósito ambos
+ * alcances -- config de proyecto (`root_run_id is null`) + config del Caso puntual
+ * (`root_run_id = rootRunId`). Es la semántica correcta para pinnear (`run_config_versions`) toda
+ * la config vigente que le corresponde a un run nuevo: la de su propio Caso más la compartida.
+ */
 export async function getCurrentProjectConfigs(
   projectId: string,
+  rootRunId: string | null,
   client?: PoolClient
 ): Promise<ProjectConfigVersionRow[]> {
   const db = client ?? pool;
   const result = await db.query<ProjectConfigVersionRow>(
-    `select id, project_id, config_key, value, valid_from, valid_to
+    `select id, project_id, config_key, value, valid_from, valid_to, root_run_id
      from project_config_versions
-     where project_id = $1 and valid_to is null`,
-    [projectId]
+     where project_id = $1 and valid_to is null and (root_run_id = $2 or root_run_id is null)`,
+    [projectId, rootRunId]
   );
   return result.rows;
 }
@@ -498,6 +535,14 @@ export async function setProjectConfig(params: {
   }
 }
 
+/**
+ * FEATURE-046: `root_run_id` se resuelve a partir de `changedInRunId` -- presente implica config de
+ * Caso (`coalesce(runs.root_run_id, runs.id)`), ausente implica config de alcance de proyecto
+ * (`null`, compartida por todos los Casos). El cierre de la fila vigente anterior deja de buscar
+ * solo por `(project_id, config_key)`: agrega `root_run_id is not distinct from $3` para no pisar
+ * la fila vigente de un Caso ajeno (`is not distinct from`, no `=`, porque dos alcances de proyecto
+ * -- ambos `NULL` -- deben seguir matcheando entre sí).
+ */
 async function writeProjectConfigVersion(
   client: PoolClient,
   params: {
@@ -509,18 +554,20 @@ async function writeProjectConfigVersion(
     changeReason?: string;
   }
 ): Promise<ProjectConfigVersionRow> {
+  const rootRunId = params.changedInRunId ? await getRunRootRunId(client, params.changedInRunId) : null;
   await client.query(
     `update project_config_versions
      set valid_to = now()
-     where project_id = $1 and config_key = $2 and valid_to is null`,
-    [params.projectId, params.configKey]
+     where project_id = $1 and config_key = $2 and valid_to is null
+       and root_run_id is not distinct from $3`,
+    [params.projectId, params.configKey, rootRunId]
   );
   const inserted = await client.query<ProjectConfigVersionRow>(
     `insert into project_config_versions (
-       project_id, config_key, value, changed_by_user_id, changed_in_run_id, change_reason
+       project_id, config_key, value, changed_by_user_id, changed_in_run_id, change_reason, root_run_id
      )
-     values ($1, $2, $3, $4, $5, $6)
-     returning id, project_id, config_key, value, valid_from, valid_to`,
+     values ($1, $2, $3, $4, $5, $6, $7)
+     returning id, project_id, config_key, value, valid_from, valid_to, root_run_id`,
     [
       params.projectId,
       params.configKey,
@@ -528,6 +575,7 @@ async function writeProjectConfigVersion(
       params.changedByUserId ?? null,
       params.changedInRunId ?? null,
       params.changeReason ?? null,
+      rootRunId,
     ]
   );
   return inserted.rows[0];
@@ -554,25 +602,22 @@ export async function getProjectConfigHistory(
  * Corrección de bug (hallazgo de validación E2E de FEATURE-036, 2026-07-30): antes de este cambio,
  * la consulta agrupaba por el valor literal de `activeReleaseId` (ej. "r1", "r2") sobre *todo* el
  * historial del proyecto, sin filtrar por vigencia ni por a qué ciclo de negocio pertenecía cada
- * versión. Como el mismo proyecto se reutiliza entre casos de negocio no relacionados (FEATURE-030,
- * sin resolver todavía) y Architect/Planning nombran los releases siempre con los mismos IDs
- * genéricos, historial de un ciclo de negocio completamente distinto podía colarse en la vista del
- * ciclo actual. Se acota ahora al mismo `root_run_id` (raíz del ciclo de negocio) que el run que
- * escribió el `release_roadmap` actualmente vigente — runs de un ciclo anterior, aunque reusen los
- * mismos IDs literales, quedan excluidos porque pertenecen a un `root_run_id` distinto.
+ * versión. Como el mismo proyecto se reutiliza entre casos de negocio no relacionados y
+ * Architect/Planning nombran los releases siempre con los mismos IDs genéricos, historial de un
+ * ciclo de negocio completamente distinto podía colarse en la vista del ciclo actual.
+ *
+ * FEATURE-046: desde que `project_config_versions` tiene `root_run_id` propio (migración 0029),
+ * esta consulta ya no necesita resolver el epoch vigente vía un CTE que junta contra `runs` y
+ * asume una única fila vigente por proyecto (esa asunción dejó de ser válida: ahora puede haber una
+ * fila `release_roadmap` vigente por Caso de negocio simultáneamente). Se filtra directamente por
+ * `root_run_id = $2`, recibido del caller.
  */
-export async function getReleasePlansByRelease(projectId: string): Promise<ReleasePlanByReleaseRow[]> {
+export async function getReleasePlansByRelease(
+  projectId: string,
+  rootRunId: string
+): Promise<ReleasePlanByReleaseRow[]> {
   const result = await pool.query<ReleasePlanByReleaseRow>(
-    `with current_epoch as (
-       select coalesce(r.root_run_id, r.id) as root_run_id
-       from project_config_versions roadmap
-       join runs r on r.id = roadmap.changed_in_run_id
-       where roadmap.project_id = $1
-         and roadmap.config_key = 'release_roadmap'
-         and roadmap.valid_to is null
-       limit 1
-     )
-     select distinct on (roadmap.value ->> 'activeReleaseId')
+    `select distinct on (roadmap.value ->> 'activeReleaseId')
        roadmap.value ->> 'activeReleaseId' as release_id,
        plan.value
      from project_config_versions plan
@@ -580,24 +625,23 @@ export async function getReleasePlansByRelease(projectId: string): Promise<Relea
      join project_config_versions roadmap
        on roadmap.id = pinned.config_version_id
       and roadmap.config_key = 'release_roadmap'
-     join runs plan_run on plan_run.id = plan.changed_in_run_id
-     join current_epoch on coalesce(plan_run.root_run_id, plan_run.id) = current_epoch.root_run_id
      where plan.project_id = $1
        and plan.config_key = 'release_plan'
+       and plan.root_run_id = $2
        and roadmap.value ->> 'activeReleaseId' is not null
      order by roadmap.value ->> 'activeReleaseId', plan.valid_from desc`,
-    [projectId]
+    [projectId, rootRunId]
   );
   return result.rows;
 }
 
 /**
  * FEATURE-028: candidato para decidir si el `release_plan` vigente corresponde al release
- * actualmente activo. Trae, en una sola consulta, tanto el `activeReleaseId` que tenía pinneado el
- * roadmap del run que escribió ese plan como el `root_run_id` de ese mismo run y el del ciclo de
- * negocio vigente (mismo CTE `current_epoch` que `getReleasePlansByRelease`) — la comparación en sí
- * la hace `resolveReleasePlanForActiveRelease` (función pura en `runStart.ts`), no esta consulta:
- * acá solo se resuelven los datos persistidos, sin decidir nada.
+ * actualmente activo. `resolveReleasePlanForActiveRelease` (función pura en `runStart.ts`) sigue
+ * comparando `writerRootRunId` contra `currentEpochRootRunId` — con el filtro `plan.root_run_id =
+ * $2` de FEATURE-046 esa comparación queda estructuralmente garantizada (ambas son siempre el
+ * mismo `rootRunId` recibido), pero se conserva como defensa en profundidad explícita en vez de
+ * asumirlo implícito, y para no tocar `resolveReleasePlanForActiveRelease` ni sus tests.
  */
 export interface ReleasePlanAssociationCandidate {
   value: unknown;
@@ -607,47 +651,34 @@ export interface ReleasePlanAssociationCandidate {
 }
 
 export async function getReleasePlanAssociationCandidate(
-  projectId: string
+  projectId: string,
+  rootRunId: string
 ): Promise<ReleasePlanAssociationCandidate | null> {
   const result = await pool.query<{
     value: unknown;
     pinned_active_release_id: string | null;
-    writer_root_run_id: string;
-    current_epoch_root_run_id: string;
   }>(
-    `with current_epoch as (
-       select coalesce(r.root_run_id, r.id) as root_run_id
-       from project_config_versions roadmap
-       join runs r on r.id = roadmap.changed_in_run_id
-       where roadmap.project_id = $1
-         and roadmap.config_key = 'release_roadmap'
-         and roadmap.valid_to is null
-       limit 1
-     )
-     select plan.value,
-       roadmap.value ->> 'activeReleaseId' as pinned_active_release_id,
-       coalesce(plan_run.root_run_id, plan_run.id) as writer_root_run_id,
-       current_epoch.root_run_id as current_epoch_root_run_id
+    `select plan.value,
+       roadmap.value ->> 'activeReleaseId' as pinned_active_release_id
      from project_config_versions plan
      join run_config_versions pinned on pinned.run_id = plan.changed_in_run_id
      join project_config_versions roadmap
        on roadmap.id = pinned.config_version_id
       and roadmap.config_key = 'release_roadmap'
-     join runs plan_run on plan_run.id = plan.changed_in_run_id
-     cross join current_epoch
      where plan.project_id = $1
        and plan.config_key = 'release_plan'
        and plan.valid_to is null
+       and plan.root_run_id = $2
      limit 1`,
-    [projectId]
+    [projectId, rootRunId]
   );
   const row = result.rows[0];
   if (!row) return null;
   return {
     value: row.value,
     pinnedActiveReleaseId: row.pinned_active_release_id,
-    writerRootRunId: row.writer_root_run_id,
-    currentEpochRootRunId: row.current_epoch_root_run_id,
+    writerRootRunId: rootRunId,
+    currentEpochRootRunId: rootRunId,
   };
 }
 
@@ -1011,7 +1042,10 @@ export async function deleteAiOAuthConnection(userId: string, provider: Executor
 
 export async function recordRunConfigVersions(runId: string, client?: PoolClient): Promise<void> {
   const db = client ?? pool;
-  const run = await db.query<Pick<RunRow, "project_id">>("select project_id from runs where id = $1", [runId]);
+  const run = await db.query<Pick<RunRow, "project_id" | "root_run_id">>(
+    "select project_id, root_run_id from runs where id = $1",
+    [runId]
+  );
   if (!run.rows[0]) {
     throw new Error(`Run inexistente: ${runId}`);
   }
@@ -1019,7 +1053,10 @@ export async function recordRunConfigVersions(runId: string, client?: PoolClient
     return;
   }
 
-  const configs = await getCurrentProjectConfigs(run.rows[0].project_id, client);
+  // FEATURE-046: pinnea la config del propio Caso de negocio de este run (+ la de alcance de
+  // proyecto) -- nunca la de un Caso ajeno que también esté vigente en el mismo proyecto.
+  const rootRunId = run.rows[0].root_run_id ?? runId;
+  const configs = await getCurrentProjectConfigs(run.rows[0].project_id, rootRunId, client);
   for (const config of configs) {
     await db.query("insert into run_config_versions (run_id, config_version_id) values ($1, $2)", [
       runId,

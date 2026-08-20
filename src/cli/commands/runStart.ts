@@ -31,6 +31,7 @@ import {
   getProjectForUser,
   getReleasePlanAssociationCandidate,
   getRootRunExecutionContext,
+  getRunRootRunId,
   getRunStatus,
   recordArtifact,
   recordRunConfigVersions,
@@ -369,6 +370,10 @@ export async function executePipelineRun(params: {
     cleanupStrategy = "shared-worktree",
     runbookProvider = defaultRunbookProvider,
   } = params;
+  // FEATURE-046: epoch (Caso de negocio) de este run -- toda lectura/escritura de config vigente
+  // del proyecto dentro de este pipeline se acota a este Caso, nunca a "lo último vigente en el
+  // proyecto" (que podría pertenecer a un Caso concurrente ajeno).
+  const rootRunId = await getRunRootRunId(pool, runId);
   // FEATURE-025-Parte-1, sección 5.8: se resuelve por invocación, nunca una sola vez para todo el
   // run. Bajo cliAgentOverride (flags de CLI, Regla 2 de FEATURE-016: nunca consulta la DB), el
   // modelo sigue siendo el `--model` de CLI aplicado a todas las fases -- mismo comportamiento que
@@ -410,11 +415,11 @@ export async function executePipelineRun(params: {
       const baseContext = contextForNextPhase;
       const context =
         phase.agentRole === "planning"
-          ? await withRoleContext(projectId, runId, baseContext)
+          ? await withRoleContext(projectId, rootRunId, runId, baseContext)
           : phase.agentRole === "architect"
-            ? await withArchitectRoleContext(projectId, baseContext)
+            ? await withArchitectRoleContext(projectId, rootRunId, baseContext)
             : phase.agentRole === "functional"
-              ? await withFunctionalRoleContext(projectId, baseContext)
+              ? await withFunctionalRoleContext(projectId, rootRunId, baseContext)
               : baseContext;
       const roleInstructions = await readRole(phase.agentRole);
       const selection = await resolveSelection(phase.agentRole);
@@ -523,7 +528,7 @@ export async function executePipelineRun(params: {
           result.status === "escalated" &&
           isReleaseCompletionEscalation({ phase: "planning" }, { outputArtifact: result.outputArtifact });
         if ((result.status === "completed" || isReleaseCompletionForDocument) && releaseDeclarationForDocument) {
-          const roadmapForReleasePlan = await getCurrentProjectConfig(projectId, "release_roadmap");
+          const roadmapForReleasePlan = await getCurrentProjectConfig(projectId, "release_roadmap", rootRunId);
           const activeReleaseForPlanning = activeReleaseFromRoadmap(roadmapForReleasePlan?.value);
           if (!activeReleaseForPlanning) {
             throw new Error(`Run ${runId}: Planning declaró RELEASE_PLAN sin release activo fijado.`);
@@ -551,6 +556,7 @@ export async function executePipelineRun(params: {
             });
             await materializeReleasePlanDocument({
               projectId,
+              rootRunId,
               releaseKey: activeReleaseForPlanning.id,
               worktreePath: worktree.worktreePath,
             });
@@ -563,7 +569,7 @@ export async function executePipelineRun(params: {
       }
 
       if (functionalBatch) {
-        const roadmap = await getCurrentProjectConfig(projectId, "release_roadmap");
+        const roadmap = await getCurrentProjectConfig(projectId, "release_roadmap", rootRunId);
         const activeRelease = activeReleaseFromRoadmap(roadmap?.value);
         if (!activeRelease) {
           throw new Error(`Run ${runId}: Functional completó sin release activo fijado.`);
@@ -681,7 +687,7 @@ export async function executePipelineRun(params: {
           // Ahora el estado del padre se marca DESPUÉS de que el run hijo ya está commiteado en la
           // DB, para que la única notificación sobre este run sea también la única consulta
           // necesaria -- ya encuentra el `childRunId` bien.
-          const releasePlanConfig = await getCurrentProjectConfig(projectId, "release_plan");
+          const releasePlanConfig = await getCurrentProjectConfig(projectId, "release_plan", rootRunId);
           const ramaBaseTrabajo = (releasePlanConfig?.value as { ramaBaseTrabajo?: unknown } | undefined)
             ?.ramaBaseTrabajo;
           if (typeof ramaBaseTrabajo !== "string") {
@@ -1049,10 +1055,15 @@ export function resolveReleasePlanForActiveRelease(params: {
  * cacheada entre llamadas) para que Planning la traduzca al Test Plan de la Feature. Developer/QA
  * no la reciben directamente (Regla 5/6 del diseño) — reciben el Test Plan que Planning produce.
  */
-async function withRoleContext(projectId: string, runId: string, incomingContext: unknown): Promise<unknown> {
-  const roadmap = await getCurrentProjectConfig(projectId, "release_roadmap");
+async function withRoleContext(
+  projectId: string,
+  rootRunId: string,
+  runId: string,
+  incomingContext: unknown
+): Promise<unknown> {
+  const roadmap = await getCurrentProjectConfig(projectId, "release_roadmap", rootRunId);
   const activeRelease = activeReleaseFromRoadmap(roadmap?.value ?? null);
-  const candidate = await getReleasePlanAssociationCandidate(projectId);
+  const candidate = await getReleasePlanAssociationCandidate(projectId, rootRunId);
   const testingPolicy = await defaultRunbookProvider.readText(TESTING_POLICY_ASSET);
   await recordRunEvent(runId, "runbook_governance_delivered", {
     role: "planning",
@@ -1065,7 +1076,7 @@ async function withRoleContext(projectId: string, runId: string, incomingContext
   // real (si Architect ya la configuró, ver architect.txt Regla 9) vive aparte, en
   // `project_config_versions` (`testing_policy_config`), y se entrega como campo estructurado
   // separado para que Planning use los valores ya resueltos en vez de escalar pidiéndolos.
-  const testingPolicyConfig = await getCurrentProjectConfig(projectId, "testing_policy_config");
+  const testingPolicyConfig = await getCurrentProjectConfig(projectId, "testing_policy_config", rootRunId);
   const shared = {
     activeRelease,
     releasePlan: resolveReleasePlanForActiveRelease({ activeReleaseId: activeRelease?.id ?? null, candidate }),
@@ -1091,13 +1102,17 @@ async function withRoleContext(projectId: string, runId: string, incomingContext
  * amplia. Se entrega siempre que exista, sin importar el camino de invocación (Regla 4 ahora
  * decide en base a este dato, no a inferencia de la conversación).
  */
-async function withArchitectRoleContext(projectId: string, incomingContext: unknown): Promise<unknown> {
+async function withArchitectRoleContext(
+  projectId: string,
+  rootRunId: string,
+  incomingContext: unknown
+): Promise<unknown> {
   if (incomingContext === null || typeof incomingContext !== "object") {
     return incomingContext;
   }
   const [testingPolicyConfig, roadmapApproval] = await Promise.all([
-    getCurrentProjectConfig(projectId, "testing_policy_config"),
-    getCurrentProjectConfig(projectId, "release_roadmap"),
+    getCurrentProjectConfig(projectId, "testing_policy_config", rootRunId),
+    getCurrentProjectConfig(projectId, "release_roadmap", rootRunId),
   ]);
   const extra: Record<string, unknown> = {};
   if (testingPolicyConfig) extra.existingTestingPolicyConfig = testingPolicyConfig.value;
@@ -1117,14 +1132,18 @@ async function withArchitectRoleContext(projectId: string, incomingContext: unkn
  * Architect: se le da a Functional la lista de Features ya activadas para el release actual como
  * dato explícito (`existingFeatures`), en vez de esperar que lo infiera de la conversación.
  */
-async function withFunctionalRoleContext(projectId: string, incomingContext: unknown): Promise<unknown> {
+async function withFunctionalRoleContext(
+  projectId: string,
+  rootRunId: string,
+  incomingContext: unknown
+): Promise<unknown> {
   if (incomingContext === null || typeof incomingContext !== "object") {
     return incomingContext;
   }
-  const roadmap = await getCurrentProjectConfig(projectId, "release_roadmap");
+  const roadmap = await getCurrentProjectConfig(projectId, "release_roadmap", rootRunId);
   const activeRelease = activeReleaseFromRoadmap(roadmap?.value);
   if (!activeRelease) return incomingContext;
-  const existingFeatures = await getActivatedFeatureIdentities(projectId, activeRelease.id);
+  const existingFeatures = await getActivatedFeatureIdentities(projectId, activeRelease.id, rootRunId);
   if (existingFeatures.length === 0) return incomingContext;
   return { ...(incomingContext as Record<string, unknown>), existingFeatures };
 }
@@ -1268,6 +1287,9 @@ export async function persistReleasePlanIfDeclared(params: {
   featureJustCompleted: string | null;
   inputReleasePlan: unknown;
 }): Promise<void> {
+  // FEATURE-046: config de Caso -- se resuelve una vez y se usa en todas las lecturas de
+  // `release_plan`/`release_roadmap` de esta función.
+  const rootRunId = await getRunRootRunId(pool, params.runId);
   // FEATURE-038: excepción exclusiva de persistencia para el cierre de release — RELEASE_COMPLETO
   // viaja con status "escalated" (es un Approval Gate, no un error), así que sin esta excepción el
   // guard de abajo descartaría el RELEASE_PLAN final antes de persistirlo, dejando el estado
@@ -1326,7 +1348,7 @@ export async function persistReleasePlanIfDeclared(params: {
 
   if (!declaration) return;
 
-  const existing = await getCurrentProjectConfig(params.projectId, "release_plan");
+  const existing = await getCurrentProjectConfig(params.projectId, "release_plan", rootRunId);
   const existingRamaBase = (existing?.value as { ramaBaseTrabajo?: unknown } | undefined)?.ramaBaseTrabajo;
   const ramaBaseTrabajo = typeof existingRamaBase === "string" ? existingRamaBase : params.fallbackRamaBaseTrabajo;
   if (!ramaBaseTrabajo) {
@@ -1346,7 +1368,7 @@ export async function persistReleasePlanIfDeclared(params: {
     return;
   }
 
-  const roadmap = await getCurrentProjectConfig(params.projectId, "release_roadmap");
+  const roadmap = await getCurrentProjectConfig(params.projectId, "release_roadmap", rootRunId);
   const activeRelease = activeReleaseFromRoadmap(roadmap?.value);
   if (!activeRelease) throw new Error(`Run ${params.runId}: Planning completó sin release activo fijado.`);
   const update = parseFeatureUpdatePayload(params.result.outputArtifact);
@@ -1418,6 +1440,9 @@ async function continueReleaseAfterFeatureApproved(params: {
   cleanupStrategy: "shared-worktree" | "standalone-clone";
 }): Promise<void> {
   const { projectId, runId, worktree, userId, cliAgentOverride, model, cleanupStrategy } = params;
+  // FEATURE-046: config de Caso -- se resuelve una vez y se usa en todas las lecturas de config
+  // vigente del proyecto dentro de esta función.
+  const rootRunId = await getRunRootRunId(pool, runId);
 
   // FEATURE-019, hallazgo de cierre: no usamos `projectRepoRoot` (bug preexistente de FEATURE-018
   // — ver `respondService.ts`, ese valor es ambiguo entre las dos cleanupStrategy de FEATURE-017:
@@ -1512,7 +1537,7 @@ async function continueReleaseAfterFeatureApproved(params: {
   }
   console.log(`[run:start] push real de la sub-rama "${worktree.branchName}" a origin.`);
 
-  const releasePlanConfig = await getCurrentProjectConfig(projectId, "release_plan");
+  const releasePlanConfig = await getCurrentProjectConfig(projectId, "release_plan", rootRunId);
   const releasePlanValue = releasePlanConfig?.value as
     | { ramaBaseTrabajo?: unknown; featureActualId?: unknown }
     | undefined;

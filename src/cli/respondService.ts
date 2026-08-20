@@ -8,6 +8,7 @@ import {
   getBusinessCaseForRun,
   getCurrentProjectConfig,
   getRunDetailForUser,
+  getRunRootRunId,
   recordRunConfigVersions,
   recordRunEvent,
   getProjectAgentConfigProfileId,
@@ -148,6 +149,9 @@ export async function respondToEscalation(params: {
     throw new Error(`El run ${params.parentRunId} no tiene project_id persistido.`);
   }
   const projectId = parentRun.project_id;
+  // FEATURE-046: config de Caso -- toda lectura de config vigente del proyecto en esta función se
+  // acota al Caso de negocio del run que está respondiendo la escalación.
+  const rootRunId = await getRunRootRunId(pool, params.parentRunId);
 
   const escalationArtifact = latestEscalationArtifact(parentDetail.artifacts);
   const escalationContent = escalationArtifactContent(escalationArtifact);
@@ -174,7 +178,7 @@ export async function respondToEscalation(params: {
   // FEATURE-018) o no haberlo (el proyecto queda cerrado, sin child run).
   let releaseClosureRoadmap: RoadmapApprovalPayload | null = null;
   if (isReleaseCompletionEscalation(escalationArtifact, escalationContent)) {
-    const roadmapConfig = await getCurrentProjectConfig(projectId, "release_roadmap");
+    const roadmapConfig = await getCurrentProjectConfig(projectId, "release_roadmap", rootRunId);
     if (!isRoadmapApprovalPayload(roadmapConfig?.value)) {
       throw new Error(`Run ${params.parentRunId}: no hay release_roadmap persistido — no se puede cerrar el release.`);
     }
