@@ -157,6 +157,8 @@ test("FEATURE-047: dos Casos del mismo proyecto tienen su propio Project Brief y
     await pool.query("delete from project_config_versions where project_id = $1", [projectId]);
     await pool.query("delete from project_briefs where project_id = $1", [projectId]);
     await pool.query("delete from architectures where project_id = $1", [projectId]);
+    await pool.query("delete from artifacts where run_id in (select id from runs where project_id = $1)", [projectId]);
+    await pool.query("delete from run_events where run_id in (select id from runs where project_id = $1)", [projectId]);
     await pool.query("delete from runs where project_id = $1", [projectId]);
     await pool.query("delete from projects where id = $1", [projectId]);
   }
