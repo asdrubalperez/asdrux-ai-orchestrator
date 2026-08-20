@@ -121,7 +121,7 @@ import {
 import {
   createProjectForUser,
   getProjectSummary,
-  listProjectCases,
+  listProjectCaseTree,
   listProjects,
   selectProject,
   setProjectRepositoryForUser,
@@ -1305,12 +1305,12 @@ export function createApp(config: ServerConfig): express.Express {
         res.status(400).json({ error: "invalid_project_id" });
         return;
       }
-      const result = await listProjectCases({ projectId, userId: req.user?.id ?? "" });
+      const result = await listProjectCaseTree({ projectId, userId: req.user?.id ?? "" });
       if (!result.found) {
         res.status(404).json({ error: "project_not_found" });
         return;
       }
-      res.json({ runs: result.runs });
+      res.json({ cases: result.cases });
     } catch (err) {
       next(err);
     }
