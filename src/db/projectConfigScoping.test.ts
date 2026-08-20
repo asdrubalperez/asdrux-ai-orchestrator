@@ -108,12 +108,23 @@ test("FEATURE-046: dos Casos del mismo proyecto no ven el release_roadmap del ot
     assert.equal(pinned.rows.length, 1, "el hijo de A debe pinnear exactamente una versión de release_roadmap");
     assert.deepEqual(pinned.rows[0].value, roadmapA, "el hijo de A debe pinnear el roadmap de A, nunca el de B");
 
-    // Config de alcance de proyecto (sin changedInRunId) -- sigue siendo compartida por ambos Casos.
+    // Config de alcance de proyecto (sin changedInRunId). Regla 10 del diseño: `getCurrentProjectConfig`
+    // NUNCA hace fallback automático entre alcance de Caso y alcance de proyecto -- pasar el propio
+    // `rootRunId` de un Caso NO encuentra una fila de alcance de proyecto; hay que pedirla con
+    // `null` explícito. La visibilidad compartida real para "un run nuevo hereda también la config
+    // de proyecto" pasa por `getCurrentProjectConfigs` (bulk, Regla 11), no por esta función.
     await setProjectConfig({ projectId, configKey: "testing_policy_config", value: projectWideValue });
-    const projectWideForA = await getCurrentProjectConfig(projectId, "testing_policy_config", rootAId);
-    const projectWideForB = await getCurrentProjectConfig(projectId, "testing_policy_config", rootBId);
-    assert.deepEqual(projectWideForA?.value, projectWideValue);
-    assert.deepEqual(projectWideForB?.value, projectWideValue);
+    const projectWideExplicit = await getCurrentProjectConfig(projectId, "testing_policy_config", null);
+    assert.deepEqual(projectWideExplicit?.value, projectWideValue, "pedido explícito con rootRunId=null debe encontrar la fila de proyecto");
+    const projectScopedLookupForA = await getCurrentProjectConfig(projectId, "testing_policy_config", rootAId);
+    assert.equal(projectScopedLookupForA, null, "pasar el rootRunId de un Caso NO debe encontrar la fila de alcance de proyecto (Regla 10, sin fallback)");
+
+    const bulkForAWithProjectWide = await getCurrentProjectConfigs(projectId, rootAId);
+    const bulkForBWithProjectWide = await getCurrentProjectConfigs(projectId, rootBId);
+    const testingPolicyForA = bulkForAWithProjectWide.find((row) => row.config_key === "testing_policy_config");
+    const testingPolicyForB = bulkForBWithProjectWide.find((row) => row.config_key === "testing_policy_config");
+    assert.deepEqual(testingPolicyForA?.value, projectWideValue, "el bulk de A sí debe incluir la config de alcance de proyecto (Regla 11)");
+    assert.deepEqual(testingPolicyForB?.value, projectWideValue, "el bulk de B también, es compartida por todos los Casos");
   } finally {
     await pool.query("delete from run_config_versions where run_id in (select id from runs where project_id = $1)", [projectId]);
     await pool.query("update runs set active_feature_id = null, root_run_id = null, originated_from_run_id = null where project_id = $1", [projectId]);
