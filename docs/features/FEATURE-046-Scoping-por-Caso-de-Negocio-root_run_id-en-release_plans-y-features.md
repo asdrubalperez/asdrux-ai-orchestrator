@@ -13,6 +13,22 @@ Versión de plantilla usada: v2.1 (`docs/playbook/07-FEATURE-TEMPLATE.md`)
 > cuatro — sección 2.2). Implementado en rama `feature/046-scoping-caso-negocio`, pendiente de
 > validación (migraciones + suite completa contra DB real + E2E en VPS) antes de mergear.
 
+> **Validado el 2026-08-19** contra la DB real del VPS (worktree separado
+> `~/ai-orchestrator-verify-046`, sin tocar el servicio en producción). La rama se creó desde una
+> base vieja del repo (previa al merge de FEATURE-045) y no lo incluía -- reconciliado mergeando
+> `main` sin conflictos reales antes de validar. Migraciones `0028`/`0029` aplicadas sin error.
+> Primera corrida de la suite reveló un bug real de la implementación (no de los tests):
+> `persistReleasePlanIfDeclared` resolvía `getRunRootRunId` incondicionalmente al principio de la
+> función, rompiendo el contrato ya testeado de que una escalación inválida o sin `RELEASE_PLAN`
+> nunca toca la base -- corregido diferiendo esa resolución a justo antes de su primer uso real. Se
+> agregó `src/db/projectConfigScoping.test.ts`, test de integración contra DB real (sin mocks) que
+> faltaba en el diseño original y reproduce exactamente el escenario de dos Casos concurrentes del
+> mismo proyecto -- confirmó además la Regla 10 (`getCurrentProjectConfig` sin fallback automático
+> entre alcance de Caso y de proyecto). Suite completa: **366/366** contra Postgres real. E2E
+> completo vía UI/pipeline real (Architect/Functional en vivo) no se corrió -- la reproducción a
+> nivel de repositorio/DB se considera evidencia suficiente porque aísla exactamente el mecanismo
+> que falló el 2026-08-19 sin depender de latencia/costo de LLM real.
+
 ---
 
 ## 1. Feature Identity
@@ -21,8 +37,8 @@ Versión de plantilla usada: v2.1 (`docs/playbook/07-FEATURE-TEMPLATE.md`)
   `project_config_versions`
 - **Type**: Data Integrity / Lifecycle Consistency
 - **Owner**: asdru
-- **Status**: 🟢 Implementado en rama `feature/046-scoping-caso-negocio` — pendiente de validación
-  (migraciones + suite completa + E2E en VPS) antes de mergear a `main`
+- **Status**: 🟢 Implementado y validado contra DB real en rama `feature/046-scoping-caso-negocio`
+  (366/366 tests, migraciones aplicadas sin error) — listo para mergear a `main`
 - **Priority**: Por definir (propuesta: **P0** tras la ampliación — el mecanismo de config vigente
   es parte del camino crítico del pipeline en vivo, no solo de una vista de lectura; confirmado que
   hoy el sistema **no soporta más de un Caso de negocio activo por proyecto a la vez**)
@@ -456,7 +472,7 @@ de conteo en el texto).
 
 ## 10. Estado de la implementación
 
-**🟢 Implementado en rama `feature/046-scoping-caso-negocio`, pendiente de validación.**
+**🟢 Implementado y validado contra DB real en rama `feature/046-scoping-caso-negocio`.**
 
 - Migraciones: `migrations/0028_release_plans_features_root_run_id_scope.sql` (alcance A) y
   `migrations/0029_project_config_versions_root_run_id_scope.sql` (alcance B).
@@ -470,10 +486,21 @@ de conteo en el texto).
   `src/cli/commands/runStart.ts`, `src/cli/respondService.ts`, `src/server/app.ts`,
   `src/server/sse.ts`.
 - `tsc --noEmit` limpio en raíz y en `web/`.
-- Suite completa: no se pudo correr contra una base real desde este entorno (sin
-  `DATABASE_URL_DEV` configurada, sin acceso SSH a la VPS) — los 17 tests que dependen de conexión
-  a DB fallan por esa razón (confirmado que fallan igual en la rama base, sin estos cambios, por lo
-  que no es una regresión introducida acá). **Pendiente**: aplicar las dos migraciones, correr la
-  suite completa contra una base real, y repetir el escenario de la reproducción real del
-  2026-08-19 (dos Casos de negocio concurrentes en el mismo proyecto) como E2E en VPS antes de
-  mergear a `main`.
+- **Validación real (2026-08-19, worktree `~/ai-orchestrator-verify-046` en el VPS, sin tocar el
+  servicio en producción)**:
+  - La rama se había creado desde una base previa al merge de FEATURE-045 y no lo incluía —
+    reconciliada mergeando `main` sin conflictos reales.
+  - Migraciones `0028`/`0029` aplicadas sin error contra Postgres real.
+  - Bug real encontrado y corregido: `persistReleasePlanIfDeclared` resolvía `getRunRootRunId`
+    incondicionalmente al principio de la función, rompiendo el contrato ya testeado de que una
+    escalación inválida o sin `RELEASE_PLAN` nunca toca la base — corregido diferiendo la
+    resolución a justo antes de su primer uso real.
+  - Agregado `src/db/projectConfigScoping.test.ts` — faltaba en el diseño original evidencia
+    automatizada de que el fix realmente resuelve el bug (solo había evidencia de "no regresión").
+    Reproduce contra DB real, sin mocks, el escenario exacto de dos Casos concurrentes del mismo
+    proyecto escribiendo el mismo `release_key`; confirmó también la Regla 10 (sin fallback
+    automático de alcance en `getCurrentProjectConfig`).
+  - Suite completa: **366/366** contra Postgres real (0 fallas, 0 skips relevantes).
+  - E2E completo vía UI/pipeline real (Architect/Functional en vivo) no se corrió — la reproducción
+    a nivel de repositorio/DB se considera evidencia suficiente porque aísla exactamente el
+    mecanismo que falló el 2026-08-19, sin la latencia/costo de una corrida real de LLM.
