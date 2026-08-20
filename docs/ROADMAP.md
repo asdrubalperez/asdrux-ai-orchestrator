@@ -49,21 +49,9 @@
 - ✅ FEATURE-045 — Vista jerárquica y semántica de Casos de Negocio
 - ✅ FEATURE-046 — Scoping por Caso de Negocio (`root_run_id`) en `release_plans`/`features` y en
   la config vigente del proyecto (`project_config_versions`)
+- ✅ FEATURE-047 — Scoping por Caso de Negocio (`root_run_id`) en `project_briefs`/`architectures`
 
 **🟡 Confirmado**
-- FEATURE-047 — Scoping por Caso de Negocio (`root_run_id`) en `project_briefs`/`architectures`.
-  Mismo patrón exacto que FEATURE-046 (`unique(project_id)`, sin columna de ciclo/Caso,
-  `created_in_run_id` presente pero no usado para acotar), en las dos tablas que quedaron fuera de
-  ese alcance (FEATURE-033/034). Detectado en vivo el 2026-08-20 durante la validación E2E de
-  FEATURE-046: al crear un segundo Caso de negocio en el mismo proyecto, la pantalla de detalle del
-  run mostró como "materializados" el Project Brief y la Architecture del **primer** Caso (única
-  fila por proyecto), y se confirmó por código (`persistProjectBriefDocument`,
-  `src/features/projectBriefLifecycle.ts:56-95`) que, de completarse la fase de Architect del
-  segundo Caso, esa fila se sobrescribe en silencio — pérdida real de los documentos del primer
-  Caso. Se frenó la prueba antes de aprobar el Gate para no perder los datos. Confirmado por
-  búsqueda exhaustiva que ninguna otra tabla tiene el mismo patrón sin cubrir (única
-  `unique(project_id)`/`unique(project_id, ...)` restante sin `root_run_id`). Prioridad propuesta
-  P0, mismo criterio que FEATURE-046. Sin diseño todavía.
 - FEATURE-039 — Regla 11 de Testing Policy (riesgo de contrato externo repetido) no se aplica
   estructuralmente. Prioridad por definir.
 - FEATURE-040 — Gates de gobernanza binarios (merge, cierre de release), sin camino de rechazo con
@@ -97,7 +85,7 @@ Esfuerzo.
 
 | Elemento | Esfuerzo | Impacto | Ponderación |
 |---|---|---|---|
-| FEATURE-047 — Scoping por Caso de Negocio (`root_run_id`) en `project_briefs`/`architectures` (P0, sin diseño) | Medio | Alto | Alta |
+| FEATURE-047 — Scoping por Caso de Negocio (`root_run_id`) en `project_briefs`/`architectures` (P0, ✅ Ejecutado) | Medio | Alto | Alta |
 | FEATURE-045 — Vista jerárquica y semántica de Casos de Negocio (✅ Ejecutado) | Medio | Alto | Alta |
 | FEATURE-028 — Release Plan asociado al Release activo (P1) | Medio | Alto | Alta |
 | FEATURE-025-Parte-1 — Asistente/modelo/credenciales API por agente (✅ Implementada y mergeada, pendiente validación E2E) | Medio | Medio | Alta |

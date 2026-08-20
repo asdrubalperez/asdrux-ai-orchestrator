@@ -1,7 +1,7 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { pool } from "../db/pool.js";
-import { recordArtifact, recordRunEvent } from "../db/repository.js";
+import { getRunRootRunId, recordArtifact, recordRunEvent } from "../db/repository.js";
 import { canonicalJson } from "./contracts.js";
 import {
   PROJECT_BRIEF_DOCUMENT_PATH,
@@ -25,6 +25,7 @@ export interface ProjectBriefRow {
   final_document_path: string;
   document_hash: string | null;
   created_in_run_id: string;
+  root_run_id: string;
 }
 
 /**
@@ -55,13 +56,17 @@ export async function persistProjectBrief(params: {
       throw new ProjectBriefLifecycleEscalationError("Run y proyecto no coinciden.");
     }
 
+    // FEATURE-047: `project_briefs` es de Caso, no de proyecto -- un segundo Caso de negocio del
+    // mismo proyecto nunca debe encontrar (y por lo tanto sobrescribir) la fila de otro Caso.
+    const rootRunId = await getRunRootRunId(client, params.runId);
+
     const existing = await client.query<ProjectBriefRow & { last_payload: unknown }>(
       `select project_briefs.*, artifacts.content -> 'payload' as last_payload
        from project_briefs
        left join artifacts on artifacts.id = project_briefs.canonical_artifact_id
-       where project_briefs.project_id = $1
+       where project_briefs.project_id = $1 and project_briefs.root_run_id = $2
        for update of project_briefs`,
-      [params.projectId]
+      [params.projectId, rootRunId]
     );
     let row = existing.rows[0] as ProjectBriefRow | undefined;
 
@@ -82,9 +87,9 @@ export async function persistProjectBrief(params: {
       const inserted = await client.query<ProjectBriefRow>(
         `insert into project_briefs (
            project_id, source_event_key, template_key, template_version, template_hash,
-           template_snapshot, final_document_path, created_in_run_id
+           template_snapshot, final_document_path, created_in_run_id, root_run_id
          )
-         values ($1,$2,$3,$4,$5,$6,$7,$8)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
          returning *`,
         [
           params.projectId,
@@ -95,6 +100,7 @@ export async function persistProjectBrief(params: {
           templateMetadata.templateSnapshot,
           PROJECT_BRIEF_DOCUMENT_PATH,
           params.runId,
+          rootRunId,
         ]
       );
       row = inserted.rows[0];
@@ -148,14 +154,16 @@ export async function persistProjectBrief(params: {
 
 export async function materializeProjectBriefDocument(params: {
   projectId: string;
+  runId: string;
   worktreePath: string;
 }): Promise<{ projectBrief: ProjectBriefRow; markdown: string; hash: string } | null> {
+  const rootRunId = await getRunRootRunId(pool, params.runId);
   const result = await pool.query<ProjectBriefRow & { artifact_content: unknown }>(
     `select project_briefs.*, artifacts.content as artifact_content
      from project_briefs
      join artifacts on artifacts.id = project_briefs.canonical_artifact_id
-     where project_briefs.project_id = $1`,
-    [params.projectId]
+     where project_briefs.project_id = $1 and project_briefs.root_run_id = $2`,
+    [params.projectId, rootRunId]
   );
   const projectBrief = result.rows[0];
   if (!projectBrief) return null;
@@ -197,7 +205,9 @@ export async function getProjectBriefDocumentForRun(runId: string): Promise<Proj
   const result = await pool.query<ProjectBriefRow & { artifact_content: unknown }>(
     `select project_briefs.*, artifacts.content as artifact_content
      from runs
-     join project_briefs on project_briefs.project_id = runs.project_id
+     join project_briefs
+       on project_briefs.project_id = runs.project_id
+      and project_briefs.root_run_id = coalesce(runs.root_run_id, runs.id)
      join artifacts on artifacts.id = project_briefs.canonical_artifact_id
      where runs.id = $1`,
     [runId]
