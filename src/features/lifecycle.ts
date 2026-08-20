@@ -2,7 +2,7 @@ import { readdir, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { PoolClient } from "pg";
 import { pool } from "../db/pool.js";
-import { recordArtifact, recordRunEvent, setProjectConfig } from "../db/repository.js";
+import { getRunRootRunId, recordArtifact, recordRunEvent, setProjectConfig } from "../db/repository.js";
 import type { AgentRole } from "../contracts/executor.js";
 import {
   canonicalJson,
@@ -36,6 +36,8 @@ export interface FeatureRow extends FeatureIdentityView {
   final_commit_sha: string | null;
   pushed_branch: string | null;
   pushed_at: string | null;
+  /** FEATURE-046: epoch (Caso de negocio) dueño de esta fila -- fijado una única vez al crearla. */
+  root_run_id: string;
 }
 
 type Contribution =
@@ -60,13 +62,15 @@ type Contribution =
  */
 export async function getActivatedFeatureIdentities(
   projectId: string,
-  releaseKey: string
+  releaseKey: string,
+  /** FEATURE-046: epoch (Caso de negocio) del run que pide la lista -- nunca las de un Caso ajeno. */
+  rootRunId: string
 ): Promise<Array<{ sourceKey: string; name: string }>> {
   const result = await pool.query<{ source_key: string; name: string }>(
     `select source_key, name from features
-     where project_id = $1 and release_key = $2 and activated_at is not null
+     where project_id = $1 and release_key = $2 and activated_at is not null and root_run_id = $3
      order by created_at asc`,
-    [projectId, releaseKey]
+    [projectId, releaseKey, rootRunId]
   );
   return result.rows.map((row) => ({ sourceKey: row.source_key, name: row.name }));
 }
@@ -87,6 +91,9 @@ export async function persistFunctionalFeatureBatch(params: {
     await client.query("begin");
     await client.query("select id from projects where id = $1 for update", [params.projectId]);
     await assertRunProjectAndPinnedRelease(client, params.runId, params.projectId, params.releaseKey);
+    // FEATURE-046: dos Casos de negocio distintos del mismo proyecto que reutilicen `releaseKey`/
+    // `source_key` nunca comparten fila -- el lookup/insert de abajo se acota al epoch de este run.
+    const rootRunId = await getRunRootRunId(client, params.runId);
     const existingCodes = await client.query<{ feature_code: string }>(
       "select feature_code from features where project_id = $1",
       [params.projectId]
@@ -97,9 +104,9 @@ export async function persistFunctionalFeatureBatch(params: {
     for (const definition of params.payload.features) {
       const existing = await client.query<FeatureRow>(
         `select * from features
-         where project_id = $1 and release_key = $2 and source_key = $3
+         where project_id = $1 and release_key = $2 and source_key = $3 and root_run_id = $4
          for update`,
-        [params.projectId, params.releaseKey, definition.id]
+        [params.projectId, params.releaseKey, definition.id, rootRunId]
       );
       let feature = existing.rows[0];
       if (!feature) {
@@ -112,9 +119,9 @@ export async function persistFunctionalFeatureBatch(params: {
           `insert into features (
              project_id, release_key, source_key, feature_code, name, priority,
              template_key, template_version, template_hash, template_snapshot,
-             final_document_path, created_in_run_id
+             final_document_path, created_in_run_id, root_run_id
            )
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
            returning *`,
           [
             params.projectId,
@@ -129,6 +136,7 @@ export async function persistFunctionalFeatureBatch(params: {
             templateMetadata.templateSnapshot,
             finalPath,
             params.runId,
+            rootRunId,
           ]
         );
         feature = inserted.rows[0];
@@ -213,21 +221,24 @@ export async function persistPlanningFeatureSelection(params: {
   const client = await pool.connect();
   try {
     await client.query("begin");
-    const featureResult = await client.query<FeatureRow>(
-      `select * from features
-       where project_id = $1 and release_key = $2 and source_key = $3
-       for update`,
-      [params.projectId, params.releaseKey, params.featureActualId]
-    );
-    let feature = featureResult.rows[0];
-    if (!feature) throw new FeatureLifecycleEscalationError("Planning seleccionó una Feature inexistente en el release activo.");
-    const run = await client.query<{ project_id: string | null }>(
-      "select project_id from runs where id = $1 for update",
+    const run = await client.query<{ project_id: string | null; root_run_id: string | null }>(
+      "select project_id, root_run_id from runs where id = $1 for update",
       [params.runId]
     );
     if (run.rows[0]?.project_id !== params.projectId) {
       throw new FeatureLifecycleEscalationError("Run y Feature no pertenecen al mismo proyecto.");
     }
+    // FEATURE-046: la Feature elegida por Planning se busca dentro del mismo Caso de negocio de
+    // este run -- nunca la de un Caso ajeno que reutilice el mismo release_key/source_key.
+    const rootRunId = run.rows[0].root_run_id ?? params.runId;
+    const featureResult = await client.query<FeatureRow>(
+      `select * from features
+       where project_id = $1 and release_key = $2 and source_key = $3 and root_run_id = $4
+       for update`,
+      [params.projectId, params.releaseKey, params.featureActualId, rootRunId]
+    );
+    let feature = featureResult.rows[0];
+    if (!feature) throw new FeatureLifecycleEscalationError("Planning seleccionó una Feature inexistente en el release activo.");
     await setProjectConfig({
       projectId: params.projectId,
       configKey: "release_plan",

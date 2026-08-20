@@ -14,11 +14,11 @@ import { getFeatureDocumentForRun } from "../features/lifecycle.js";
 
 /** FEATURE-018: mismo criterio que resolveReleaseRoadmap en app.ts (no importado desde acá para no
  * crear un import circular app.ts <-> sse.ts). */
-async function resolveReleaseRoadmap(projectId: string | null) {
+async function resolveReleaseRoadmap(projectId: string | null, rootRunId: string) {
   if (!projectId) return null;
   const [config, releasePlans] = await Promise.all([
-    getCurrentProjectConfig(projectId, "release_roadmap"),
-    getReleasePlansByRelease(projectId),
+    getCurrentProjectConfig(projectId, "release_roadmap", rootRunId),
+    getReleasePlansByRelease(projectId, rootRunId),
   ]);
   return toReleaseRoadmapView(config?.value ?? null, releasePlans);
 }
@@ -65,7 +65,7 @@ export async function openRunEventsStream(params: {
   addClient(client);
 
   const [roadmap, featureDocument, childRunId] = await Promise.all([
-    resolveReleaseRoadmap(detail.run.project_id),
+    resolveReleaseRoadmap(detail.run.project_id, detail.run.root_run_id ?? detail.run.id),
     getFeatureDocumentForRun(params.runId),
     getChildRunId(params.runId),
   ]);
@@ -160,7 +160,7 @@ async function pushRunSnapshotToClients(runId: string): Promise<void> {
         return;
       }
       const [roadmap, featureDocument, childRunId] = await Promise.all([
-        resolveReleaseRoadmap(detail.run.project_id),
+        resolveReleaseRoadmap(detail.run.project_id, detail.run.root_run_id ?? detail.run.id),
         getFeatureDocumentForRun(client.runId),
         getChildRunId(client.runId),
       ]);

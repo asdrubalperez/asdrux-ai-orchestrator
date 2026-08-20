@@ -1052,7 +1052,7 @@ export function createApp(config: ServerConfig): express.Express {
       }
       const [releaseRoadmap, featureDocument, projectBriefDocument, architectureDocument, releasePlanDocument, childRunId] =
         await Promise.all([
-          resolveReleaseRoadmap(detail.run.project_id),
+          resolveReleaseRoadmap(detail.run.project_id, detail.run.root_run_id ?? detail.run.id),
           getFeatureDocumentForRun(runId),
           getProjectBriefDocumentForRun(runId),
           getArchitectureDocumentForRun(runId),
@@ -1809,11 +1809,11 @@ function parseLastEventId(value: string | undefined): number {
  * (ReleasePlanPanel). `projectId` null (runs legados sin proyecto vinculado) resuelve a null sin
  * consultar nada.
  */
-async function resolveReleaseRoadmap(projectId: string | null) {
+async function resolveReleaseRoadmap(projectId: string | null, rootRunId: string) {
   if (!projectId) return null;
   const [config, releasePlans] = await Promise.all([
-    getCurrentProjectConfig(projectId, "release_roadmap"),
-    getReleasePlansByRelease(projectId),
+    getCurrentProjectConfig(projectId, "release_roadmap", rootRunId),
+    getReleasePlansByRelease(projectId, rootRunId),
   ]);
   return toReleaseRoadmapView(config?.value ?? null, releasePlans);
 }

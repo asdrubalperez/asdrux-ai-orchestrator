@@ -46,34 +46,29 @@
 - ✅ FEATURE-025-Parte-1 — Asistente IA, modelo y credenciales API por agente
 - ✅ FEATURE-025-Parte-2 — OAuth personal por proveedor de IA (Claude/Codex)
 - ✅ FEATURE-041 — Creación y gestión de cuentas de usuario (self-service)
+- ✅ FEATURE-045 — Vista jerárquica y semántica de Casos de Negocio
+- ✅ FEATURE-046 — Scoping por Caso de Negocio (`root_run_id`) en `release_plans`/`features` y en
+  la config vigente del proyecto (`project_config_versions`)
 
 **🟡 Confirmado**
-- FEATURE-045 — Vista jerárquica y semántica de Casos de Negocio. Implementada en rama
-  `feature/045-vista-jerarquica-casos` (backend `src/cases/caseTree.ts` + endpoint evolucionado +
-  frontend `CasesList.tsx`), 12/12 tests propios y 348/348 del repo en verde, typecheck limpio.
-  Pendiente merge a `main` y validación E2E real del owner. Ver
-  `docs/features/FEATURE-045-Vista-jerarquica-y-semantica-de-Casos-de-Negocio.md`.
-- FEATURE-027 — Continuidad durable del loop Developer ↔ QA. Prioridad P0.
+- FEATURE-047 — Scoping por Caso de Negocio (`root_run_id`) en `project_briefs`/`architectures`.
+  Mismo patrón exacto que FEATURE-046 (`unique(project_id)`, sin columna de ciclo/Caso,
+  `created_in_run_id` presente pero no usado para acotar), en las dos tablas que quedaron fuera de
+  ese alcance (FEATURE-033/034). Detectado en vivo el 2026-08-20 durante la validación E2E de
+  FEATURE-046: al crear un segundo Caso de negocio en el mismo proyecto, la pantalla de detalle del
+  run mostró como "materializados" el Project Brief y la Architecture del **primer** Caso (única
+  fila por proyecto), y se confirmó por código (`persistProjectBriefDocument`,
+  `src/features/projectBriefLifecycle.ts:56-95`) que, de completarse la fase de Architect del
+  segundo Caso, esa fila se sobrescribe en silencio — pérdida real de los documentos del primer
+  Caso. Se frenó la prueba antes de aprobar el Gate para no perder los datos. Confirmado por
+  búsqueda exhaustiva que ninguna otra tabla tiene el mismo patrón sin cubrir (única
+  `unique(project_id)`/`unique(project_id, ...)` restante sin `root_run_id`). Prioridad propuesta
+  P0, mismo criterio que FEATURE-046. Sin diseño todavía.
 - FEATURE-039 — Regla 11 de Testing Policy (riesgo de contrato externo repetido) no se aplica
   estructuralmente. Prioridad por definir.
 - FEATURE-040 — Gates de gobernanza binarios (merge, cierre de release), sin camino de rechazo con
   feedback correctivo. Prioridad por definir.
 **⚪ Tentativo**
-- FEATURE-046 — Scoping por ciclo de negocio en la persistencia/lectura operativa de
-  `release_plans`/`features`/`release_roadmap`. Detectado durante la validación adversarial de
-  FEATURE-045; **alcance ampliado por reproducción en vivo (2026-08-19)**: no es solo el write
-  path de `release_plans`/`features` sin `root_run_id` (hallazgo original) — el mecanismo de
-  "config vigente del proyecto" (`project_config_versions`, índice único `valid_to IS NULL` por
-  `project_id`+`config_key`) es **por proyecto, no por Caso**, y lo consume en vivo el pipeline real
-  (`architectureLifecycle.ts:248`, `respondService.ts:177`, `pinnedConfig` en `lifecycle.ts`), no
-  solo la proyección de lectura de FEATURE-045. Repro real: dos Casos de negocio distintos
-  (`root_run_id` distintos) en el mismo proyecto ("Proyecto de Prueba") — el segundo Caso, al
-  correr Architect, leyó como "vigente" el `release_roadmap` que había dejado el primer Caso,
-  escaló pidiendo aprobación por "estructura distinta al roadmap vigente", y al aprobarse Functional
-  chocó con `FEATURE-002` ya activada por el otro Caso (`FeatureLifecycleEscalationError`). Conclusión:
-  **varios Casos de negocio concurrentes dentro del mismo proyecto no están soportados hoy** — no
-  es un caso raro de colisión de `release_key`, es el camino normal en cuanto dos Casos comparten
-  proyecto. Workaround mientras no se implemente: un Caso de negocio por proyecto.
 - Escalamiento optimizado sin reinicio completo
 - Planning valida la Feature de Functional antes de diseñar el Release Plan
 - Feedback no bloqueante entre roles del pipeline
@@ -102,7 +97,8 @@ Esfuerzo.
 
 | Elemento | Esfuerzo | Impacto | Ponderación |
 |---|---|---|---|
-| FEATURE-045 — Vista jerárquica y semántica de Casos de Negocio (implementada, pendiente merge/E2E) | Medio | Alto | Alta |
+| FEATURE-047 — Scoping por Caso de Negocio (`root_run_id`) en `project_briefs`/`architectures` (P0, sin diseño) | Medio | Alto | Alta |
+| FEATURE-045 — Vista jerárquica y semántica de Casos de Negocio (✅ Ejecutado) | Medio | Alto | Alta |
 | FEATURE-028 — Release Plan asociado al Release activo (P1) | Medio | Alto | Alta |
 | FEATURE-025-Parte-1 — Asistente/modelo/credenciales API por agente (✅ Implementada y mergeada, pendiente validación E2E) | Medio | Medio | Alta |
 | FEATURE-025-Parte-2 — OAuth personal por proveedor de IA (después de Parte 1, requiere spike) | Alto | Medio | Media |
@@ -123,6 +119,7 @@ Esfuerzo.
 | FEATURE-036 — Release activo nominal tras cierre (P1) | Bajo | Medio | Baja |
 | FEATURE-029 — Contrato build output / COMANDO_TEST (P1) | Bajo | Bajo | Baja |
 | FEATURE-043 — Separar configuración de ejecución (repo/rama) del caso de negocio (✅ Ejecutado) | Bajo | Bajo | Baja |
+| FEATURE-046 — Scoping por Caso de Negocio (`root_run_id`) en `release_plans`/`features` + `project_config_versions` (P0, ✅ Ejecutado) | Alto | Alto | Alta |
 
 ---
 
@@ -1276,6 +1273,49 @@ ninguno de los dos.
 
 Detectado durante la validación de FEATURE-037 (2026-07-31, caso `tempo-auto-planner`, primero en
 el Gate de merge y confirmado de nuevo en el Gate de cierre de release). Prioridad por definir.
+
+### ✅ FEATURE-046 — Scoping por Caso de Negocio (`root_run_id`) en `release_plans`/`features` y en
+la config vigente del proyecto
+
+**Estado:** Implementado y validado contra DB real (366/366 tests, migraciones `0028`/`0029`
+aplicadas sin error, escenario de dos Casos concurrentes reproducido y confirmado resuelto vía
+`src/db/projectConfigScoping.test.ts`). Prioridad **P0** (ver ampliación de alcance abajo). Diseño y
+resultado de validación en
+`docs/features/FEATURE-046-Scoping-por-Caso-de-Negocio-root_run_id-en-release_plans-y-features.md`.
+
+Detectado durante la validación adversarial de FEATURE-045 (Vista jerárquica de Casos de Negocio,
+2026-08-19): `release_plans` (`unique(project_id, release_key)`) y `features`
+(`unique(project_id, release_key, source_key)`) no tienen ninguna columna de ciclo/Caso de negocio,
+a diferencia del mecanismo legado (`getReleasePlansByRelease`/`getReleasePlanAssociationCandidate`
+en `src/db/repository.ts`), que ya fue corregido para este mismo tipo de bug en FEATURE-036
+(2026-07-30) filtrando por `coalesce(root_run_id, id)`. Como Architect/Planning nombran los releases
+con IDs genéricos (`"r1"`, `"r2"`) y los proyectos se reutilizan entre Casos de negocio no
+relacionados, dos Casos que reutilicen el mismo `release_key` colisionan hoy en el mecanismo
+canónico nuevo (FEATURE-035/FEATURE-023): en `release_plans` el contenido de ambos Casos se mezcla
+en silencio (`mergeFeaturePlan`); en `features` el segundo Caso sobrescribe en silencio la
+definición si la Feature todavía no fue activada, o dispara `FeatureLifecycleEscalationError` de
+forma confusa si ya lo fue.
+
+**Ampliación de alcance (2026-08-19, reproducción real en vivo)**: el mismo bug no se limita a
+`release_plans`/`features`. El mecanismo de "config vigente del proyecto"
+(`project_config_versions`, índice único `one_current_project_config` sobre `project_id, config_key`
+con `valid_to is null`) es por proyecto, no por Caso, y lo usa el pipeline real en producción — no
+solo la proyección de lectura de FEATURE-045. Confirmado en código
+(`src/features/architectureLifecycle.ts:248`, `src/cli/respondService.ts:177`, ambos leyendo
+`release_roadmap` filtrando solo por `project_id`) y reproducido en vivo: dos Casos de negocio
+distintos en el mismo proyecto — el segundo Caso leyó como "vigente" el roadmap del primero al correr
+Architect, escaló pidiendo aprobación, y Functional chocó con una Feature ya activada por el otro
+Caso. **Confirma que hoy un proyecto no soporta más de un Caso de negocio activo por vez.**
+
+**Diseño propuesto**: agregar `root_run_id` como columna denormalizada (mismo patrón que
+`created_in_run_id`) a `release_plans`/`features`, más una columna `root_run_id` nullable a
+`project_config_versions` (donde `NULL` significa explícitamente "config de alcance de proyecto",
+compartida por todos los Casos — necesaria para claves que no son de Caso). Incluye backfill
+determinístico para filas existentes en las tres tablas y una auditoría de datos reales antes de
+endurecer los constraints — mismo criterio que el paso previo de FEATURE-036, sección 8 (parcial
+para `project_config_versions`, que no deja rastro explícito de colisiones pasadas). Hasta que se
+apruebe e implemente, se recomienda documentar explícitamente la limitación operativa: un proyecto
+solo soporta un Caso de negocio activo por vez.
 
 ### ⚪ Planning valida la Feature de Functional antes de diseñar el Release Plan
 Hoy Stage 2 de `docs/runbook/06-DELIVERY-WORKFLOW.md` dice que Planning "parte de los 3 escenarios
